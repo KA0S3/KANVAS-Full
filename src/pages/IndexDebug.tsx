@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeStore } from "@/stores/themeStore";
-import { useBookStore } from "@/stores/bookStoreFixed";
+import { useBookStore } from "@/stores/bookStoreSimple";
 
 const IndexDebug = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);

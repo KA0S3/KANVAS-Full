@@ -69,6 +69,10 @@ interface AssetStore {
   removeGlobalCustomField: (fieldId: string) => void;
   applyGlobalFieldsToAsset: (assetId: string) => void;
   
+  // Bulk restoration methods for autosave system
+  restoreAssets: (assets: Record<string, Asset>) => void;
+  restoreGlobalCustomFields: (fields: GlobalCustomField[]) => void;
+  
   // Background editing actions
   setIsEditingBackground: (editing: boolean) => void;
   
@@ -1083,6 +1087,71 @@ export const useAssetStore = create<AssetStore>()(
         currentViewportId: newViewportId,
       };
     });
+  },
+
+  // Bulk restoration methods for autosave system
+  restoreAssets: (assets: Record<string, Asset>) => {
+    const bookId = get().getCurrentBookId();
+    if (!bookId) {
+      console.warn('[AssetStore] Cannot restore assets - no current book');
+      return;
+    }
+    
+    console.log(`[AssetStore] Restoring ${Object.keys(assets).length} assets for book ${bookId}`);
+    
+    set((state) => {
+      const newBookAssets = { ...state.bookAssets };
+      const restoredAssets: Record<string, Asset> = {};
+      
+      // Process assets and rebuild hierarchy
+      Object.entries(assets).forEach(([id, asset]) => {
+        // Ensure asset has required fields and proper structure
+        const validatedAsset: Asset = {
+          ...asset,
+          id,
+          children: asset.children || [],
+          customFields: asset.customFields || [],
+          customFieldValues: asset.customFieldValues || [],
+          tags: asset.tags || [],
+          viewportConfig: asset.viewportConfig || { zoom: 1, panX: 0, panY: 0 },
+          backgroundConfig: asset.backgroundConfig || { gridSize: 40 },
+          viewportDisplaySettings: asset.viewportDisplaySettings || { ...DEFAULT_VIEWPORT_DISPLAY_SETTINGS },
+          // Ensure required fields have defaults
+          width: asset.width || 200,
+          height: asset.height || 150,
+          x: asset.x || 0,
+          y: asset.y || 0,
+          isExpanded: asset.isExpanded || false,
+          createdAt: asset.createdAt || Date.now(),
+          updatedAt: asset.updatedAt || Date.now(),
+        };
+        
+        restoredAssets[id] = validatedAsset;
+      });
+      
+      newBookAssets[bookId] = restoredAssets;
+      return { bookAssets: newBookAssets };
+    });
+    
+    console.log(`[AssetStore] Successfully restored ${Object.keys(assets).length} assets`);
+  },
+
+  restoreGlobalCustomFields: (fields: GlobalCustomField[]) => {
+    const bookId = get().getCurrentBookId();
+    if (!bookId) {
+      console.warn('[AssetStore] Cannot restore global custom fields - no current book');
+      return;
+    }
+    
+    console.log(`[AssetStore] Restoring ${fields.length} global custom fields for book ${bookId}`);
+    
+    set((state) => {
+      const newBookGlobalCustomFields = { ...state.bookGlobalCustomFields };
+      newBookGlobalCustomFields[bookId] = fields;
+      return { bookGlobalCustomFields: newBookGlobalCustomFields };
+    });
+    
+    console.log(`[AssetStore] Successfully restored ${fields.length} global custom fields`);
   },
 })
 ));

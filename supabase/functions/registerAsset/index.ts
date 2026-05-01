@@ -198,52 +198,59 @@ serve(async (req) => {
     // Calculate effective limits using new plan mapping
     const effectiveLimits = calculateEffectiveLimits(userInfo, license)
 
+    // Check for owner plan (unlimited storage)
+    const isOwner = userInfo.plan_type === 'owner'
+
     // Calculate total asset size (including all variants)
     const totalAssetSize = variants.reduce((sum, variant) => sum + variant.size, 0)
 
-    // Check if asset size exceeds maximum per-asset limit
-    if (totalAssetSize > effectiveLimits.maxAssetSize) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Asset size exceeds maximum limit',
-          details: {
-            asset_size: totalAssetSize,
-            max_allowed: effectiveLimits.maxAssetSize,
-            plan_type: userInfo.plan_type
-          }
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    // Skip quota and size checks for owner users
+    if (!isOwner) {
+      // Check if asset size exceeds maximum per-asset limit
+      if (totalAssetSize > effectiveLimits.maxAssetSize) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Asset size exceeds maximum limit',
+            details: {
+              asset_size: totalAssetSize,
+              max_allowed: effectiveLimits.maxAssetSize,
+              plan_type: userInfo.plan_type
+            }
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-    // Check if total storage would exceed quota (including pending uploads)
-    const effectiveUsage = currentUsage.total_bytes_used + currentUsage.pending_bytes
-    const newTotalUsage = effectiveUsage + BigInt(totalAssetSize)
-    if (newTotalUsage > effectiveLimits.quotaBytes) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Storage quota exceeded',
-          details: {
-            current_used: Number(currentUsage.total_bytes_used),
-            pending_uploads: Number(currentUsage.pending_bytes),
-            effective_usage: Number(effectiveUsage),
-            asset_size: totalAssetSize,
-            quota_allowed: Number(effectiveLimits.quotaBytes),
-            plan_type: userInfo.plan_type,
-            effective_limits: effectiveLimits
-          }
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      // Check if total storage would exceed quota (including pending uploads)
+      const effectiveUsage = currentUsage.total_bytes_used + currentUsage.pending_bytes
+      const newTotalUsage = effectiveUsage + BigInt(totalAssetSize)
+      if (newTotalUsage > effectiveLimits.quotaBytes) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Storage quota exceeded',
+            details: {
+              current_used: Number(currentUsage.total_bytes_used),
+              pending_uploads: Number(currentUsage.pending_bytes),
+              effective_usage: Number(effectiveUsage),
+              asset_size: totalAssetSize,
+              quota_allowed: Number(effectiveLimits.quotaBytes),
+              plan_type: userInfo.plan_type,
+              effective_limits: effectiveLimits
+            }
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Register the file in the files table using RPC
-    const { data: fileData, error: fileError } = await supabase.rpc('create_file', {
+    const { data: fileData, error: fileError } = await supabase.rpc('register_file', {
       p_project_id: project_id,
       p_asset_id: cloud_path, // Use cloud_path as asset_id reference
-      p_storage_key: cloud_path,
+      p_r2_key: cloud_path, // R2 key (same as cloud_path for compatibility)
+      p_size_bytes: totalAssetSize,
       p_mime_type: mime_type,
-      p_size_bytes: totalAssetSize
+      p_variants: JSON.stringify(variants) // Include variants information
     })
 
     if (fileError) {

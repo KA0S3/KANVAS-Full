@@ -223,26 +223,32 @@ serve(async (req) => {
     // Calculate effective limits using new plan mapping
     const effectiveLimits = calculateEffectiveLimits(userInfo, license)
 
-    // Check if upload would exceed quota (including pending uploads)
-    const effectiveUsage = currentUsage.total_bytes_used + currentUsage.pending_bytes
-    const newTotalUsage = effectiveUsage + BigInt(totalUploadSize)
-    
-    if (newTotalUsage > effectiveLimits.quotaBytes) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Storage quota exceeded',
-          details: {
-            current_used: Number(currentUsage.total_bytes_used),
-            pending_uploads: Number(currentUsage.pending_bytes),
-            effective_usage: Number(effectiveUsage),
-            upload_size: totalUploadSize,
-            quota_allowed: Number(effectiveLimits.quotaBytes),
-            plan_type: userInfo.plan_type,
-            effective_limits: effectiveLimits
-          }
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // Check for owner plan (unlimited storage)
+    const isOwner = userInfo.plan_type === 'owner'
+
+    // Skip quota checks for owner users
+    if (!isOwner) {
+      // Check if upload would exceed quota (including pending uploads)
+      const effectiveUsage = currentUsage.total_bytes_used + currentUsage.pending_bytes
+      const newTotalUsage = effectiveUsage + BigInt(totalUploadSize)
+      
+      if (newTotalUsage > effectiveLimits.quotaBytes) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Storage quota exceeded',
+            details: {
+              current_used: Number(currentUsage.total_bytes_used),
+              pending_uploads: Number(currentUsage.pending_bytes),
+              effective_usage: Number(effectiveUsage),
+              upload_size: totalUploadSize,
+              quota_allowed: Number(effectiveLimits.quotaBytes),
+              plan_type: userInfo.plan_type,
+              effective_limits: effectiveLimits
+            }
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Atomically reserve the bytes for upload

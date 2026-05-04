@@ -6,6 +6,7 @@ import { deleteProject } from '@/services/ProjectService';
 import { documentMutationService } from '@/services/DocumentMutationService';
 import { undoService } from '@/services/UndoService';
 import { softDeleteService } from '@/services/SoftDeleteService';
+import { StorageCleanup } from '@/utils/storageCleanup';
 
 const defaultCoverPresets: BookCoverPreset[] = [
   { id: 'cosmic-blue', name: 'Cosmic Blue', color: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' },
@@ -377,11 +378,56 @@ export const useBookStore = create<BookStore>()(
       name: 'kanvas-world-storage',
       storage: {
         getItem: (name) => {
-          const item = localStorage.getItem(name);
-          return item ? JSON.parse(item) : null;
+          try {
+            const item = localStorage.getItem(name);
+            if (!item) return null;
+            
+            // Check storage usage before loading
+            StorageCleanup.checkAndCleanup();
+            
+            return JSON.parse(item);
+          } catch (error) {
+            console.error('[BookStore] Error loading from localStorage:', error);
+            return null;
+          }
         },
         setItem: (name, value) => {
-          localStorage.setItem(name, JSON.stringify(value));
+          try {
+            // Clean up storage before saving to prevent quota exceeded
+            StorageCleanup.checkAndCleanup();
+            
+            // Remove large base64 images from books before saving
+            const cleanValue = { ...value };
+            if (cleanValue.state && cleanValue.state.books) {
+              Object.keys(cleanValue.state.books).forEach(bookId => {
+                const book = cleanValue.state.books[bookId];
+                if (book.coverImage && book.coverImage.startsWith('data:image/') && book.coverImage.length > 50000) {
+                  console.log(`[BookStore] Excluding large cover image from localStorage: ${bookId}`);
+                  // Don't save large images to localStorage, they'll be handled separately
+                  delete book.coverImage;
+                }
+                if (book.coverPageSettings && book.coverPageSettings.coverImageData && book.coverPageSettings.coverImageData.length > 50000) {
+                  console.log(`[BookStore] Excluding large cover page image from localStorage: ${bookId}`);
+                  delete book.coverPageSettings.coverImageData;
+                }
+              });
+            }
+            
+            localStorage.setItem(name, JSON.stringify(cleanValue));
+          } catch (error) {
+            console.error('[BookStore] Error saving to localStorage:', error);
+            if (error instanceof Error && error.message.includes('quota')) {
+              // Emergency cleanup and retry
+              console.log('[BookStore] Storage quota exceeded, performing emergency cleanup...');
+              StorageCleanup.clearAllKanvasData();
+              try {
+                localStorage.setItem(name, JSON.stringify(value));
+                console.log('[BookStore] Successfully saved after cleanup');
+              } catch (retryError) {
+                console.error('[BookStore] Still failed to save after cleanup:', retryError);
+              }
+            }
+          }
         },
         removeItem: (name) => {
           localStorage.removeItem(name);

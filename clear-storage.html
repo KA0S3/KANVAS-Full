@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Storage</title>
+</head>
+<body>
+    <h1>Storage Cleanup Tool</h1>
+    <p>This will clear large images and corrupted data from localStorage</p>
+    
+    <button onclick="clearLargeImages()">Clear Large Images</button>
+    <button onclick="clearAllKanvas()">Clear All Kanvas Data</button>
+    <button onclick="showStorage()">Show Storage</button>
+    
+    <pre id="output"></pre>
+    
+    <script>
+        function showStorage() {
+            const output = document.getElementById('output');
+            const storage = {};
+            let totalSize = 0;
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key) {
+                    const value = localStorage.getItem(key);
+                    storage[key] = {
+                        size: value ? value.length : 0,
+                        preview: value ? value.substring(0, 100) + '...' : 'null'
+                    };
+                    totalSize += value ? value.length : 0;
+                }
+            }
+            
+            output.textContent = `Total storage: ${(totalSize / 1024 / 1024).toFixed(2)} MB\n\n` + 
+                               JSON.stringify(storage, null, 2);
+        }
+        
+        function clearLargeImages() {
+            const keysToRemove = [];
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key) {
+                    const value = localStorage.getItem(key);
+                    if (value && value.length > 100000) { // > 100KB
+                        console.log(`Removing large item: ${key} (${value.length} bytes)`);
+                        keysToRemove.push(key);
+                    }
+                }
+            }
+            
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+            alert(`Cleared ${keysToRemove.length} large items`);
+            showStorage();
+        }
+        
+        function clearAllKanvas() {
+            const keysToRemove = [];
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('kanvas-') || key.startsWith('bgmeta:') || key === 'kanvas_autosave' || key === 'kanvas-world-storage')) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+            alert(`Cleared ${keysToRemove.length} Kanvas items`);
+            showStorage();
+        }
+        
+        showStorage();
+    </script>
+</body>
+</html>

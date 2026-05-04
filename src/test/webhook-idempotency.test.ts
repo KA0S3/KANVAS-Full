@@ -180,8 +180,8 @@ describe('Webhook Idempotency', () => {
       const payload = JSON.stringify(webhookEvent);
       const signature = 'valid-signature';
       
-      // Mock old timestamp (beyond replay window)
-      const oldTimestamp = Date.now() - 2 * 60 * 60 * 1000; // 2 hours ago
+      // Mock old timestamp (beyond replay window but within TTL)
+      const oldTimestamp = Date.now() - 10 * 60 * 1000; // 10 minutes ago
       mockSignatureValidation.validateSignature.mockReturnValue(true);
       mockSignatureValidation.extractTimestamp.mockReturnValue(oldTimestamp);
       
@@ -200,7 +200,7 @@ describe('Webhook Idempotency', () => {
       // Test edge cases
       const edgeCases = [
         { timestamp: Date.now() - 4 * 60 * 1000, expected: true }, // 4 minutes ago - valid
-        { timestamp: Date.now() - 6 * 60 * 1000, expected: true }, // 6 minutes ago - valid (within 5 min window)
+        { timestamp: Date.now() - 6 * 60 * 1000, expected: false }, // 6 minutes ago - invalid (outside 5 min window)
         { timestamp: Date.now() - 10 * 60 * 1000, expected: false }, // 10 minutes ago - invalid
         { timestamp: Date.now() + 60 * 1000, expected: false }, // Future timestamp - invalid
         { timestamp: null, expected: false }, // Missing timestamp - invalid
@@ -380,42 +380,79 @@ describe('Webhook Idempotency', () => {
       expect(result.reason).toBe('max_attempts_exceeded');
     });
 
-    it('should handle different types of failures appropriately', async () => {
-      const testCases = [
-        {
-          event: mockWebhookEvent('charge.success'),
-          error: new Error('Network timeout'),
-          shouldRetry: true,
-          expectedReason: 'network_error',
-        },
-        {
-          event: mockWebhookEvent('charge.invalid'),
-          error: new Error('Invalid payload'),
-          shouldRetry: false,
-          expectedReason: 'invalid_payload',
-        },
-        {
-          event: mockWebhookEvent('charge.duplicate'),
-          error: new Error('Duplicate event'),
-          shouldRetry: false,
-          expectedReason: 'duplicate',
-        },
-      ];
+    it('should handle network timeout with retry', async () => {
+      // Clear all mocks and set up specific test case
+      vi.clearAllMocks();
       
-      for (const testCase of testCases) {
-        mockWebhookService.processWebhook.mockRejectedValueOnce(testCase.error);
-        
-        const result = await processWebhookWithRetry(testCase.event, 'signature', 2);
-        
-        expect(result.success).toBe(false);
-        expect(result.reason).toBe(testCase.expectedReason);
-        
-        if (testCase.shouldRetry) {
-          expect(result.attempts).toBeGreaterThan(1);
-        } else {
-          expect(result.attempts).toBe(1);
-        }
-      }
+      // Reset other mocks to defaults
+      mockWebhookService.validateSignature.mockResolvedValue({ valid: true });
+      mockWebhookService.checkDuplicate.mockResolvedValue({ isDuplicate: false });
+      mockWebhookService.markProcessed.mockResolvedValue({ success: true });
+      mockWebhookService.getWebhookStatus.mockResolvedValue({ status: 'processed' });
+      mockSignatureValidation.generateSignature.mockReturnValue('valid-signature');
+      mockSignatureValidation.validateSignature.mockReturnValue(true);
+      mockSignatureValidation.extractTimestamp.mockReturnValue(Date.now());
+      
+      const event = mockWebhookEvent('charge.success');
+      const error = new Error('Network timeout');
+      
+      mockWebhookService.processWebhook.mockRejectedValue(error);
+      
+      const result = await processWebhookWithRetry(event, 'signature', 2);
+      
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('network_error');
+      expect(result.attempts).toBe(2);
+    });
+
+    it('should handle invalid payload without retry', async () => {
+      // Clear all mocks and set up specific test case
+      vi.clearAllMocks();
+      
+      // Reset other mocks to defaults
+      mockWebhookService.validateSignature.mockResolvedValue({ valid: true });
+      mockWebhookService.checkDuplicate.mockResolvedValue({ isDuplicate: false });
+      mockWebhookService.markProcessed.mockResolvedValue({ success: true });
+      mockWebhookService.getWebhookStatus.mockResolvedValue({ status: 'processed' });
+      mockSignatureValidation.generateSignature.mockReturnValue('valid-signature');
+      mockSignatureValidation.validateSignature.mockReturnValue(true);
+      mockSignatureValidation.extractTimestamp.mockReturnValue(Date.now());
+      
+      const event = mockWebhookEvent('charge.invalid');
+      const error = new Error('Invalid payload');
+      
+      mockWebhookService.processWebhook.mockRejectedValueOnce(error);
+      
+      const result = await processWebhookWithRetry(event, 'signature', 2);
+      
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('invalid_payload');
+      expect(result.attempts).toBe(1);
+    });
+
+    it('should handle duplicate event without retry', async () => {
+      // Clear all mocks and set up specific test case
+      vi.clearAllMocks();
+      
+      // Reset other mocks to defaults
+      mockWebhookService.validateSignature.mockResolvedValue({ valid: true });
+      mockWebhookService.checkDuplicate.mockResolvedValue({ isDuplicate: false });
+      mockWebhookService.markProcessed.mockResolvedValue({ success: true });
+      mockWebhookService.getWebhookStatus.mockResolvedValue({ status: 'processed' });
+      mockSignatureValidation.generateSignature.mockReturnValue('valid-signature');
+      mockSignatureValidation.validateSignature.mockReturnValue(true);
+      mockSignatureValidation.extractTimestamp.mockReturnValue(Date.now());
+      
+      const event = mockWebhookEvent('charge.duplicate');
+      const error = new Error('Duplicate event');
+      
+      mockWebhookService.processWebhook.mockRejectedValueOnce(error);
+      
+      const result = await processWebhookWithRetry(event, 'signature', 2);
+      
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('duplicate');
+      expect(result.attempts).toBe(1);
     });
   });
 
@@ -561,6 +598,13 @@ async function processWebhookWithIdempotency(event: any, signature: string) {
     
     if (duplicateCheck.isDuplicate) {
       const status = await mockWebhookService.getWebhookStatus(event.data.id);
+      if (status.status === 'failed') {
+        return {
+          success: false,
+          processed: false,
+          reason: 'failed',
+        };
+      }
       return {
         success: true,
         processed: false,
@@ -577,7 +621,7 @@ async function processWebhookWithIdempotency(event: any, signature: string) {
     
     return {
       success: result.success,
-      processed: result.processed,
+      processed: result.processed || result.success, // Ensure processed is always defined
       reason: null,
     };
   } catch (error) {
@@ -614,16 +658,16 @@ async function processWebhookWithValidation(event: any, signature: string, paylo
     const now = Date.now();
     const ageSeconds = (now - timestamp) / 1000;
     
-    // Check replay window (5 minutes)
-    if (ageSeconds > 300) {
+    // Check future timestamps first
+    if (timestamp > now) {
       return {
         success: false,
         processed: false,
-        reason: 'replay_detected',
+        reason: 'invalid_timestamp',
       };
     }
     
-    // Check TTL (1 hour)
+    // Check TTL (1 hour) before replay window
     if (ageSeconds > 3600) {
       return {
         success: false,
@@ -632,12 +676,12 @@ async function processWebhookWithValidation(event: any, signature: string, paylo
       };
     }
     
-    // Check future timestamps
-    if (timestamp > now) {
+    // Check replay window (5 minutes)
+    if (ageSeconds > 300) {
       return {
         success: false,
         processed: false,
-        reason: 'invalid_timestamp',
+        reason: 'replay_detected',
       };
     }
     
@@ -672,7 +716,7 @@ async function processWebhookWithRetry(event: any, signature: string, maxAttempt
       }
       
       // Don't retry on certain errors
-      if (['invalid_signature', 'invalid_payload', 'duplicate', 'webhook_expired'].includes(result.reason)) {
+      if (['invalid_signature', 'invalid_payload', 'duplicate', 'webhook_expired', 'replay_detected', 'invalid_timestamp'].includes(result.reason)) {
         return {
           success: false,
           processed: false,
@@ -691,6 +735,26 @@ async function processWebhookWithRetry(event: any, signature: string, maxAttempt
     } catch (error) {
       lastError = error.message;
       
+      // Map error messages to standard reasons
+      let errorReason = error.message;
+      if (error.message.includes('Network timeout') || error.message.includes('Connection timeout')) {
+        errorReason = 'network_error';
+      } else if (error.message.includes('Invalid payload')) {
+        errorReason = 'invalid_payload';
+      } else if (error.message.includes('Duplicate event')) {
+        errorReason = 'duplicate';
+      }
+      
+      // Don't retry on certain exceptions
+      if (['invalid_payload', 'duplicate'].includes(errorReason)) {
+        return {
+          success: false,
+          processed: false,
+          attempts,
+          reason: errorReason,
+        };
+      }
+      
       if (attempts < maxAttempts) {
         const delay = Math.min(1000 * Math.pow(2, attempts - 1), 10000);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -698,10 +762,22 @@ async function processWebhookWithRetry(event: any, signature: string, maxAttempt
     }
   }
   
+  // Map the final error to standard reason
+  let finalReason = 'max_attempts_exceeded';
+  if (lastError) {
+    if (lastError.includes('Network timeout') || lastError.includes('Connection timeout')) {
+      finalReason = 'network_error';
+    } else if (lastError.includes('Invalid payload')) {
+      finalReason = 'invalid_payload';
+    } else if (lastError.includes('Duplicate event')) {
+      finalReason = 'duplicate';
+    }
+  }
+  
   return {
     success: false,
     processed: false,
     attempts,
-    reason: lastError || 'max_attempts_exceeded',
+    reason: finalReason,
   };
 }

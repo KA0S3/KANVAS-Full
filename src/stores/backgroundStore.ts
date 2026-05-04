@@ -5,33 +5,48 @@ import { DEFAULT_BACKGROUND_CONFIG, getAssetKey } from '@/types/background';
 import { getBackground as getBackgroundFromStorage, setBackground as setBackgroundToStorage, loadAllBackgrounds, loadAllBackgroundsAsync } from '@/utils/backgroundStorage';
 import { documentMutationService } from '@/services/DocumentMutationService';
 import { useAssetStore } from '@/stores/assetStore';
+import { logBackground, reportError } from '@/utils/logger';
 
 const storeInitTime = Date.now();
-console.log('[BackgroundStore] ============================================');
-console.log('[BackgroundStore] STORE INITIALIZING at', storeInitTime);
-console.log('[BackgroundStore] ============================================');
+logBackground('============================================');
+logBackground('STORE INITIALIZING at', storeInitTime);
+logBackground('============================================');
 
 // Debounce timers for background saves to prevent excessive writes
 const backgroundSaveDebouncers = new Map<string, number>();
 const BACKGROUND_DEBOUNCE_MS = 500; // 500ms debounce for background changes
 
+// Global cleanup function to clear all background save timers
+export const clearAllBackgroundTimers = () => {
+  logBackground(`Clearing ${backgroundSaveDebouncers.size} background save timers`);
+  backgroundSaveDebouncers.forEach((timerId) => {
+    clearTimeout(timerId);
+  });
+  backgroundSaveDebouncers.clear();
+};
+
 export const useBackgroundStore = create<BackgroundStore>()(
   subscribeWithSelector(
     (set, get) => {
+      // Add cleanup on page unload to prevent memory leaks
+      if (typeof window !== 'undefined') {
+        window.addEventListener('beforeunload', clearAllBackgroundTimers);
+        window.addEventListener('pagehide', clearAllBackgroundTimers);
+      }
         // Initialize configs from localStorage on store creation
-        console.log('[BackgroundStore] Running store creator function...');
+        logBackground('Running store creator function...');
         const initialConfigs = loadAllBackgrounds() || {};
         const configCount = Object.keys(initialConfigs).length;
-        console.log(`[BackgroundStore] Initial sync load complete: ${configCount} backgrounds found`);
+        logBackground(`Initial sync load complete: ${configCount} backgrounds found`);
 
         // Async load images from IndexedDB to restore actual image URLs
         // The sync load only gets metadata (with imageUrl: null), we need to fetch the actual images
         if (configCount > 0) {
-          console.log('[BackgroundStore] Starting async IndexedDB image load...');
+          logBackground('Starting async IndexedDB image load...');
           loadAllBackgroundsAsync().then(loadedConfigs => {
             const loadedCount = Object.keys(loadedConfigs).length;
             const configsWithImages = Object.entries(loadedConfigs).filter(([_, config]) => config.imageUrl).length;
-            console.log(`[BackgroundStore] ✅ Async load complete: ${loadedCount} configs, ${configsWithImages} with images`);
+            logBackground(`✅ Async load complete: ${loadedCount} configs, ${configsWithImages} with images`);
             
             // Merge loaded configs with current state (preserving any in-memory changes)
             set((state) => ({
@@ -40,12 +55,12 @@ export const useBackgroundStore = create<BackgroundStore>()(
                 ...loadedConfigs
               }
             }));
-            console.log('[BackgroundStore] Store updated with images from IndexedDB');
+            logBackground('Store updated with images from IndexedDB');
           }).catch(error => {
-            console.error('[BackgroundStore] Failed to load images from IndexedDB:', error);
+            reportError(error, 'BackgroundStore.asyncLoad', 'Failed to load images from IndexedDB');
           });
         } else {
-          console.log('[BackgroundStore] ✅ Store initialized - no backgrounds to load');
+          logBackground('✅ Store initialized - no backgrounds to load');
         }
 
         return {
@@ -76,7 +91,7 @@ export const useBackgroundStore = create<BackgroundStore>()(
             const key = getAssetKey(assetId);
             const clonedConfig = get().cloneConfig(config);
 
-            console.log(`[BackgroundStore] Setting background for ${assetId} (key: ${key}):`, clonedConfig.mode);
+            logBackground(`Setting background for ${assetId} (key: ${key}):`, clonedConfig.mode);
 
             // Update in-memory store immediately (no debounce needed for UI)
             set((state) => ({
@@ -96,7 +111,7 @@ export const useBackgroundStore = create<BackgroundStore>()(
             backgroundSaveDebouncers.set(key, window.setTimeout(() => {
               // Persist to localStorage
               setBackgroundToStorage(key, clonedConfig);
-              console.log(`[BackgroundStore] Saved background to localStorage for ${assetId}`);
+              logBackground(`Saved background to localStorage for ${assetId}`);
               
               // Sync backgrounds using saveGlobalBackgrounds (MASTER_PLAN.md state-based tracking)
               // This stores all background configs in world_document.backgrounds as single source of truth
@@ -120,10 +135,10 @@ export const useBackgroundStore = create<BackgroundStore>()(
                     backgroundConfig: clonedConfig
                   };
                   documentMutationService.markAssetChanged(actualAssetId, updatedAsset);
-                  console.log(`[BackgroundStore] Marked asset ${actualAssetId} as changed with backgroundConfig`);
+                  logBackground(`Marked asset ${actualAssetId} as changed with backgroundConfig`);
                 }
               } else {
-                console.log('[BackgroundStore] Background saved locally - will sync when book is entered');
+                logBackground('Background saved locally - will sync when book is entered');
               }
               
               // Clean up timer
@@ -149,7 +164,7 @@ export const useBackgroundStore = create<BackgroundStore>()(
               });
               return JSON.parse(jsonString);
             } catch (error) {
-              console.error('[BackgroundStore] Failed to clone config:', error);
+              reportError(error, 'BackgroundStore.cloneConfig', 'Failed to clone config');
               // Fallback to shallow clone
               return { ...config };
             }
@@ -179,6 +194,10 @@ export const useBackgroundStore = create<BackgroundStore>()(
               gridSize: legacyConfig.gridSize || 40,
               imageSize: legacyConfig.imageSize,
             };
+          },
+
+          cleanup: () => {
+            clearAllBackgroundTimers();
           },
         };
       }

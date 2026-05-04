@@ -4,11 +4,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ConflictResolutionProvider } from "@/components/ConflictResolutionProvider";
-import { useEffect } from "react";
+import { RateLimitWarning } from "@/components/ui/rate-limit-warning";
+import { useEffect, useState } from "react";
 import { emergencySaveService } from "@/services/emergencySaveService";
 import { connectivityService } from "@/services/connectivityService";
 import { documentMutationService } from "@/services/DocumentMutationService";
 import { useUndoKeyboard } from "@/hooks/useUndoKeyboard";
+import { useAuthStore } from "@/stores/authStore";
 import Index from "./pages/Index";
 import AuthConfirm from "./pages/AuthConfirm";
 import AuthCallback from "./pages/AuthCallback";
@@ -23,6 +25,9 @@ const queryClient = new QueryClient();
 const App = () => {
   // Initialize undo keyboard shortcuts
   useUndoKeyboard();
+  
+  // Get auth state for rate limiting
+  const { user } = useAuthStore();
   
   // Initialize services on app mount
   useEffect(() => {
@@ -49,6 +54,8 @@ const App = () => {
       <ConflictResolutionProvider>
         <Toaster />
         <Sonner />
+        {/* Rate limit warning component - only show when user is authenticated */}
+        {user && <RateLimitWarning userId={user.id} />}
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />

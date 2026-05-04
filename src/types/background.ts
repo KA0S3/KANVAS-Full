@@ -24,6 +24,7 @@ export interface BackgroundStore {
   setBackground: (assetId: string, config: BackgroundConfig) => void;
   cloneConfig: (config: BackgroundConfig) => BackgroundConfig;
   migrateLegacyConfig: (legacyConfig: any) => BackgroundConfig;
+  cleanup: () => void;
 }
 
 export const DEFAULT_BACKGROUND_CONFIG: BackgroundConfig = {

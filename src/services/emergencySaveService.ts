@@ -3,6 +3,7 @@ import { useAssetStore } from '@/stores/assetStore';
 import { useBackgroundStore } from '@/stores/backgroundStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { documentMutationService } from './DocumentMutationService';
+import { logEmergency, reportError } from '@/utils/logger';
 
 interface EmergencyBackup {
   assets: Record<string, any>;
@@ -34,7 +35,7 @@ class EmergencySaveService {
     
     this.setupEmergencyHandlers();
     this.isInitialized = true;
-    console.log('[EmergencySave] Service initialized');
+    logEmergency('Service initialized');
   }
 
   private setupEmergencyHandlers(): void {
@@ -77,12 +78,12 @@ class EmergencySaveService {
       }
     });
 
-    console.log('[EmergencySave] Event handlers registered');
+    logEmergency('Event handlers registered');
   }
 
   private async performEmergencySave(): Promise<void> {
     try {
-      console.log('[EmergencySave] Performing emergency save');
+      logEmergency('Performing emergency save');
       
       // 1. Save to localStorage immediately (fast, synchronous-ish)
       this.saveToLocalStorage();
@@ -94,11 +95,11 @@ class EmergencySaveService {
         
         // Also try immediate sync (may not complete during unload)
         documentMutationService.syncNow().catch(err => {
-          console.warn('[EmergencySave] Immediate sync failed (expected during unload):', err);
+          logEmergency('Immediate sync failed (expected during unload):', err);
         });
       }
     } catch (error) {
-      console.error('[EmergencySave] Emergency save failed:', error);
+      reportError(error, 'emergencySaveService.performEmergencySave', 'Emergency save failed');
     }
   }
 
@@ -116,9 +117,9 @@ class EmergencySaveService {
       };
       
       localStorage.setItem('kanvas-emergency-backup', JSON.stringify(emergencyData));
-      console.log('[EmergencySave] Emergency backup saved to localStorage');
+      logEmergency('Emergency backup saved to localStorage');
     } catch (error) {
-      console.error('[EmergencySave] Failed to save to localStorage:', error);
+      reportError(error, 'emergencySaveService.saveToLocalStorage', 'Failed to save to localStorage');
     }
   }
 
@@ -128,7 +129,7 @@ class EmergencySaveService {
       const projectId = bookStore.currentBookId;
       
       if (!projectId) {
-        console.log('[EmergencySave] No project ID, skipping beacon sync');
+        logEmergency('No project ID, skipping beacon sync');
         return;
       }
 
@@ -138,12 +139,16 @@ class EmergencySaveService {
         type: 'emergency-sync'
       };
       
-      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-      const sent = navigator.sendBeacon('/api/emergency-sync', blob);
+      // Use Supabase Edge Function URL for emergency-sync
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const functionUrl = `${supabaseUrl}/functions/v1/emergency-sync`;
       
-      console.log(`[EmergencySave] Beacon sync ${sent ? 'sent' : 'failed'}`);
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const sent = navigator.sendBeacon(functionUrl, blob);
+      
+      logEmergency(`Beacon sync ${sent ? 'sent' : 'failed'} to ${functionUrl}`);
     } catch (error) {
-      console.error('[EmergencySave] Beacon sync failed:', error);
+      reportError(error, 'emergencySaveService.beaconSync', 'Beacon sync failed');
     }
   }
 
@@ -161,15 +166,15 @@ class EmergencySaveService {
       // Only restore if backup is recent (within 24 hours)
       const hoursSinceBackup = (Date.now() - data.timestamp) / (1000 * 60 * 60);
       if (hoursSinceBackup > 24) {
-        console.log('[EmergencySave] Backup too old, ignoring');
+        logEmergency('Backup too old, ignoring');
         localStorage.removeItem('kanvas-emergency-backup');
         return null;
       }
 
-      console.log('[EmergencySave] Emergency backup found, age:', hoursSinceBackup.toFixed(2), 'hours');
+      logEmergency(`Emergency backup found, age: ${hoursSinceBackup.toFixed(2)} hours`);
       return data;
     } catch (error) {
-      console.error('[EmergencySave] Failed to load emergency backup:', error);
+      reportError(error, 'emergencySaveService.loadEmergencyBackup', 'Failed to load emergency backup');
       return null;
     }
   }
@@ -179,7 +184,7 @@ class EmergencySaveService {
    */
   clearEmergencyBackup(): void {
     localStorage.removeItem('kanvas-emergency-backup');
-    console.log('[EmergencySave] Emergency backup cleared');
+    logEmergency('Emergency backup cleared');
   }
 
   /**

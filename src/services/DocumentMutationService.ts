@@ -4,10 +4,13 @@ import { useCloudStore } from '@/stores/cloudStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { connectivityService } from '@/services/connectivityService';
 import { performanceMonitor } from '@/utils/performanceMonitor';
+import { TextStorageOptimizer } from '@/utils/textStorageOptimizer';
 import { ConflictResolver, type Conflict, type ConflictResolution, type ConflictStrategy } from './ConflictResolver';
 import type { Asset } from '@/components/AssetItem';
 import type { BackgroundConfig } from '@/types/background';
 import { compressBase64Thumbnail, isThumbnailTooLarge } from '@/utils/thumbnailCompression';
+import { logDocument, reportError } from '@/utils/logger';
+import { withApiRateLimit } from '@/services/rateLimitMiddleware';
 
 // Document operation types
 export type DocumentOperation =
@@ -112,7 +115,7 @@ class DocumentMutationService {
 
     // Listen for online/offline events to trigger sync
     const handleOnline = () => {
-      console.log('[DocumentMutation] Connection restored, triggering sync');
+      logDocument('Connection restored, triggering sync');
       this.syncNow();
       // NOTE: Cloud retry polling NOT started automatically to prevent idle DB requests
       // It will be started only when there are failed uploads to retry
@@ -145,7 +148,7 @@ class DocumentMutationService {
    */
   setConflictStrategy(strategy: ConflictStrategy): void {
     this.conflictResolver.setOptions({ strategy });
-    console.log(`[DocumentMutation] Conflict strategy set to: ${strategy}`);
+    logDocument(`Conflict strategy set to: ${strategy}`);
   }
 
   /**
@@ -179,7 +182,7 @@ class DocumentMutationService {
       // Check cache first
       const cached = this.documentCache.get(projectId);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-        console.log('[DocumentMutation] Cache hit for document:', projectId);
+        logDocument('Cache hit for document:', projectId);
         return { success: true, data: cached.data };
       }
 
@@ -192,7 +195,7 @@ class DocumentMutationService {
         });
 
       if (projectError || !projectData || projectData.length === 0) {
-        console.error('[DocumentMutation] Failed to load project:', projectError);
+        reportError(projectError || new Error('No project data found'), 'DocumentMutation.loadDocument', 'Failed to load project');
         return { success: false, error: String(projectError) };
       }
 
@@ -208,14 +211,17 @@ class DocumentMutationService {
         });
 
       if (assetsError) {
-        console.error('[DocumentMutation] Failed to load assets:', assetsError);
+        reportError(assetsError, 'DocumentMutation.loadDocument', 'Failed to load assets');
         return { success: false, error: String(assetsError) };
       }
 
       // Build result matching expected structure
+      // Restore compressed text fields from storage
+      const restoredAssetsData = TextStorageOptimizer.restoreAssetsFromStorage(assetsData || []);
+      
       const result = {
         world_document: {
-          assets: assetsData || [],
+          assets: restoredAssetsData,
           backgrounds: project.backgrounds || {},
           tags: project.tags_config || {}
         },
@@ -243,7 +249,7 @@ class DocumentMutationService {
 
       return { success: true, data: result };
     } catch (error) {
-      console.error('[DocumentMutation] Failed to load document:', error);
+      reportError(error, 'DocumentMutation.loadDocument', 'Failed to load document');
       return { success: false, error: String(error) };
     }
   }
@@ -256,38 +262,36 @@ class DocumentMutationService {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.error('[DocumentMutation] Cannot create project - not authenticated');
+        reportError(new Error('Not authenticated'), 'DocumentMutation.createProject', 'Cannot create project - not authenticated');
         return false;
       }
 
       // First try to load the project to see if it exists
       const loadResult = await this.loadDocument(projectId);
       if (loadResult.success && loadResult.data) {
-        console.log('[DocumentMutation] Project already exists:', projectId);
+        logDocument('Project already exists:', projectId);
         return true;
       }
 
       // Create new project using RPC (bypasses RLS)
-      console.log('[DocumentMutation] Creating project via RPC:', projectId);
+      logDocument('Creating project via RPC:', projectId);
       const { data, error } = await supabase
         .rpc('create_project', {
           p_name: projectName,
-          p_description: null,
-          p_cover_config: coverConfig || {},
           p_project_id: projectId
         });
 
       if (error) {
-        console.error('[DocumentMutation] Failed to create project via RPC:', error);
+        reportError(error, 'DocumentMutation.createProject', 'Failed to create project via RPC');
         return false;
       }
 
-      console.log('[DocumentMutation] Created new project:', data);
+      logDocument('Created new project:', data);
       this.currentProjectId = projectId;
       this.currentVersion = 1;
       return true;
     } catch (error) {
-      console.error('[DocumentMutation] Error creating project:', error);
+      reportError(error, 'DocumentMutation.createProject', 'Error creating project');
       return false;
     }
   }
@@ -378,14 +382,14 @@ class DocumentMutationService {
     // Check if the current book still exists locally (might have been deleted)
     const bookStore = useBookStore.getState();
     if (!bookStore.books[this.currentProjectId]) {
-      console.log('[DocumentMutation] Project no longer exists locally, skipping save');
+      logDocument('Project no longer exists locally, skipping save');
       this.currentProjectId = null;
       return false;
     }
 
     try {
       performanceMonitor.incrementDatabaseRequests();
-      console.log('[DocumentMutation] saveGlobalBackgrounds - Sending to RPC:', {
+      logDocument('saveGlobalBackgrounds - Sending to RPC:', {
         p_project_id: this.currentProjectId,
         p_backgrounds: backgrounds
       });
@@ -395,8 +399,8 @@ class DocumentMutationService {
       });
 
       if (error) {
-        console.error('[DocumentMutation] Failed to save global backgrounds:', error);
-        console.error('[DocumentMutation] Error details:', JSON.stringify(error, null, 2));
+        reportError(error, 'DocumentMutation.saveGlobalBackgrounds', 'Failed to save global backgrounds');
+        logDocument('Error details:', JSON.stringify(error, null, 2));
 
         // Invalidate cache on any error
         this.documentCache.delete(this.currentProjectId);
@@ -404,27 +408,27 @@ class DocumentMutationService {
 
         // If error is "Unauthorized", the project may have been deleted - don't retry
         if (error.message?.includes('Unauthorized')) {
-          console.log('[DocumentMutation] Project may have been deleted, clearing currentProjectId');
+          logDocument('Project may have been deleted, clearing currentProjectId');
           this.currentProjectId = null;
           return false;
         }
 
         // If version conflict, reload and retry
         if (error.message?.includes('Version conflict')) {
-          console.log('[DocumentMutation] Version conflict detected, reloading document...');
+          logDocument('Version conflict detected, reloading document...');
           const loadResult = await this.loadDocument(this.currentProjectId);
           if (loadResult.success && loadResult.data) {
             this.currentVersion = loadResult.data.version;
-            console.log('[DocumentMutation] Reloaded version:', this.currentVersion);
+            logDocument('Reloaded version:', this.currentVersion);
 
             // Retry with correct version
-            console.log('[DocumentMutation] Retrying saveGlobalBackgrounds with correct version');
+            logDocument('Retrying saveGlobalBackgrounds with correct version');
             const { error: retryError } = await supabase.rpc('save_project', {
               p_project_id: this.currentProjectId,
               p_backgrounds: backgrounds
             });
             if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
+              reportError(retryError, 'DocumentMutation.saveGlobalBackgrounds', 'Retry failed');
               return false;
             }
             this.currentVersion += 1;
@@ -440,7 +444,7 @@ class DocumentMutationService {
 
       return true;
     } catch (error) {
-      console.error('[DocumentMutation] Error saving global backgrounds:', error);
+      reportError(error, 'DocumentMutation.saveGlobalBackgrounds', 'Error saving global backgrounds');
       return false;
     }
   }
@@ -451,62 +455,77 @@ class DocumentMutationService {
     // Check if the current book still exists locally (might have been deleted)
     const bookStore = useBookStore.getState();
     if (!bookStore.books[this.currentProjectId]) {
-      console.log('[DocumentMutation] Project no longer exists locally, skipping save');
+      logDocument('Project no longer exists locally, skipping save');
       this.currentProjectId = null;
       return false;
     }
 
+    const authStore = useAuthStore.getState();
+    const userId = authStore.user?.id;
+    
+    if (!userId) {
+      logDocument('No user ID available for rate limiting');
+      return false;
+    }
+
     try {
-      performanceMonitor.incrementDatabaseRequests();
-      const { error } = await supabase.rpc('save_project', {
-        p_project_id: this.currentProjectId,
-        p_viewport: { offset: { x: offsetX, y: offsetY }, scale }
-      });
+      return await withApiRateLimit(userId, async () => {
+        performanceMonitor.incrementDatabaseRequests();
+        const { error } = await supabase.rpc('save_project', {
+          p_project_id: this.currentProjectId,
+          p_viewport: { offsetX, offsetY, scale }
+        });
 
-      if (error) {
-        console.error('[DocumentMutation] Failed to save viewport:', error);
+        if (error) {
+          reportError(error, 'DocumentMutation.saveViewport', 'Failed to save viewport');
+          this.documentCache.delete(this.currentProjectId);
+          this.backgroundsCache.delete(this.currentProjectId);
 
-        // Invalidate cache on any error
-        this.documentCache.delete(this.currentProjectId);
-        this.backgroundsCache.delete(this.currentProjectId);
+          // If error is "Unauthorized", the project may have been deleted - don't retry
+          if (error.message?.includes('Unauthorized')) {
+            logDocument('Project may have been deleted, clearing currentProjectId');
+            this.currentProjectId = null;
+            return false;
+          }
 
-        // If error is "Unauthorized", the project may have been deleted - don't retry
-        if (error.message?.includes('Unauthorized')) {
-          console.log('[DocumentMutation] Project may have been deleted, clearing currentProjectId');
-          this.currentProjectId = null;
+          // If version conflict, reload and retry
+          if (error.message?.includes('Version conflict')) {
+            logDocument('Version conflict detected, reloading document...');
+            const loadResult = await this.loadDocument(this.currentProjectId);
+            if (loadResult.success && loadResult.data) {
+              this.currentVersion = loadResult.data.version;
+              logDocument('Reloaded version:', this.currentVersion);
+
+              // Retry with correct version
+              const { error: retryError } = await supabase.rpc('save_project', {
+                p_project_id: this.currentProjectId,
+                p_viewport: { offsetX, offsetY, scale }
+              });
+              if (retryError) {
+                reportError(retryError, 'DocumentMutation.saveViewport', 'Retry failed');
+                return false;
+              }
+              this.currentVersion += 1;
+              return true;
+            }
+          }
           return false;
         }
 
-        // If version conflict, reload and retry
-        if (error.message?.includes('Version conflict')) {
-          console.log('[DocumentMutation] Version conflict detected, reloading document...');
-          const loadResult = await this.loadDocument(this.currentProjectId);
-          if (loadResult.success && loadResult.data) {
-            this.currentVersion = loadResult.data.version;
-            console.log('[DocumentMutation] Reloaded version:', this.currentVersion);
+        this.currentVersion += 1;
+        this.documentCache.delete(this.currentProjectId);
+        this.backgroundsCache.delete(this.currentProjectId);
 
-            // Retry with correct version
-            const { error: retryError } = await supabase.rpc('save_project', {
-              p_project_id: this.currentProjectId,
-              p_viewport: { offset: { x: offsetX, y: offsetY }, scale }
-            });
-            if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
-              return false;
-            }
-            this.currentVersion += 1;
-            return true;
-          }
-        }
+        return true;
+      });
+    } catch (error) {
+      // Check if this is a rate limit error
+      if ((error as any).rateLimitExceeded) {
+        logDocument('Rate limit exceeded for saveViewport:', (error as any).message);
         return false;
       }
-
-      this.currentVersion += 1;
-      this.documentCache.delete(this.currentProjectId);
-
-      return true;
-    } catch (error) {
-      console.error('[DocumentMutation] Error saving viewport:', error);
+      
+      reportError(error, 'DocumentMutation.saveViewport', 'Error saving viewport');
       return false;
     }
   }
@@ -517,62 +536,79 @@ class DocumentMutationService {
     // Check if the current book still exists locally (might have been deleted)
     const bookStore = useBookStore.getState();
     if (!bookStore.books[this.currentProjectId]) {
-      console.log('[DocumentMutation] Project no longer exists locally, skipping save');
+      logDocument('Project no longer exists locally, skipping save');
       this.currentProjectId = null;
       return false;
     }
 
+    const authStore = useAuthStore.getState();
+    const userId = authStore.user?.id;
+    
+    if (!userId) {
+      logDocument('No user ID available for rate limiting');
+      return false;
+    }
+
     try {
-      performanceMonitor.incrementDatabaseRequests();
-      const { error } = await supabase.rpc('save_project', {
-        p_project_id: this.currentProjectId,
-        p_tags_config: tags
-      });
+      return await withApiRateLimit(userId, async () => {
+        performanceMonitor.incrementDatabaseRequests();
+        const { error } = await supabase.rpc('save_project', {
+          p_project_id: this.currentProjectId,
+          p_tags_config: tags
+        });
 
-      if (error) {
-        console.error('[DocumentMutation] Failed to save global tags:', error);
+        if (error) {
+          reportError(error, 'DocumentMutation.saveGlobalTags', 'Failed to save global tags');
 
-        // Invalidate cache on any error
-        this.documentCache.delete(this.currentProjectId);
-        this.backgroundsCache.delete(this.currentProjectId);
+          // Invalidate cache on any error
+          this.documentCache.delete(this.currentProjectId);
+          this.backgroundsCache.delete(this.currentProjectId);
 
-        // If error is "Unauthorized", the project may have been deleted - don't retry
-        if (error.message?.includes('Unauthorized')) {
-          console.log('[DocumentMutation] Project may have been deleted, clearing currentProjectId');
-          this.currentProjectId = null;
+          // If error is "Unauthorized", the project may have been deleted - don't retry
+          if (error.message?.includes('Unauthorized')) {
+            logDocument('Project may have been deleted, clearing currentProjectId');
+            this.currentProjectId = null;
+            return false;
+          }
+
+          // If version conflict, reload and retry
+          if (error.message?.includes('Version conflict')) {
+            logDocument('Version conflict detected, reloading document...');
+            const loadResult = await this.loadDocument(this.currentProjectId);
+            if (loadResult.success && loadResult.data) {
+              this.currentVersion = loadResult.data.version;
+              logDocument('Reloaded version:', this.currentVersion);
+
+              // Retry with correct version
+              const { error: retryError } = await supabase.rpc('save_project', {
+                p_project_id: this.currentProjectId,
+                p_tags_config: tags
+              });
+              if (retryError) {
+                reportError(retryError, 'DocumentMutation.saveGlobalTags', 'Retry failed');
+                return false;
+              }
+              this.currentVersion += 1;
+              return true;
+            }
+          }
           return false;
         }
 
-        // If version conflict, reload and retry
-        if (error.message?.includes('Version conflict')) {
-          console.log('[DocumentMutation] Version conflict detected, reloading document...');
-          const loadResult = await this.loadDocument(this.currentProjectId);
-          if (loadResult.success && loadResult.data) {
-            this.currentVersion = loadResult.data.version;
-            console.log('[DocumentMutation] Reloaded version:', this.currentVersion);
+        this.currentVersion += 1;
+        this.documentCache.delete(this.currentProjectId);
+        this.backgroundsCache.delete(this.currentProjectId);
 
-            // Retry with correct version
-            const { error: retryError } = await supabase.rpc('save_project', {
-              p_project_id: this.currentProjectId,
-              p_tags_config: tags
-            });
-            if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
-              return false;
-            }
-            this.currentVersion += 1;
-            return true;
-          }
-        }
+        return true;
+      });
+    } catch (error) {
+      // Check if this is a rate limit error
+      if ((error as any).rateLimitExceeded) {
+        logDocument('Rate limit exceeded for saveGlobalTags:', (error as any).message);
         return false;
       }
-
-      this.currentVersion += 1;
-      this.documentCache.delete(this.currentProjectId);
-
-      return true;
-    } catch (error) {
-      console.error('[DocumentMutation] Error saving global tags:', error);
+      
+      reportError(error, 'DocumentMutation.saveGlobalTags', 'Error saving global tags');
       return false;
     }
   }
@@ -593,14 +629,14 @@ class DocumentMutationService {
     // Check if the current book still exists locally (might have been deleted)
     const bookStore = useBookStore.getState();
     if (!bookStore.books[this.currentProjectId]) {
-      console.log('[DocumentMutation] Project no longer exists locally, skipping save');
+      logDocument('Project no longer exists locally, skipping save');
       this.currentProjectId = null;
       return false;
     }
 
     try {
       performanceMonitor.incrementDatabaseRequests();
-      console.log('[DocumentMutation] saveCoverMetadata - Sending to RPC:', {
+      logDocument('saveCoverMetadata - Sending to RPC:', {
         p_project_id: this.currentProjectId,
         p_cover_config: coverConfig
       });
@@ -616,8 +652,8 @@ class DocumentMutationService {
       });
 
       if (error) {
-        console.error('[DocumentMutation] Failed to save cover metadata:', error);
-        console.error('[DocumentMutation] Error details:', JSON.stringify(error, null, 2));
+        reportError(error, 'DocumentMutation.saveCoverMetadata', 'Failed to save cover metadata');
+        logDocument('Error details:', JSON.stringify(error, null, 2));
 
         // Invalidate cache on any error
         this.documentCache.delete(this.currentProjectId);
@@ -625,21 +661,21 @@ class DocumentMutationService {
 
         // If error is "Unauthorized", the project may have been deleted - don't retry
         if (error.message?.includes('Unauthorized')) {
-          console.log('[DocumentMutation] Project may have been deleted, clearing currentProjectId');
+          logDocument('Project may have been deleted, clearing currentProjectId');
           this.currentProjectId = null;
           return false;
         }
 
         // If version conflict, reload and retry
         if (error.message?.includes('Version conflict')) {
-          console.log('[DocumentMutation] Version conflict detected, reloading document...');
+          logDocument('Version conflict detected, reloading document...');
           const loadResult = await this.loadDocument(this.currentProjectId);
           if (loadResult.success && loadResult.data) {
             this.currentVersion = loadResult.data.version;
-            console.log('[DocumentMutation] Reloaded version:', this.currentVersion);
+            logDocument('Reloaded version:', this.currentVersion);
 
             // Retry with correct version
-            console.log('[DocumentMutation] Retrying saveCoverMetadata with correct version');
+            logDocument('Retrying saveCoverMetadata with correct version');
             const { error: retryError } = await supabase.rpc('save_project', {
               p_project_id: this.currentProjectId,
               p_cover_image: coverConfig.coverImage,
@@ -650,7 +686,7 @@ class DocumentMutationService {
               p_cover_page_settings: coverConfig.coverPageSettings
             });
             if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
+              reportError(retryError, 'DocumentMutation.saveViewport', 'Retry failed');
               return false;
             }
             this.currentVersion += 1;
@@ -664,10 +700,10 @@ class DocumentMutationService {
       this.documentCache.delete(this.currentProjectId);
       this.backgroundsCache.delete(this.currentProjectId);
 
-      console.log('[DocumentMutation] Cover metadata saved successfully');
+      logDocument('Cover metadata saved successfully');
       return true;
     } catch (error) {
-      console.error('[DocumentMutation] Error saving cover metadata:', error);
+      reportError(error, 'DocumentMutation.saveCoverMetadata', 'Error saving cover metadata');
       return false;
     }
   }
@@ -675,38 +711,38 @@ class DocumentMutationService {
   // Clear stuck sync flag (for recovery)
   clearSyncInProgress(): void {
     this.syncInProgress = false;
-    console.log('[DocumentMutation] Cleared stuck sync flag');
+    logDocument('Cleared stuck sync flag');
   }
 
   // Immediate sync (for critical operations)
   async syncNow(): Promise<boolean> {
     if (this.syncInProgress) {
-      console.log('[DocumentMutation] syncNow: sync in progress, skipping');
+      logDocument('syncNow: sync in progress, skipping');
       return false;
     }
     if (!connectivityService.isOnline()) {
-      console.log('[DocumentMutation] syncNow: offline, skipping');
+      logDocument('syncNow: offline, skipping');
       return false;
     }
     if (!this.currentProjectId) {
-      console.log('[DocumentMutation] syncNow: no project loaded, skipping');
+      logDocument('syncNow: no project loaded, skipping');
       return false;
     }
 
     const totalChanges = Object.keys(this.changedAssets).length + Object.keys(this.changedPositions).length;
     if (totalChanges === 0) {
-      console.log('[DocumentMutation] syncNow: no changes, nothing to sync');
+      logDocument('syncNow: no changes, nothing to sync');
       return true;
     }
 
-    console.log(`[DocumentMutation] syncNow: syncing ${totalChanges} changes`);
+    logDocument(`syncNow: syncing ${totalChanges} changes`);
     return this.performSync();
   }
 
   // Main sync method
   private async performSync(): Promise<boolean> {
     if (!this.currentProjectId) {
-      console.error('[DocumentMutation] No project loaded');
+      reportError(new Error('No project loaded'), 'DocumentMutation.performSync', 'No project loaded');
       return false;
     }
 
@@ -717,7 +753,7 @@ class DocumentMutationService {
     // Set timeout to clear stuck sync flag
     const syncTimeout = setTimeout(() => {
       if (this.syncInProgress) {
-        console.warn('[DocumentMutation] Sync timeout - clearing stuck flag after', this.syncTimeoutMs, 'ms');
+        logDocument(`Sync timeout - clearing stuck flag after ${this.syncTimeoutMs}ms`);
         this.syncInProgress = false;
         this.notifySubscribers();
       }
@@ -736,13 +772,13 @@ class DocumentMutationService {
       this.notifySubscribers();
       return true;
     } catch (error) {
-      console.error('[DocumentMutation] Sync failed:', error);
+      reportError(error, 'DocumentMutation.performSync', 'Sync failed');
       return false;
     } finally {
       clearTimeout(syncTimeout);
       this.syncInProgress = false;
       const syncDuration = Date.now() - this.syncStartTime;
-      console.log(`[DocumentMutation] Sync completed in ${syncDuration}ms`);
+      logDocument(`Sync completed in ${syncDuration}ms`);
     }
   }
 
@@ -770,7 +806,7 @@ class DocumentMutationService {
     }
 
     if (error) {
-      console.error('[DocumentMutation] Failed to save position changes:', error);
+      reportError(error, 'DocumentMutation.savePositionChanges', 'Failed to save position changes');
       
       // Invalidate cache on any error
       this.documentCache.delete(this.currentProjectId);
@@ -779,18 +815,18 @@ class DocumentMutationService {
       // If error is "Unauthorized", the project might not exist yet
       // Try to create it and retry
       if (error.message?.includes('Unauthorized')) {
-        console.log('[DocumentMutation] Project might not exist, attempting to create...');
+        logDocument('Project might not exist, attempting to create...');
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const created = await this.createProject(this.currentProjectId, 'Untitled Project');
           if (created) {
-            console.log('[DocumentMutation] Project created, retrying position save');
+            logDocument('Project created, retrying position save');
             const { error: retryError } = await supabase.rpc('save_positions', {
               p_project_id: this.currentProjectId,
               p_positions: positions
             });
             if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
+              reportError(retryError, 'DocumentMutation.savePositionChanges', 'Retry failed');
               throw retryError;
             }
             // Clear changes after successful save
@@ -867,15 +903,29 @@ class DocumentMutationService {
 
     const changes = processedAssets;
 
+    // Optimize text fields for low IO storage
+    const optimizedChanges = TextStorageOptimizer.optimizeAssetsForStorage(changes);
+    
+    // Log storage savings
+    const savings = TextStorageOptimizer.estimateSavings(changes[0]);
+    if (savings.savings > 0) {
+      logDocument('Text storage optimization:', {
+        originalSize: savings.originalSize,
+        optimizedSize: savings.optimizedSize,
+        savings: savings.savings,
+        savingsPercent: Math.round((savings.savings / savings.originalSize) * 100)
+      });
+    }
+
     performanceMonitor.incrementDatabaseRequests();
-    console.log('[DocumentMutation] saveMetadataChanges - Sending to RPC:', {
+    logDocument('saveMetadataChanges - Sending to RPC:', {
       p_project_id: this.currentProjectId,
-      p_assets_count: changes.length,
-      p_assets: changes
+      p_assets_count: optimizedChanges.length,
+      p_assets: optimizedChanges
     });
     const { error } = await supabase.rpc('save_assets', {
       p_project_id: this.currentProjectId,
-      p_assets: changes
+      p_assets: optimizedChanges
     });
 
     // Only clear changes after successful save
@@ -885,9 +935,9 @@ class DocumentMutationService {
     }
 
     if (error) {
-      console.error('[DocumentMutation] Failed to save metadata changes:', error);
-      console.error('[DocumentMutation] Error details:', JSON.stringify(error, null, 2));
-      console.error('[DocumentMutation] Asset save context:', {
+      reportError(error, 'DocumentMutation.saveMetadataChanges', 'Failed to save metadata changes');
+      logDocument('Error details:', JSON.stringify(error, null, 2));
+      logDocument('Asset save context:', {
         projectId: this.currentProjectId,
         assetCount: changes.length,
         currentVersion: this.currentVersion
@@ -900,19 +950,19 @@ class DocumentMutationService {
       // If error is "Unauthorized", the project might not exist yet
       // Try to create it and retry
       if (error.message?.includes('Unauthorized')) {
-        console.log('[DocumentMutation] Project might not exist, attempting to create...');
+        logDocument('Project might not exist, attempting to create...');
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const created = await this.createProject(this.currentProjectId, 'Untitled Project');
           if (created) {
-            console.log('[DocumentMutation] Project created, retrying metadata save');
+            logDocument('Project created, retrying metadata save');
             const { error: retryError } = await supabase.rpc('save_assets', {
               p_project_id: this.currentProjectId,
               p_assets: changes
               // No p_expected_version - let server handle it
             });
             if (retryError) {
-              console.error('[DocumentMutation] Retry failed:', retryError);
+              reportError(retryError, 'DocumentMutation.saveMetadataChanges', 'Retry failed');
               throw retryError;
             }
             // Reload version from server after successful save
@@ -928,20 +978,20 @@ class DocumentMutationService {
         }
       }
       if (error.message?.includes('Version conflict')) {
-        console.log('[DocumentMutation] Version conflict detected, reloading document...');
+        logDocument('Version conflict detected, reloading document...');
         const loadResult = await this.loadDocument(this.currentProjectId);
         if (loadResult.success && loadResult.data) {
           this.currentVersion = loadResult.data.version;
-          console.log('[DocumentMutation] Reloaded version:', this.currentVersion);
+          logDocument('Reloaded version:', this.currentVersion);
           
           // Retry with correct version
-          console.log('[DocumentMutation] Retrying saveMetadataChanges with correct version');
+          logDocument('Retrying saveMetadataChanges with correct version');
           const { error: retryError } = await supabase.rpc('save_assets', {
             p_project_id: this.currentProjectId,
             p_assets: changes
           });
           if (retryError) {
-            console.error('[DocumentMutation] Retry failed:', retryError);
+            reportError(retryError, 'DocumentMutation.saveMetadataChanges', 'Retry failed');
             throw retryError;
           }
           this.currentVersion += 1;
@@ -1008,10 +1058,10 @@ class DocumentMutationService {
    * NOTE: Following MASTER_PLAN.md - simplified conflict resolution with state-based tracking
    */
   private async handleConflict(): Promise<boolean> {
-    console.log('[DocumentMutation] Resolving conflict...');
+    logDocument('Resolving conflict...');
 
     if (!this.currentProjectId) {
-      console.error('[DocumentMutation] No project loaded for conflict resolution');
+      reportError(new Error('No project loaded'), 'DocumentMutation.handleConflict', 'No project loaded for conflict resolution');
       return false;
     }
 
@@ -1019,7 +1069,7 @@ class DocumentMutationService {
       // 1. Reload server document
       const serverDoc = await this.loadDocument(this.currentProjectId);
       if (!serverDoc.success || !serverDoc.data) {
-        console.error('[DocumentMutation] Failed to load server document for conflict resolution');
+        reportError(new Error('Failed to load server document'), 'DocumentMutation.handleConflict', 'Failed to load server document for conflict resolution');
         return false;
       }
 
@@ -1033,7 +1083,7 @@ class DocumentMutationService {
 
       // 4. Log resolution
       const totalChanges = Object.keys(this.changedAssets).length + Object.keys(this.changedPositions).length;
-      console.log(`[DocumentMutation] Conflict resolved (server-wins): cleared ${totalChanges} local changes`);
+      logDocument(`Conflict resolved (server-wins): cleared ${totalChanges} local changes`);
 
       // 5. Notify user/system
       this.notifyConflictResolved({
@@ -1046,7 +1096,7 @@ class DocumentMutationService {
 
       return true;
     } catch (error) {
-      console.error('[DocumentMutation] Conflict resolution failed:', error);
+      reportError(error, 'DocumentMutation.handleConflict', 'Conflict resolution failed');
 
       // Fallback: simple server-wins
       if (this.lastServerDocument) {
@@ -1065,7 +1115,7 @@ class DocumentMutationService {
    * Apply server document to local stores
    */
   private async applyServerDocument(serverDoc: any): Promise<void> {
-    console.log('[DocumentMutation] Applying server document to local state');
+    logDocument('Applying server document to local state');
 
     // Update version
     this.currentVersion = serverDoc.version;
@@ -1078,7 +1128,7 @@ class DocumentMutationService {
     if (serverDoc.world_document?.backgrounds) {
       const backgroundStore = (await import('@/stores/backgroundStore')).useBackgroundStore.getState();
       const backgrounds = serverDoc.world_document.backgrounds;
-      console.log('[DocumentMutation] Restoring', Object.keys(backgrounds).length, 'backgrounds from server');
+      logDocument(`Restoring ${Object.keys(backgrounds).length} backgrounds from server`);
 
       Object.entries(backgrounds).forEach(([key, config]) => {
         // Don't trigger cloud sync when restoring from cloud (avoid loop)
@@ -1199,7 +1249,7 @@ class DocumentMutationService {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('[DocumentMutation] Query failed:', error);
+      reportError(error, 'DocumentMutation.query', 'Query failed');
       return [];
     }
   }
@@ -1237,7 +1287,7 @@ class DocumentMutationService {
   startAutoSave(projectId: string): void {
     this.setProjectId(projectId);
     // Auto-save is now handled by autosaveService which calls syncNow()
-    console.log('[DocumentMutation] Auto-save started for project:', projectId);
+    logDocument('Auto-save started for project:', projectId);
   }
 
   /**
@@ -1260,13 +1310,13 @@ class DocumentMutationService {
   setupAuthListener(): void {
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'TOKEN_REFRESHED') {
-        console.log('Auth token refreshed');
+        logDocument('Auth token refreshed');
       } else if (event === 'SIGNED_OUT') {
-        console.warn('User signed out, attempting to save unsaved changes before clearing');
+        logDocument('User signed out, attempting to save unsaved changes before clearing');
         try {
           await this.manualSave();
         } catch (error) {
-          console.error('Failed to save on sign-out:', error);
+          reportError(error, 'DocumentMutation.setupAuthListener', 'Failed to save on sign-out');
         }
         this.clearChanges();
       }
@@ -1308,7 +1358,7 @@ class DocumentMutationService {
     if (!forceRefresh) {
       const cached = this.backgroundsCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL_MS) {
-        console.log('[DocumentMutation] Loading backgrounds from RAM cache:', cacheKey);
+        logDocument('Loading backgrounds from RAM cache:', cacheKey);
         return cached.data;
       }
     }
@@ -1338,7 +1388,7 @@ class DocumentMutationService {
 
       return backgrounds;
     } catch (error) {
-      console.error('[DocumentMutation] Failed to load backgrounds:', error);
+      reportError(error, 'DocumentMutation.loadBackgrounds', 'Failed to load backgrounds');
       return null;
     }
   }
@@ -1367,7 +1417,7 @@ class DocumentMutationService {
       if (error) throw error;
       return !!data;
     } catch (error) {
-      console.error('[DocumentMutation] File registration failed:', error);
+      reportError(error, 'DocumentMutation.registerFile', 'File registration failed');
       return false;
     }
   }
@@ -1436,7 +1486,7 @@ class DocumentMutationService {
 
       return { assets, nextCursor, hasMore };
     } catch (error) {
-      console.error('[DocumentMutation] Paginated query failed:', error);
+      reportError(error, 'DocumentMutation.paginatedQuery', 'Paginated query failed');
       return { assets: [], nextCursor: null, hasMore: false };
     }
   }
@@ -1508,7 +1558,7 @@ class DocumentMutationService {
         loadedAssets: doc.loaded_assets
       };
     } catch (error) {
-      console.error('[DocumentMutation] Viewport load failed:', error);
+      reportError(error, 'DocumentMutation.loadDocumentViewport', 'Viewport load failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1549,7 +1599,7 @@ class DocumentMutationService {
 
       return { success: true, assets };
     } catch (error) {
-      console.error('[DocumentMutation] Load chunk failed:', error);
+      reportError(error, 'DocumentMutation.loadDocumentChunk', 'Load chunk failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1607,7 +1657,7 @@ class DocumentMutationService {
         }
       };
     } catch (error) {
-      console.error('[DocumentMutation] Get manifest failed:', error);
+      reportError(error, 'DocumentMutation.getManifest', 'Get manifest failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1648,7 +1698,7 @@ class DocumentMutationService {
         status: 'queued'
       };
     } catch (error) {
-      console.error('[DocumentMutation] Queue server operation failed:', error);
+      reportError(error, 'DocumentMutation.queueServerOperation', 'Queue server operation failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1691,7 +1741,7 @@ class DocumentMutationService {
         }))
       };
     } catch (error) {
-      console.error('[DocumentMutation] Get queue failed:', error);
+      reportError(error, 'DocumentMutation.getQueue', 'Get queue failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1745,7 +1795,7 @@ class DocumentMutationService {
         }))
       };
     } catch (error) {
-      console.error('[DocumentMutation] Query tree failed:', error);
+      reportError(error, 'DocumentMutation.queryTree', 'Query tree failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1790,7 +1840,7 @@ class DocumentMutationService {
 
       return { success: true, metrics, recommendedStrategy };
     } catch (error) {
-      console.error('[DocumentMutation] Get metrics failed:', error);
+      reportError(error, 'DocumentMutation.getMetrics', 'Get metrics failed');
       return { success: false, error: String(error) };
     }
   }
@@ -1856,7 +1906,7 @@ class DocumentMutationService {
   startCloudRetryPolling(): void {
     if (this.cloudRetryInterval) return; // Already running
     
-    console.log('[DocumentMutation] Starting cloud retry polling');
+    logDocument('Starting cloud retry polling');
     
     this.cloudRetryInterval = window.setInterval(async () => {
       if (!connectivityService.isOnline() || !this.currentProjectId) return;
@@ -1872,7 +1922,7 @@ class DocumentMutationService {
     if (this.cloudRetryInterval) {
       window.clearInterval(this.cloudRetryInterval);
       this.cloudRetryInterval = null;
-      console.log('[DocumentMutation] Stopped cloud retry polling');
+      logDocument('Stopped cloud retry polling');
     }
   }
 
@@ -1893,7 +1943,7 @@ class DocumentMutationService {
         const retryCount = retryInfo?.count || 0;
         
         if (retryCount >= CLOUD_RETRY_CONFIG.maxRetries) {
-          console.warn(`[DocumentMutation] Max retries exceeded for asset ${item.asset_id}, skipping`);
+          logDocument(`Max retries exceeded for asset ${item.asset_id}, skipping`);
           continue;
         }
 
@@ -1925,7 +1975,7 @@ class DocumentMutationService {
         }));
       }
     } catch (error) {
-      console.error('[DocumentMutation] Cloud retry queue processing failed:', error);
+      reportError(error, 'DocumentMutation.processCloudRetryQueue', 'Cloud retry queue processing failed');
     } finally {
       this.isCloudRetryRunning = false;
     }
@@ -1962,7 +2012,7 @@ class DocumentMutationService {
         };
       });
     } catch (error) {
-      console.error('[DocumentMutation] Get sync queue failed:', error);
+      reportError(error, 'DocumentMutation.getSyncQueue', 'Get sync queue failed');
       return [];
     }
   }
@@ -1994,7 +2044,7 @@ class DocumentMutationService {
         cloudError: item.cloud_error
       }));
     } catch (error) {
-      console.error('[DocumentMutation] Get failed uploads failed:', error);
+      reportError(error, 'DocumentMutation.getFailedUploads', 'Get failed uploads failed');
       return [];
     }
   }
@@ -2025,7 +2075,7 @@ class DocumentMutationService {
 
       return true;
     } catch (err) {
-      console.error('[DocumentMutation] Update cloud status failed:', err);
+      reportError(err, 'DocumentMutation.updateCloudStatus', 'Update cloud status failed');
       return false;
     }
   }
@@ -2066,7 +2116,7 @@ class DocumentMutationService {
         updatedAt: item.updated_at
       }));
     } catch (error) {
-      console.error('[DocumentMutation] Get uploads by status failed:', error);
+      reportError(error, 'DocumentMutation.getUploadsByStatus', 'Get uploads by status failed');
       return [];
     }
   }
@@ -2104,7 +2154,7 @@ class DocumentMutationService {
         lastFailedAt: row.last_failed_at
       };
     } catch (error) {
-      console.error('[DocumentMutation] Get cloud sync summary failed:', error);
+      reportError(error, 'DocumentMutation.getCloudSyncSummary', 'Get cloud sync summary failed');
       return null;
     }
   }
@@ -2122,7 +2172,7 @@ class DocumentMutationService {
     
     // Limit to 100 per batch
     if (assetIds.length > 100) {
-      console.warn('[DocumentMutation] Bulk update limited to 100 assets');
+      logDocument('Bulk update limited to 100 assets');
       assetIds = assetIds.slice(0, 100);
     }
 
@@ -2144,7 +2194,7 @@ class DocumentMutationService {
 
       return data || 0;
     } catch (err) {
-      console.error('[DocumentMutation] Bulk update cloud status failed:', err);
+      reportError(err, 'DocumentMutation.bulkUpdateCloudStatus', 'Bulk update cloud status failed');
       return 0;
     }
   }
@@ -2155,7 +2205,7 @@ class DocumentMutationService {
    */
   resetCloudRetryCount(assetId: string): void {
     this.cloudRetryCounts.delete(assetId);
-    console.log(`[DocumentMutation] Reset retry count for asset ${assetId}`);
+    logDocument(`Reset retry count for asset ${assetId}`);
   }
 
   /**

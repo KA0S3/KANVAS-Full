@@ -9,6 +9,7 @@ import { updateQuotaBasedOnPlan } from './cloudStore';
 import { ownerKeyService } from '@/services/ownerKeyService';
 import type { User } from '@supabase/supabase-js';
 import { performanceMonitor } from '@/utils/performanceMonitor';
+import { logAuth, reportError } from '@/utils/logger';
 
 type Plan = 'guest' | 'free' | 'pro' | 'lifetime' | 'owner';
 
@@ -101,7 +102,7 @@ export const useAuthStore = create<AuthStore>()(
           if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed.state?._authStateInitialized) {
-              console.log('[authStore] Clearing old persisted _authStateInitialized');
+              logAuth('Clearing old persisted _authStateInitialized');
               delete parsed.state._authStateInitialized;
               localStorage.setItem('kanvas-auth', JSON.stringify(parsed));
             }
@@ -112,16 +113,16 @@ export const useAuthStore = create<AuthStore>()(
 
         // Prevent multiple initializations
         if (get()._authStateInitialized) {
-          console.log('[authStore] Auth store already initialized');
+          logAuth('Auth store already initialized');
           return;
         }
 
-        console.log('[authStore] Initializing auth store');
+        logAuth('Initializing auth store');
         set({ _authStateInitialized: true, loading: true });
         
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
           async (event, session) => {
-            console.log('[authStore] Auth state changed:', event, session?.user?.email);
+            logAuth('Auth state changed:', { event, email: session?.user?.email });
             
             // Debounce rapid auth state changes
             const now = Date.now();
@@ -129,7 +130,7 @@ export const useAuthStore = create<AuthStore>()(
             const debounceTime = 200; // 200ms debounce
             
             if (now - lastChange < debounceTime) {
-              console.log('[authStore] Auth state change debounced');
+              logAuth('Auth state change debounced');
               return;
             }
             
@@ -198,7 +199,7 @@ export const useAuthStore = create<AuthStore>()(
         const sessionPromise = supabase.auth.getSession();
         
         sessionPromise.then(async ({ data: { session } }) => {
-          console.log('[authStore] Initial session resolved:', session?.user?.email);
+          logAuth('Initial session resolved:', { email: session?.user?.email });
           if (session?.user) {
             set({
               user: session.user,
@@ -227,7 +228,7 @@ export const useAuthStore = create<AuthStore>()(
             });
           }
         }).catch((error) => {
-          console.error('[authStore] Session check failed:', error);
+          reportError(error, 'authStore.sessionCheck', 'Session check failed');
           // Ensure loading is set to false even on error
           set({
             user: null,
@@ -251,7 +252,7 @@ export const useAuthStore = create<AuthStore>()(
       // Sign in method - OPTIMIZED
       signIn: async (email: string, password: string) => {
         try {
-          console.log('[authStore] Starting sign in process for:', email);
+          logAuth('Starting sign in process for:', email);
           
           // OPTIMIZED: Skip provider detection for initial attempt, only check on failure
           const { data, error } = await supabase.auth.signInWithPassword({
@@ -260,7 +261,7 @@ export const useAuthStore = create<AuthStore>()(
           });
 
           if (error) {
-            console.error('Sign in error:', error);
+            reportError(error, 'authStore.signIn', 'Sign in error');
             
             // Only check for provider conflicts if it's likely to be a provider issue
             if (error.message === 'Invalid login credentials') {
@@ -277,11 +278,11 @@ export const useAuthStore = create<AuthStore>()(
             return { error: error.message };
           }
 
-          console.log('[authStore] Sign in successful');
+          logAuth('Sign in successful');
           // The onAuthStateChange listener will handle updating the state
           return { success: true };
         } catch (error) {
-          console.error('Unexpected sign in error:', error);
+          reportError(error, 'authStore.signIn', 'Unexpected sign in error');
           return { error: 'An unexpected error occurred during sign in' };
         }
       },
@@ -297,7 +298,7 @@ export const useAuthStore = create<AuthStore>()(
           });
 
           if (error) {
-            console.error('Google sign in error:', error);
+            reportError(error, 'authStore.signInWithGoogle', 'Google sign in error');
             return { error: error.message };
           }
 
@@ -305,7 +306,7 @@ export const useAuthStore = create<AuthStore>()(
           // The onAuthStateChange listener will handle updating the state
           return { success: true };
         } catch (error) {
-          console.error('Unexpected Google sign in error:', error);
+          reportError(error, 'authStore.signInWithGoogle', 'Unexpected Google sign in error');
           return { error: 'An unexpected error occurred during Google sign in' };
         }
       },
@@ -313,13 +314,13 @@ export const useAuthStore = create<AuthStore>()(
       // Sign up method
       signUp: async (email: string, password: string) => {
         try {
-          console.log('[authStore] Starting sign up process for:', email);
+          logAuth('Starting sign up process for:', email);
           
           // First check if user already exists
           const userCheck = await get().checkUserExists(email);
           
           if (userCheck.exists) {
-            console.log('[authStore] User already exists with providers:', userCheck.providers);
+            logAuth('User already exists with providers:', userCheck.providers);
             
             if (userCheck.providers.includes('google') && userCheck.providers.includes('email')) {
               return { 
@@ -354,7 +355,7 @@ export const useAuthStore = create<AuthStore>()(
           });
 
           if (error) {
-            console.error('Sign up error:', error);
+            reportError(error, 'authStore.signUp', 'Sign up error');
             
             // Handle specific Supabase errors that might indicate user exists
             if (error.message.includes('user_already_exists') || 
@@ -381,29 +382,29 @@ export const useAuthStore = create<AuthStore>()(
             return { error: error.message };
           }
 
-          console.log('[authStore] Sign up response received:', { 
+          logAuth('Sign up response received:', { 
             user: !!data.user, 
             emailConfirmed: !!data.user?.email_confirmed_at 
           });
 
           // Handle different sign up scenarios
           if (data.user && !data.user.email_confirmed_at) {
-            console.log('[authStore] User created, email confirmation required');
+            logAuth('User created, email confirmation required');
             set({ isVerificationPending: true, verificationEmail: email });
             return { success: true };
           } else if (data.user && data.user.email_confirmed_at) {
-            console.log('[authStore] User created and already confirmed');
+            logAuth('User created and already confirmed');
             // User is already confirmed (might happen if email confirmation is disabled)
             return { success: true };
           } else {
-            console.log('[authStore] No user object returned, likely email confirmation required');
+            logAuth('No user object returned, likely email confirmation required');
             // This is the "fake success" case - Supabase returns success but no user object
             // when email confirmation is enabled and user needs to confirm
             set({ isVerificationPending: true, verificationEmail: email });
             return { success: true };
           }
         } catch (error) {
-          console.error('Unexpected sign up error:', error);
+          reportError(error, 'authStore.signUp', 'Unexpected sign up error');
           return { error: 'An unexpected error occurred during sign up' };
         }
       },
@@ -411,13 +412,13 @@ export const useAuthStore = create<AuthStore>()(
       // Sign out method - IMPROVED
       signOut: async () => {
         try {
-          console.log('[authStore] Starting sign out process');
+          logAuth('Starting sign out process');
           
           // Sign out from Supabase first - this will trigger the auth state change listener
           const { error } = await supabase.auth.signOut();
           
           if (error) {
-            console.error('Supabase sign out error:', error);
+            reportError(error, 'authStore.signOut', 'Supabase sign out error');
             // Continue with cleanup even if Supabase sign out fails
           }
           
@@ -438,14 +439,14 @@ export const useAuthStore = create<AuthStore>()(
             // Clear our auth store persisted data
             localStorage.removeItem('kanvas-auth');
             
-            console.log('[authStore] Cleared all session storage');
+            logAuth('Cleared all session storage');
           } catch (clearError) {
-            console.warn('[authStore] Error clearing session storage:', clearError);
+            reportError(clearError, 'authStore.signOut', 'Error clearing session storage');
           }
           
-          console.log('[authStore] Sign out completed successfully');
+          logAuth('Sign out completed successfully');
         } catch (error) {
-          console.error('Unexpected sign out error:', error);
+          reportError(error, 'authStore.signOut', 'Unexpected sign out error');
           // Ensure state is cleared even on unexpected errors
           set({
             user: null,
@@ -475,19 +476,19 @@ export const useAuthStore = create<AuthStore>()(
         // Prevent duplicate fetches for same user
         const lastFetched = get()._lastFetchedUserId;
         if (lastFetched === userId && get().planLoading) {
-          console.log(`[authStore] Skipping duplicate fetch for user: ${userId}`);
+          logAuth(`Skipping duplicate fetch for user: ${userId}`);
           return;
         }
 
         try {
-          console.log(`[authStore] Fetching plan for user: ${userId}`);
+          logAuth(`Fetching plan for user: ${userId}`);
           set({ planLoading: true, _lastFetchedUserId: userId });
           
           // OWNER CHECK: Immediate owner fallback - Check if this is the owner email first
           const ownerEmail = import.meta.env?.VITE_OWNER_EMAIL;
           const currentUser = get().user;
           if (currentUser?.email === ownerEmail) {
-            console.log('[authStore] IMMEDIATE OWNER FALLBACK - Setting owner plan');
+            logAuth('IMMEDIATE OWNER FALLBACK - Setting owner plan');
             set({ plan: 'owner', planLoading: false });
             await get().updateEffectiveLimits();
             return;
@@ -514,11 +515,11 @@ export const useAuthStore = create<AuthStore>()(
 
                 if (!error && data) {
                   const userPlan = migrateLegacyPlanId(data?.plan_type as Plan || 'free') as Plan;
-                  console.log(`[authStore] Direct query success: ${userPlan}`);
+                  logAuth(`Direct query success: ${userPlan}`);
                   return userPlan;
                 }
               } catch (err) {
-                console.log('[authStore] Direct query failed:', err);
+                logAuth('Direct query failed:', err);
               }
 
               // Method 2: Auth metadata fallback
@@ -527,11 +528,11 @@ export const useAuthStore = create<AuthStore>()(
                 const metadataPlan = user?.user_metadata?.plan_type || user?.app_metadata?.plan_type;
                 if (metadataPlan) {
                   const userPlan = migrateLegacyPlanId(metadataPlan as Plan) as Plan;
-                  console.log(`[authStore] Metadata fallback success: ${userPlan}`);
+                  logAuth(`Metadata fallback success: ${userPlan}`);
                   return userPlan;
                 }
               } catch (err) {
-                console.log('[authStore] Metadata fallback failed:', err);
+                logAuth('Metadata fallback failed:', err);
               }
 
               // Method 3: Check if user has active licenses as fallback
@@ -555,11 +556,11 @@ export const useAuthStore = create<AuthStore>()(
                     'custom': 'lifetime'
                   };
                   const userPlan = licenseToPlanMap[licenseData.license_type] || 'free';
-                  console.log(`[authStore] License fallback success: ${userPlan}`);
+                  logAuth(`License fallback success: ${userPlan}`);
                   return userPlan;
                 }
               } catch (err) {
-                console.log('[authStore] License fallback failed:', err);
+                logAuth('License fallback failed:', err);
               }
 
               return null;
@@ -574,16 +575,16 @@ export const useAuthStore = create<AuthStore>()(
               return;
             }
           } catch (err) {
-            console.log('[authStore] All plan detection methods failed or timed out');
+            logAuth('All plan detection methods failed or timed out');
           }
 
           // Final fallback
-          console.log('[authStore] Using default plan: guest');
+          logAuth('Using default plan: guest');
           set({ plan: 'guest', planLoading: false });
           await get().updateEffectiveLimits();
           
         } catch (error) {
-          console.error('[authStore] Unexpected error fetching user plan:', error);
+          reportError(error, 'authStore.fetchUserPlan', 'Unexpected error fetching user plan');
           set({ plan: 'guest', planLoading: false });
           await get().updateEffectiveLimits();
         }
@@ -611,7 +612,7 @@ export const useAuthStore = create<AuthStore>()(
             return { error: result.error || 'Invalid owner key' };
           }
         } catch (error) {
-          console.error('Owner key validation error:', error);
+          reportError(error, 'authStore.validateOwnerKey', 'Owner key validation error');
           set({ ownerKeyInfo: null });
           await get().updateEffectiveLimits();
           return { error: 'Owner key validation failed' };
@@ -638,7 +639,7 @@ export const useAuthStore = create<AuthStore>()(
             .maybeSingle();
 
           if (error) {
-            console.warn('Failed to fetch user license:', error);
+            logAuth('Failed to fetch user license:', error);
             set({ licenseInfo: null });
             await get().updateEffectiveLimits();
             return;
@@ -647,7 +648,7 @@ export const useAuthStore = create<AuthStore>()(
           set({ licenseInfo: data });
           await get().updateEffectiveLimits();
         } catch (error) {
-          console.warn('Unexpected error fetching user license:', error);
+          logAuth('Unexpected error fetching user license:', error);
           set({ licenseInfo: null });
           await get().updateEffectiveLimits();
         }
@@ -666,7 +667,7 @@ export const useAuthStore = create<AuthStore>()(
             .limit(1);
 
           if (error) {
-            console.warn('Failed to fetch owner keys:', error);
+            logAuth('Failed to fetch owner keys:', error);
             set({ ownerKeyInfo: null });
             await get().updateEffectiveLimits();
             return;
@@ -686,7 +687,7 @@ export const useAuthStore = create<AuthStore>()(
           }
           await get().updateEffectiveLimits();
         } catch (error) {
-          console.warn('Unexpected error fetching owner keys:', error);
+          logAuth('Unexpected error fetching owner keys:', error);
           set({ ownerKeyInfo: null });
           await get().updateEffectiveLimits();
         }
@@ -715,7 +716,7 @@ export const useAuthStore = create<AuthStore>()(
     // OWNER CHECK: Immediate owner detection before server call
     const ownerEmail = import.meta.env?.VITE_OWNER_EMAIL;
     if (user.email === ownerEmail) {
-      console.log('[authStore] 🚀 IMMEDIATE OWNER DETECTION - Setting owner limits');
+      logAuth('🚀 IMMEDIATE OWNER DETECTION - Setting owner limits');
       const ownerLimits: EffectiveLimits = {
         quotaBytes: 10 * 1024 * 1024 * 1024, // 10GB
         maxBooks: -1, // Unlimited books
@@ -738,9 +739,9 @@ export const useAuthStore = create<AuthStore>()(
       // Update cloudStore quota based on new effective limits
       updateQuotaBasedOnPlan();
       
-      console.log('[authStore] Updated effective limits from server:', limits);
+      logAuth('Updated effective limits from server:', limits);
     } catch (error) {
-      console.error('[authStore] Failed to update effective limits:', error);
+      reportError(error, 'authStore.updateEffectiveLimits', 'Failed to update effective limits');
       
       // Fallback to client-side computation if server fails
       const { plan, ownerKeyInfo, licenseInfo } = get();
@@ -774,11 +775,11 @@ export const useAuthStore = create<AuthStore>()(
     const { user } = get();
     
     if (!user) {
-      console.warn('[authStore] Cannot refresh user data: no authenticated user');
+      logAuth('Cannot refresh user data: no authenticated user');
       return;
     }
 
-    console.log('[authStore] Refreshing user data for real-time updates');
+    logAuth('Refreshing user data for real-time updates');
     
     try {
       // Refresh all user data in parallel
@@ -789,9 +790,9 @@ export const useAuthStore = create<AuthStore>()(
         get().updateEffectiveLimits()
       ]);
       
-      console.log('[authStore] Successfully refreshed user data');
+      logAuth('Successfully refreshed user data');
     } catch (error) {
-      console.error('[authStore] Failed to refresh user data:', error);
+      reportError(error, 'authStore.refreshUserData', 'Failed to refresh user data');
     }
   },
 
@@ -805,7 +806,7 @@ export const useAuthStore = create<AuthStore>()(
 
   // Debug method to clear all auth data
   clearAllAuthData: () => {
-    console.log('[authStore] Clearing all auth data (debug method)');
+    logAuth('Clearing all auth data (debug method)');
     
     // Clear all Supabase session storage first
     try {
@@ -821,7 +822,7 @@ export const useAuthStore = create<AuthStore>()(
         sessionStorage.removeItem(key);
       });
     } catch (clearError) {
-      console.warn('[authStore] Error clearing session storage in debug method:', clearError);
+      reportError(clearError, 'authStore.clearAllAuthData', 'Error clearing session storage in debug method');
     }
     
     set({
@@ -852,42 +853,36 @@ export const useAuthStore = create<AuthStore>()(
       // Check cache first
       const cached = get()._userExistsCache.get(email);
       if (cached && now - cached.timestamp < CACHE_TTL) {
-        console.log('[authStore] Using cached user existence check');
+        logAuth('Using cached user existence check');
         return cached;
       }
 
-      console.log('[authStore] Checking if user exists:', email);
+      logAuth('Checking if user exists:', email);
 
       // Only check current session - no extra DB calls
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user?.email === email) {
-        console.log('[authStore] User found in current session');
+        logAuth('User found in current session');
         const providers = Array.isArray(user.app_metadata?.provider)
           ? user.app_metadata.provider
           : user.app_metadata?.provider
             ? [user.app_metadata.provider]
-            : ['email'];
-
-        const result = {
-          exists: true,
-          providers,
-          userId: user.id
-        };
-
-        // Cache the result
+            : [];
+        
+        const result = { exists: true, providers, userId: user.id };
         get()._userExistsCache.set(email, { ...result, timestamp: now });
         return result;
       }
 
       // Can't determine without extra DB calls - assume doesn't exist to allow sign up
-      console.log('[authStore] User not in current session, assuming doesn\'t exist');
+      logAuth('User not in current session, assuming doesn\'t exist');
       const result = { exists: false, providers: [] };
       get()._userExistsCache.set(email, { ...result, timestamp: now });
       return result;
 
     } catch (error) {
-      console.error('[authStore] Error checking user existence:', error);
+      reportError(error, 'authStore.checkUserExists', 'Error checking user existence');
       return { exists: false, providers: [] };
     }
   },
@@ -895,7 +890,7 @@ export const useAuthStore = create<AuthStore>()(
   // Detect which auth provider a user can/should use
   detectAuthProvider: async (email: string) => {
     try {
-      console.log('[authStore] Detecting auth provider for:', email);
+      logAuth('Detecting auth provider for:', email);
       
       const userCheck = await get().checkUserExists(email);
       
@@ -911,7 +906,7 @@ export const useAuthStore = create<AuthStore>()(
       const canUseEmail = providers.includes('email');
       const canUseGoogle = providers.includes('google');
       
-      console.log('[authStore] Provider detection result:', {
+      logAuth('Provider detection result:', {
         providers,
         canUseEmail,
         canUseGoogle
@@ -933,7 +928,7 @@ export const useAuthStore = create<AuthStore>()(
       };
       
     } catch (error) {
-      console.error('[authStore] Error detecting auth provider:', error);
+      reportError(error, 'authStore.detectAuthProvider', 'Error detecting auth provider');
       return { 
         provider: null, 
         canUseEmail: true, 
@@ -945,7 +940,7 @@ export const useAuthStore = create<AuthStore>()(
   // Link password to existing Google user
   linkPasswordToGoogleUser: async (email: string, password: string) => {
     try {
-      console.log('[authStore] Attempting to link password to Google user:', email);
+      logAuth('Attempting to link password to Google user:', email);
       
       // Method 1: Try to update the user's password directly
       // This requires the user to be authenticated first, so we'll use password reset
@@ -955,15 +950,15 @@ export const useAuthStore = create<AuthStore>()(
       });
       
       if (error) {
-        console.error('[authStore] Error sending password reset:', error);
+        reportError(error, 'authStore.linkPasswordToGoogleUser', 'Error sending password reset');
         return { error: error.message };
       }
       
-      console.log('[authStore] Password reset sent successfully');
+      logAuth('Password reset sent successfully');
       return { success: true, message: 'Password setup link sent to your email! Check your inbox to continue.' };
       
     } catch (error) {
-      console.error('[authStore] Unexpected error linking password:', error);
+      reportError(error, 'authStore.linkPasswordToGoogleUser', 'Unexpected error linking password');
       return { error: 'An unexpected error occurred while setting up password access' };
     }
   },
@@ -971,7 +966,7 @@ export const useAuthStore = create<AuthStore>()(
   // Enhanced method to create password for Google users
   createPasswordForGoogleUser: async (email: string, newPassword: string, resetToken?: string) => {
     try {
-      console.log('[authStore] Creating password for Google user:', email);
+      logAuth('Creating password for Google user:', email);
       
       // This would typically be called from the reset password flow
       // For now, we'll use the reset password approach
@@ -981,15 +976,15 @@ export const useAuthStore = create<AuthStore>()(
       });
       
       if (error) {
-        console.error('[authStore] Error updating password:', error);
+        reportError(error, 'authStore.createPasswordForGoogleUser', 'Error updating password');
         return { error: error.message };
       }
       
-      console.log('[authStore] Password created successfully');
+      logAuth('Password created successfully');
       return { success: true, message: 'Password created successfully! You can now sign in with either Google or your password.' };
       
     } catch (error) {
-      console.error('[authStore] Unexpected error creating password:', error);
+      reportError(error, 'authStore.createPasswordForGoogleUser', 'Unexpected error creating password');
       return { error: 'An unexpected error occurred while creating your password' };
     }
   },
@@ -997,33 +992,33 @@ export const useAuthStore = create<AuthStore>()(
   // Data migration methods
   checkForMigrationConflicts: async (userId: string) => {
     try {
-      console.log('[authStore] Checking for migration conflicts for user:', userId);
+      logAuth('Checking for migration conflicts for user:', userId);
       const conflict = await dataMigrationService.checkMigrationConflicts(userId);
       return conflict;
     } catch (error) {
-      console.error('[authStore] Error checking migration conflicts:', error);
+      reportError(error, 'authStore.checkForMigrationConflicts', 'Error checking migration conflicts');
       return null;
     }
   },
 
   shouldShowGuestImport: async () => {
     try {
-      console.log('[authStore] Checking if guest import should be shown');
+      logAuth('Checking if guest import should be shown');
       const shouldShow = await dataMigrationService.shouldMigrateLocalData();
       return shouldShow;
     } catch (error) {
-      console.error('[authStore] Error checking guest import:', error);
+      reportError(error, 'authStore.shouldShowGuestImport', 'Error checking guest import');
       return false;
     }
   },
 
   executeDataMigration: async (strategy: any, userId: string) => {
     try {
-      console.log('[authStore] Executing data migration with strategy:', strategy);
+      logAuth('Executing data migration with strategy:', strategy);
       const result = await dataMigrationService.executeMigration(strategy, userId);
       return result;
     } catch (error) {
-      console.error('[authStore] Error executing data migration:', error);
+      reportError(error, 'authStore.executeDataMigration', 'Error executing data migration');
       return {
         success: false,
         strategy,

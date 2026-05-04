@@ -21,8 +21,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[ErrorBoundary] Uncaught error:', error, errorInfo);
-    // Could send to error tracking service here
-    // errorReportingService.captureException(error, { extra: errorInfo });
+    
+    // Basic error context for debugging
+    const errorContext = {
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+      componentStack: errorInfo.componentStack,
+    };
+    
+    console.error('[ErrorBoundary] Error context:', errorContext);
   }
 
   public render() {

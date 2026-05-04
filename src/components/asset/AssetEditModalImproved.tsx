@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
 import { X, Save, Upload, ChevronDown, ChevronRight } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useAssetStore } from '@/stores/assetStore';
 import { useTagStore } from '@/stores/tagStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 import {
   Dialog,
   DialogContent,
@@ -31,6 +41,7 @@ import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager
 import { BackgroundMapEditor } from './BackgroundMapEditor';
 import type { Asset } from '@/components/AssetItem';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
+import { assetSchema, type AssetFormData } from '@/utils/validationSchemas';
 
 interface AssetEditModalProps {
   isOpen: boolean;
@@ -71,18 +82,25 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     background: false,
   });
   
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    thumbnail: '',
-    tags: [] as string[],
-    width: 200,
-    height: 150,
-    x: 0,
-    y: 0,
-    type: 'other',
+  const form = useForm<AssetFormData>({
+    resolver: zodResolver(assetSchema),
+    defaultValues: {
+      name: '',
+      description: '',
+      type: 'other' as const,
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 150,
+      tags: [],
+      thumbnail: '',
+      background: '',
+      content: '',
+      customFields: [],
+      customFieldValues: []
+    }
   });
-  
+
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [customFieldValues, setCustomFieldValues] = useState<CustomFieldValue[]>([]);
   const [viewportDisplaySettings, setViewportDisplaySettings] = useState<ViewportDisplaySettings>({
@@ -104,16 +122,20 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     
     if (asset) {
       console.log('📝 AssetEditModal: Setting form data from existing asset');
-      setFormData({
+      form.reset({
         name: asset.name || '',
         description: asset.description || '',
-        thumbnail: asset.thumbnail || '',
-        tags: asset.tags || [],
-        width: asset.width || 200,
-        height: asset.height || 150,
+        type: asset.type || 'other',
         x: asset.x || 0,
         y: asset.y || 0,
-        type: asset.type || 'other',
+        width: asset.width || 200,
+        height: asset.height || 150,
+        tags: asset.tags || [],
+        thumbnail: asset.thumbnail || '',
+        background: asset.background || '',
+        content: asset.content || '',
+        customFields: asset.customFields || [],
+        customFieldValues: asset.customFieldValues || []
       });
       setCustomFields(asset.customFields || []);
       setCustomFieldValues(asset.customFieldValues || []);
@@ -126,16 +148,20 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     } else if (isNewAsset) {
       // Initialize with initialData for new asset
       console.log('📝 AssetEditModal: Setting form data from initialData for new asset');
-      setFormData({
+      form.reset({
         name: initialData?.name || '',
         description: initialData?.description || '',
-        thumbnail: '',
-        tags: initialData?.tags || [],
-        width: initialData?.width || 200,
-        height: initialData?.height || 150,
+        type: (initialData?.type as any) || 'other',
         x: initialData?.x || 0,
         y: initialData?.y || 0,
-        type: initialData?.type || 'other',
+        width: initialData?.width || 200,
+        height: initialData?.height || 150,
+        tags: initialData?.tags || [],
+        thumbnail: '',
+        background: '',
+        content: '',
+        customFields: initialData?.customFields || [],
+        customFieldValues: initialData?.customFieldValues || []
       });
       setCustomFields(initialData?.customFields || []);
       setCustomFieldValues(initialData?.customFieldValues || []);
@@ -146,22 +172,26 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
         portraitBlur: 0,
       });
     }
-  }, [asset, isNewAsset, initialData]);
+  }, [asset, isNewAsset, initialData, form]);
 
   // Refresh asset data when background is saved
   useEffect(() => {
     if (refreshTrigger > 0 && asset) {
       // Re-sync form data with updated asset data
-      setFormData({
+      form.reset({
         name: asset.name || '',
         description: asset.description || '',
-        thumbnail: asset.thumbnail || '',
-        tags: asset.tags || [],
-        width: asset.width || 200,
-        height: asset.height || 150,
+        type: asset.type || 'other',
         x: asset.x || 0,
         y: asset.y || 0,
-        type: asset.type || 'other',
+        width: asset.width || 200,
+        height: asset.height || 150,
+        tags: asset.tags || [],
+        thumbnail: asset.thumbnail || '',
+        background: asset.background || '',
+        content: asset.content || '',
+        customFields: asset.customFields || [],
+        customFieldValues: asset.customFieldValues || []
       });
       setCustomFields(asset.customFields || []);
       setCustomFieldValues(asset.customFieldValues || []);
@@ -172,16 +202,18 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
         portraitBlur: 0,
       });
     }
-  }, [refreshTrigger, asset]);
+  }, [refreshTrigger, asset, form]);
 
   // Check if there are unsaved changes
   const hasUnsavedChanges = () => {
+    const formValues = form.getValues();
+    
     if (isNewAsset) {
       // For new assets, check if any field has been filled
-      return formData.name.trim() || 
-             formData.description.trim() || 
-             formData.thumbnail || 
-             formData.tags.length > 0 ||
+      return formValues.name.trim() || 
+             formValues.description.trim() || 
+             formValues.thumbnail || 
+             formValues.tags.length > 0 ||
              customFields.length > 0 ||
              customFieldValues.length > 0;
     }
@@ -189,14 +221,14 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     // For existing assets, compare with original data
     if (!asset) return false;
     
-    return formData.name !== (asset.name || '') ||
-           formData.description !== (asset.description || '') ||
-           formData.thumbnail !== (asset.thumbnail || '') ||
-           formData.width !== (asset.width || 200) ||
-           formData.height !== (asset.height || 150) ||
-           formData.x !== (asset.x || 0) ||
-           formData.y !== (asset.y || 0) ||
-           JSON.stringify(formData.tags.sort()) !== JSON.stringify((asset.tags || []).sort()) ||
+    return formValues.name !== (asset.name || '') ||
+           formValues.description !== (asset.description || '') ||
+           formValues.thumbnail !== (asset.thumbnail || '') ||
+           formValues.width !== (asset.width || 200) ||
+           formValues.height !== (asset.height || 150) ||
+           formValues.x !== (asset.x || 0) ||
+           formValues.y !== (asset.y || 0) ||
+           JSON.stringify(formValues.tags.sort()) !== JSON.stringify((asset.tags || []).sort()) ||
            JSON.stringify(customFields) !== JSON.stringify(asset.customFields || []) ||
            JSON.stringify(customFieldValues) !== JSON.stringify(asset.customFieldValues || []) ||
            JSON.stringify(viewportDisplaySettings) !== JSON.stringify(asset.viewportDisplaySettings || {});
@@ -224,46 +256,49 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       console.log('💾 AssetEditModal: handleSave called');
       console.log('💾 AssetEditModal: isNewAsset:', isNewAsset);
       console.log('💾 AssetEditModal: initialData:', initialData);
-      console.log('💾 AssetEditModal: formData:', formData);
       
-      const assetData = {
-        ...formData,
-        type: formData.type as 'other' | 'image' | 'document' | 'video' | 'audio' | 'code',
-        customFields,
-        customFieldValues,
-        viewportDisplaySettings,
-      };
-
-      if (isNewAsset || !asset) {
-        // Create new asset
-        if (onCreateAsset) {
-          const creationOptions = {
-            name: formData.name,
-            description: formData.description,
-            type: formData.type as 'other' | 'image' | 'document' | 'video' | 'audio' | 'code',
-            x: formData.x,
-            y: formData.y,
-            width: formData.width,
-            height: formData.height,
-            customFields,
-            customFieldValues,
-            tags: formData.tags,
-          };
-          
-          console.log('💾 AssetEditModal: Calling onCreateAsset with options:', creationOptions);
-          onCreateAsset(creationOptions);
-        }
-        onClose();
-        return;
-      } else {
-        // Update existing asset
-        updateAsset(asset.id, assetData);
+      // Validate form before saving
+      form.handleSubmit((data) => {
+        console.log('💾 AssetEditModal: Validated form data:', data);
         
-        // Tag associations are already handled in real-time via handleTagToggle
-        // No need to re-process them here to avoid duplicates
-      }
-      
-      onClose();
+        const assetData = {
+          ...data,
+          customFields,
+          customFieldValues,
+          viewportDisplaySettings,
+        };
+
+        if (isNewAsset || !asset) {
+          // Create new asset
+          if (onCreateAsset) {
+            const creationOptions = {
+              name: data.name,
+              description: data.description,
+              type: data.type,
+              x: data.x,
+              y: data.y,
+              width: data.width,
+              height: data.height,
+              customFields,
+              customFieldValues,
+              tags: data.tags,
+            };
+            
+            console.log('💾 AssetEditModal: Calling onCreateAsset with options:', creationOptions);
+            onCreateAsset(creationOptions);
+          }
+          onClose();
+          return;
+        } else {
+          // Update existing asset
+          updateAsset(asset.id, assetData);
+          
+          // Tag associations are already handled in real-time via handleTagToggle
+          // No need to re-process them here to avoid duplicates
+        }
+        
+        onClose();
+      })();
     } catch (error) {
       console.error('Failed to save asset:', error);
     }
@@ -275,24 +310,24 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
-        setFormData(prev => ({ ...prev, [field]: result }));
+        form.setValue(field, result);
       };
       reader.readAsDataURL(file);
     }
   };
 
   const handleTagToggle = (tagId: string) => {
-    const isCurrentlySelected = formData.tags.includes(tagId);
+    const currentTags = form.getValues('tags') || [];
+    const isCurrentlySelected = currentTags.includes(tagId);
     
     // Update form state immediately
-    setFormData(prev => ({
-      ...prev,
-      tags: isCurrentlySelected
-        ? prev.tags.filter(id => id !== tagId)
-        : [...prev.tags, tagId]
-    }));
+    const newTags = isCurrentlySelected
+      ? currentTags.filter(id => id !== tagId)
+      : [...currentTags, tagId];
     
-    // For existing assets, also update the tag store immediately for visual feedback
+    form.setValue('tags', newTags);
+    
+    // For existing assets, also update tag store immediately for visual feedback
     if (asset && !isNewAsset) {
       if (isCurrentlySelected) {
         removeTagFromAsset(asset.id, tagId);
@@ -360,61 +395,80 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                 Basic Information
               </h3>
               
-              <div className="space-y-4">
-                {/* Name */}
-                <div className="space-y-2">
-                  <Label htmlFor="asset-name">Name *</Label>
-                  <Input
-                    id="asset-name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="Enter asset name..."
-                    className="bg-glass/50 border-glass-border/40"
+              <Form {...form}>
+                <div className="space-y-4">
+                  {/* Name */}
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel htmlFor="asset-name">Name *</FormLabel>
+                        <FormControl>
+                          <Input
+                            id="asset-name"
+                            placeholder="Enter asset name..."
+                            className="bg-glass/50 border-glass-border/40"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
                   />
-                </div>
-                
-                                
-                {/* Description */}
-                <div className="space-y-2">
-                  <Label htmlFor="asset-description">Description</Label>
-                  <Textarea
-                    id="asset-description"
-                    value={formData.description}
-                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Enter asset description..."
-                    rows={4}
-                    className="bg-glass/50 border-glass-border/40"
+                  
+                  {/* Description */}
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel htmlFor="asset-description">Description</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            id="asset-description"
+                            placeholder="Enter asset description..."
+                            rows={4}
+                            className="bg-glass/50 border-glass-border/40"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
                   />
-                </div>
-                
-                {/* Tags */}
-                <div className="space-y-2">
-                  <Label htmlFor="asset-tags">Tags</Label>
-                  <div className="flex flex-wrap gap-2 p-3 border border-glass-border/40 rounded-md bg-glass/30 min-h-[44px]">
-                    {availableTags.map((tag) => {
-                      // Ensure tag has a valid color, fallback to gray if not
-                      const tagColor = tag.color && tag.color.trim() !== '' ? tag.color : '#6b7280';
-                      
-                      return (
-                        <Badge
-                          key={tag.id}
-                          variant={formData.tags.includes(tag.id) ? "default" : "outline"}
-                          className="cursor-pointer"
-                          style={{ 
-                            backgroundColor: formData.tags.includes(tag.id) ? tagColor : 'transparent',
-                            borderColor: tagColor,
-                            color: formData.tags.includes(tag.id) ? 'white' : tagColor,
-                            borderWidth: '2px'
-                          }}
-                          onClick={() => handleTagToggle(tag.id)}
-                        >
-                          {tag.name}
-                        </Badge>
-                      );
-                    })}
+                  
+                  {/* Tags */}
+                  <div className="space-y-2">
+                    <Label htmlFor="asset-tags">Tags</Label>
+                    <div className="flex flex-wrap gap-2 p-3 border border-glass-border/40 rounded-md bg-glass/30 min-h-[44px]">
+                      {availableTags.map((tag) => {
+                        // Ensure tag has a valid color, fallback to gray if not
+                        const tagColor = tag.color && tag.color.trim() !== '' ? tag.color : '#6b7280';
+                        const currentTags = form.getValues('tags') || [];
+                        const isSelected = currentTags.includes(tag.id);
+                        
+                        return (
+                          <Badge
+                            key={tag.id}
+                            variant={isSelected ? "default" : "outline"}
+                            className="cursor-pointer"
+                            style={{ 
+                              backgroundColor: isSelected ? tagColor : 'transparent',
+                              borderColor: tagColor,
+                              color: isSelected ? 'white' : tagColor,
+                              borderWidth: '2px'
+                            }}
+                            onClick={() => handleTagToggle(tag.id)}
+                          >
+                            {tag.name}
+                          </Badge>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </Form>
             </div>
 
             {/* Right Column - Images */}
@@ -428,10 +482,10 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                 {/* Thumbnail */}
                 <div className="space-y-2">
                   <Label htmlFor="thumbnail">Thumbnail</Label>
-                  {formData.thumbnail ? (
+                  {form.watch('thumbnail') ? (
                     <div className="relative group">
                       <img
-                        src={formData.thumbnail}
+                        src={form.watch('thumbnail')}
                         alt="Thumbnail preview"
                         className="w-full h-40 object-cover rounded-md border border-glass-border/40"
                       />
@@ -440,7 +494,7 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                         variant="destructive"
                         size="sm"
                         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => setFormData(prev => ({ ...prev, thumbnail: '' }))}
+                        onClick={() => form.setValue('thumbnail', '')}
                       >
                         <X className="w-4 h-4" />
                       </Button>
@@ -554,7 +608,7 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
           <Button variant="outline" onClick={handleCloseAttempt}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!formData.name.trim() || isCreating}>
+          <Button onClick={handleSave} disabled={!form.watch('name')?.trim() || isCreating}>
             {isCreating ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>

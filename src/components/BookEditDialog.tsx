@@ -365,12 +365,12 @@ const BookEditDialog = ({ book, open, onOpenChange, onBookUpdated }: BookEditDia
                     className={`bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 rounded-xl px-4 py-3 transition-all focus:ring-2 focus:ring-blue-500/50 ${
                       theme === 'dark' ? '' : 'bg-white/50 border-gray-300 text-black placeholder-gray-500'
                     }`}
-                    maxLength={50}
+                    maxLength={250}
                   />
                   <div className={`text-xs ${
                     theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
                   }`}>
-                    {title.length}/50 characters
+                    {title.length}/250 characters
                   </div>
                 </div>
 
@@ -390,12 +390,12 @@ const BookEditDialog = ({ book, open, onOpenChange, onBookUpdated }: BookEditDia
                     className={`bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 rounded-xl px-4 py-3 transition-all focus:ring-2 focus:ring-blue-500/50 ${
                       theme === 'dark' ? '' : 'bg-white/50 border-gray-300 text-black placeholder-gray-500'
                     }`}
-                    maxLength={100}
+                    maxLength={500}
                   />
                   <div className={`text-xs ${
                     theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
                   }`}>
-                    {subheading.length}/100 characters
+                    {subheading.length}/500 characters
                   </div>
                 </div>
 

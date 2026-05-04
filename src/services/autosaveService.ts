@@ -6,6 +6,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { documentMutationService, type SyncStatus } from './DocumentMutationService';
 import { r2UploadService } from './R2UploadService';
+import { logAutosave, reportError } from '@/utils/logger';
+import { performanceMonitor } from '@/utils/performanceMonitor';
 
 export type AutosaveStatus = 'idle' | 'local-saving' | 'cloud-syncing' | 'saved' | 'error';
 export type { SyncStatus };
@@ -36,10 +38,22 @@ class AutosaveService {
   private subscribers: Set<(state: AutosaveState) => void> = new Set();
   
   // Configurable intervals (in milliseconds) - optimized to reduce Supabase I/O
-  private readonly DEBOUNCE_DELAY = 5000; // 5 seconds (increased from 2s to reduce writes)
-  private readonly AUTOSAVE_INTERVAL = 60000; // 60 seconds (1 minute - increased to minimize DB requests)
+  private readonly DEBOUNCE_DELAY = 10000; // 10 seconds (increased from 5s to reduce writes)
+  private readonly AUTOSAVE_INTERVAL = 120000; // 2 minutes (increased from 60s to minimize DB requests)
   private readonly MANUAL_SAVE_INTERVAL = 10000; // 10 seconds for manual saves
   private readonly LOCAL_STORAGE_KEY = 'kanvas_autosave';
+
+  // Batch storage operation configuration
+  private readonly BATCH_SIZE_LIMIT = 50; // Maximum number of operations per batch
+  private readonly BATCH_TIMEOUT_MS = 5000; // Force batch flush after 5 seconds
+  private readonly BATCH_STORAGE_KEY = 'kanvas_batch_operations';
+  private pendingBatchOperations: Array<{ id: string; type: string; data: any; timestamp: number }> = [];
+  private batchFlushTimer: number | null = null;
+
+  // Request deduplication configuration
+  private readonly DEDUPLICATION_WINDOW_MS = 1000; // 1 second window for deduplication
+  private pendingRequests: Map<string, { timestamp: number; abortController: AbortController }> = new Map();
+  private ongoingSaveOperations: Set<string> = new Set();
 
   static getInstance(): AutosaveService {
     if (!AutosaveService.instance) {
@@ -79,6 +93,350 @@ class AutosaveService {
     const hasMutationChanges = documentMutationService.hasUnsavedChanges();
     
     return hasQueueChanges || hasMutationChanges;
+  }
+
+  // Smart change detection - only trigger autosave for meaningful changes
+  private hasMeaningfulChanges(): boolean {
+    // First check if there are any actual changes
+    if (!this.hasActualChanges()) {
+      return false;
+    }
+
+    // Check DocumentMutationService for meaningful changes
+    const mutationChanges = this.getMeaningfulMutationChanges();
+    if (mutationChanges.hasMetadataChanges || mutationChanges.hasPositionChanges) {
+      return true;
+    }
+
+    // Check autosave queue for meaningful changes
+    return this.hasMeaningfulQueueChanges();
+  }
+
+  // Get meaningful changes from DocumentMutationService
+  private getMeaningfulMutationChanges(): { hasMetadataChanges: boolean; hasPositionChanges: boolean } {
+    // For now, we'll consider any DocumentMutationService changes as meaningful
+    // In a more sophisticated implementation, we could analyze the specific changes
+    const hasUnsavedChanges = documentMutationService.hasUnsavedChanges();
+    
+    return {
+      hasMetadataChanges: hasUnsavedChanges,
+      hasPositionChanges: hasUnsavedChanges
+    };
+  }
+
+  // Check if autosave queue has meaningful changes (not just UI state)
+  private hasMeaningfulQueueChanges(): boolean {
+    // Asset changes are always meaningful (they represent data changes)
+    if (this.queue.assets) {
+      return true;
+    }
+
+    // Background changes are meaningful (they affect visual state)
+    if (this.queue.backgrounds) {
+      return true;
+    }
+
+    // World data changes are meaningful (they affect project structure)
+    if (this.queue.worldData) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Batch storage operations
+  private addToBatch(operation: { id: string; type: string; data: any }): void {
+    this.pendingBatchOperations.push({
+      ...operation,
+      timestamp: Date.now()
+    });
+
+    // Check if batch should be flushed due to size limit
+    if (this.pendingBatchOperations.length >= this.BATCH_SIZE_LIMIT) {
+      this.flushBatch();
+      return;
+    }
+
+    // Set timer to flush batch after timeout if not already set
+    if (!this.batchFlushTimer) {
+      this.batchFlushTimer = window.setTimeout(() => {
+        this.flushBatch();
+      }, this.BATCH_TIMEOUT_MS);
+    }
+  }
+
+  private async flushBatch(): Promise<void> {
+    if (this.batchFlushTimer) {
+      clearTimeout(this.batchFlushTimer);
+      this.batchFlushTimer = null;
+    }
+
+    if (this.pendingBatchOperations.length === 0) {
+      return;
+    }
+
+    const startTime = Date.now();
+    const operationsToProcess = [...this.pendingBatchOperations];
+    this.pendingBatchOperations = [];
+
+    // Track batch operation
+    performanceMonitor.incrementBatchOperations();
+
+    try {
+      logAutosave(`Processing batch of ${operationsToProcess.length} operations`);
+      
+      // Group operations by type for efficient processing
+      const groupedOps = this.groupOperationsByType(operationsToProcess);
+      
+      // Process each group
+      for (const [type, operations] of Object.entries(groupedOps)) {
+        await this.processBatchGroup(type, operations);
+      }
+
+      // Record timing metrics
+      const duration = Date.now() - startTime;
+      performanceMonitor.recordBatchTime(duration);
+      logAutosave(`Batch processing completed in ${duration}ms`);
+    } catch (error) {
+      reportError(error, 'autosaveService.flushBatch', 'Batch processing failed');
+      
+      // Record timing metrics even for failed operations
+      const duration = Date.now() - startTime;
+      performanceMonitor.recordBatchTime(duration);
+      logAutosave(`Batch processing failed after ${duration}ms`);
+      
+      // Re-add failed operations to batch for retry
+      this.pendingBatchOperations.unshift(...operationsToProcess);
+    }
+  }
+
+  private groupOperationsByType(operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Record<string, Array<{ id: string; type: string; data: any; timestamp: number }>> {
+    const grouped: Record<string, Array<{ id: string; type: string; data: any; timestamp: number }>> = {};
+    
+    for (const op of operations) {
+      if (!grouped[op.type]) {
+        grouped[op.type] = [];
+      }
+      grouped[op.type].push(op);
+    }
+    
+    return grouped;
+  }
+
+  private async processBatchGroup(type: string, operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Promise<void> {
+    switch (type) {
+      case 'asset_metadata':
+        await this.processAssetMetadataBatch(operations);
+        break;
+      case 'asset_position':
+        await this.processAssetPositionBatch(operations);
+        break;
+      case 'background_config':
+        await this.processBackgroundConfigBatch(operations);
+        break;
+      case 'project_config':
+        await this.processProjectConfigBatch(operations);
+        break;
+      default:
+        logAutosave(`Unknown batch operation type: ${type}`);
+    }
+  }
+
+  private async processAssetMetadataBatch(operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Promise<void> {
+    // Combine asset metadata changes into a single save_assets call
+    const assetsData = operations.map(op => op.data);
+    
+    if (assetsData.length === 0) return;
+
+    const { currentBookId } = useBookStore.getState();
+    if (!currentBookId) return;
+
+    const { error } = await supabase.rpc('save_assets', {
+      p_project_id: currentBookId,
+      p_assets: assetsData
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    logAutosave(`Batched ${assetsData.length} asset metadata changes`);
+  }
+
+  private async processAssetPositionBatch(operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Promise<void> {
+    // Combine position changes into a single save_positions call
+    const positionsData = operations.map(op => op.data);
+    
+    if (positionsData.length === 0) return;
+
+    const { currentBookId } = useBookStore.getState();
+    if (!currentBookId) return;
+
+    const { error } = await supabase.rpc('save_positions', {
+      p_project_id: currentBookId,
+      p_positions: positionsData
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    logAutosave(`Batched ${positionsData.length} position changes`);
+  }
+
+  private async processBackgroundConfigBatch(operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Promise<void> {
+    // Combine background config changes
+    const { currentBookId } = useBookStore.getState();
+    if (!currentBookId) return;
+
+    // Merge all background configs
+    const mergedConfigs: Record<string, any> = {};
+    for (const op of operations) {
+      Object.assign(mergedConfigs, op.data);
+    }
+
+    const { error } = await supabase.rpc('save_project', {
+      p_project_id: currentBookId,
+      p_backgrounds: mergedConfigs
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    logAutosave(`Batched ${operations.length} background config changes`);
+  }
+
+  private async processProjectConfigBatch(operations: Array<{ id: string; type: string; data: any; timestamp: number }>): Promise<void> {
+    // Process project-level configuration changes
+    const { currentBookId } = useBookStore.getState();
+    if (!currentBookId) return;
+
+    // Merge all project configs
+    const mergedConfig: Record<string, any> = {};
+    for (const op of operations) {
+      Object.assign(mergedConfig, op.data);
+    }
+
+    const { error } = await supabase.rpc('save_project', {
+      p_project_id: currentBookId,
+      ...mergedConfig
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    logAutosave(`Batched ${operations.length} project config changes`);
+  }
+
+  // Request deduplication methods
+  private generateRequestKey(type: string, data: any): string {
+    // Generate a unique key for the request based on type and data hash
+    const dataHash = this.hashData(data);
+    return `${type}_${dataHash}`;
+  }
+
+  private hashData(data: any): string {
+    // Simple hash function for deduplication
+    const str = JSON.stringify(data, Object.keys(data).sort());
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  }
+
+  private shouldDeduplicateRequest(requestKey: string): boolean {
+    const existing = this.pendingRequests.get(requestKey);
+    if (!existing) {
+      return false;
+    }
+
+    // Check if the request is within the deduplication window
+    const now = Date.now();
+    if (now - existing.timestamp < this.DEDUPLICATION_WINDOW_MS) {
+      return true;
+    }
+
+    // Clean up expired request
+    this.pendingRequests.delete(requestKey);
+    return false;
+  }
+
+  private async executeWithDeduplication<T>(
+    requestKey: string,
+    operation: () => Promise<T>,
+    abortSignal?: AbortSignal
+  ): Promise<T> {
+    // Check if request should be deduplicated
+    if (this.shouldDeduplicateRequest(requestKey)) {
+      logAutosave(`Request deduplicated: ${requestKey}`);
+      throw new Error('Request deduplicated');
+    }
+
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    
+    // Track the request
+    this.pendingRequests.set(requestKey, {
+      timestamp: Date.now(),
+      abortController
+    });
+
+    // Set up abort signal handling
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', () => {
+        abortController.abort();
+      });
+    }
+
+    try {
+      const result = await operation();
+      return result;
+    } finally {
+      // Clean up request tracking
+      this.pendingRequests.delete(requestKey);
+    }
+  }
+
+  private cancelPendingRequests(): void {
+    logAutosave('Cancelling pending requests due to new save operation');
+    
+    for (const [key, request] of this.pendingRequests.entries()) {
+      request.abortController.abort();
+      logAutosave(`Cancelled request: ${key}`);
+    }
+    
+    this.pendingRequests.clear();
+  }
+
+  private trackSaveOperation(operationId: string): void {
+    this.ongoingSaveOperations.add(operationId);
+  }
+
+  private untrackSaveOperation(operationId: string): void {
+    this.ongoingSaveOperations.delete(operationId);
+  }
+
+  private hasOngoingSaveOperation(operationId: string): boolean {
+    return this.ongoingSaveOperations.has(operationId);
+  }
+
+  private cancelOngoingSaveOperations(): void {
+    logAutosave(`Cancelling ${this.ongoingSaveOperations.size} ongoing save operations`);
+    
+    for (const operationId of this.ongoingSaveOperations) {
+      // Cancel the corresponding request if it exists
+      const request = this.pendingRequests.get(operationId);
+      if (request) {
+        request.abortController.abort();
+      }
+    }
+    
+    this.ongoingSaveOperations.clear();
   }
 
   private setupStoreSubscriptions(): void {
@@ -131,7 +489,7 @@ class AutosaveService {
   private setupVisibilityHandlers(): void {
     const handleVisibilityChange = () => {
       if (document.hidden && this.state.pendingChanges) {
-        console.log('[Autosave] Page hidden, performing emergency save');
+        logAutosave('Page hidden, performing emergency save');
         this.performAutosave();
       }
     };
@@ -153,6 +511,9 @@ class AutosaveService {
       clearTimeout(this.debounceTimer);
     }
 
+    // Cancel any pending save operations when new changes are detected
+    this.cancelPendingRequests();
+
     this.debounceTimer = window.setTimeout(() => {
       this.performAutosave();
     }, this.DEBOUNCE_DELAY);
@@ -165,15 +526,20 @@ class AutosaveService {
 
   // Cloud-first autosave with smart queuing and local backup
   private async performAutosave(): Promise<void> {
+    const startTime = Date.now();
     const { isAuthenticated, user } = useAuthStore.getState();
     const { isOnline } = useCloudStore.getState();
     const { currentBookId } = useBookStore.getState();
     
-    // CRITICAL: Only save if there are actual changes to minimize I/O
-    if (!this.hasActualChanges()) {
-      console.log('[AutosaveService] No actual changes detected, skipping autosave');
+    // CRITICAL: Only save if there are meaningful changes to minimize I/O
+    if (!this.hasMeaningfulChanges()) {
+      logAutosave('No meaningful changes detected, skipping autosave');
       return;
     }
+    
+    // Track autosave operation
+    performanceMonitor.incrementAutosaveOperations();
+    performanceMonitor.updateRequestsPerMinute();
     
     this.updateState({ 
       status: 'local-saving', 
@@ -181,7 +547,7 @@ class AutosaveService {
     });
 
     try {
-      console.log('[AutosaveService] Starting autosave cycle');
+      logAutosave('Starting autosave cycle');
 
       // Step 1: Always save to localStorage first (instant backup)
       if (isAuthenticated && user) {
@@ -193,18 +559,18 @@ class AutosaveService {
         this.updateState({ status: 'cloud-syncing' });
         
         if (isOnline) {
-          console.log('[AutosaveService] User authenticated and online, syncing to cloud');
+          logAutosave('User authenticated and online, syncing to cloud');
           
           // CRITICAL: Ensure project exists on server before syncing
           if (currentBookId && documentMutationService.getCurrentProjectId() !== currentBookId) {
-            console.log('[AutosaveService] Setting project ID for sync:', currentBookId);
+            logAutosave('Setting project ID for sync:', currentBookId);
             documentMutationService.setProjectId(currentBookId);
             
             // Try to load the document to ensure it exists
             if (currentBookId && currentBookId !== 'null') {
               const loadResult = await documentMutationService.loadDocument(currentBookId);
               if (!loadResult.success && loadResult.error === 'Project not found') {
-                console.log('[AutosaveService] Project not found, creating...');
+                logAutosave('Project not found, creating...');
                 const bookStore = useBookStore.getState();
                 const book = bookStore.books[currentBookId];
                 if (book) {
@@ -214,7 +580,7 @@ class AutosaveService {
                     book.coverPageSettings
                   );
                   if (created) {
-                    console.log('[AutosaveService] Created project for sync');
+                    logAutosave('Created project for sync');
                   }
                 }
               }
@@ -230,7 +596,7 @@ class AutosaveService {
           }
           
           if (cloudSyncSuccess) {
-            console.log('[AutosaveService] Cloud sync successful');
+            logAutosave('Cloud sync successful');
             this.updateState({
               status: 'saved',
               lastSavedTime: new Date(),
@@ -250,7 +616,7 @@ class AutosaveService {
               this.stopPeriodicAutosave();
             }
           } else {
-            console.log('[AutosaveService] Cloud sync failed, data queued for retry');
+            logAutosave('Cloud sync failed, data queued for retry');
             this.updateState({
               status: 'error',
               lastSavedTime: new Date(),
@@ -260,7 +626,7 @@ class AutosaveService {
             // Don't clear queue on failure - keep for retry
           }
         } else {
-          console.log('[AutosaveService] User authenticated but offline, local save only');
+          logAutosave('User authenticated but offline, local save only');
           this.updateState({
             status: 'saved',
             lastSavedTime: new Date(),
@@ -270,7 +636,7 @@ class AutosaveService {
         }
       } else {
         // For guest users: local save only (handled by zustand persist)
-        console.log('[AutosaveService] Guest user - local save only');
+        logAutosave('Guest user - local save only');
         this.updateState({
           status: 'saved',
           lastSavedTime: new Date(),
@@ -289,7 +655,12 @@ class AutosaveService {
         }
       }
 
-      console.log('[AutosaveService] Autosave completed successfully');
+      logAutosave('Autosave completed successfully');
+
+      // Record timing metrics
+      const duration = Date.now() - startTime;
+      performanceMonitor.recordAutosaveTime(duration);
+      logAutosave(`Autosave completed in ${duration}ms`);
 
       // Reset to idle after showing saved status
       setTimeout(() => {
@@ -299,7 +670,12 @@ class AutosaveService {
       }, 2000);
 
     } catch (error) {
-      console.error('[AutosaveService] Autosave failed:', error);
+      reportError(error, 'autosaveService.performAutosave', 'Autosave failed');
+      
+      // Record timing metrics even for failed operations
+      const duration = Date.now() - startTime;
+      performanceMonitor.recordAutosaveTime(duration);
+      logAutosave(`Autosave failed after ${duration}ms`);
       
       this.updateState({
         status: 'error',
@@ -316,11 +692,11 @@ class AutosaveService {
 
   // Manual save with shorter interval
   async triggerManualSave(): Promise<boolean> {
-    console.log('[AutosaveService] Manual save triggered');
+    logAutosave('Manual save triggered');
     
-    // CRITICAL: Only save if there are actual changes to minimize I/O
-    if (!this.hasActualChanges()) {
-      console.log('[AutosaveService] No actual changes detected, skipping save');
+    // CRITICAL: Only save if there are meaningful changes to minimize I/O
+    if (!this.hasMeaningfulChanges()) {
+      logAutosave('No meaningful changes detected, skipping save');
       return true; // Return true since nothing needed saving
     }
     
@@ -403,7 +779,7 @@ class AutosaveService {
   // Alias for backward compatibility with useAutosave hook
   public startAutosave(): void {
     // NOTE: This is a no-op now - periodic autosave starts automatically when there are pending changes
-    console.log('[AutosaveService] startAutosave called - periodic autosave now auto-starts on pending changes');
+    logAutosave('startAutosave called - periodic autosave now auto-starts on pending changes');
   }
 
   private async performPeriodicAutosave(): Promise<void> {
@@ -519,15 +895,18 @@ class AutosaveService {
         lastLocalSave: new Date(),
       });
 
-      console.log('[AutosaveService] Local save completed');
+      logAutosave('Local save completed');
     } catch (error) {
-      console.error('[AutosaveService] Local save failed:', error);
+      reportError(error, 'autosaveService.performLocalSave', 'Local save failed');
       throw error;
     }
   }
 
   private async saveToLocalStorage(userData: any): Promise<void> {
     try {
+      // Track localStorage write
+      performanceMonitor.incrementLocalStorageWrites();
+      
       const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
       const allData: Record<string, any> = storageData ? JSON.parse(storageData) : {};
       
@@ -536,7 +915,7 @@ class AutosaveService {
 
       localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(allData));
     } catch (error) {
-      console.error('[AutosaveService] LocalStorage write failed:', error);
+      reportError(error, 'autosaveService.saveToLocalStorage', 'LocalStorage write failed');
       // Don't throw - local save failure shouldn't block cloud sync
     }
   }
@@ -544,6 +923,9 @@ class AutosaveService {
   // Load user data from localStorage on startup
   async loadUserData(userId: string, projectId?: string): Promise<any | null> {
     try {
+      // Track localStorage read
+      performanceMonitor.incrementLocalStorageReads();
+      
       const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
       if (!storageData) return null;
 
@@ -552,7 +934,7 @@ class AutosaveService {
       
       return allData[userKey] || null;
     } catch (error) {
-      console.error('[AutosaveService] Failed to load user data:', error);
+      reportError(error, 'autosaveService.loadUserData', 'Failed to load user data');
       return null;
     }
   }
@@ -563,7 +945,7 @@ class AutosaveService {
     const pendingUploads = this.getPendingUploads(assetStore.bookAssets[projectId] || {});
     
     if (pendingUploads.length > 0) {
-      console.log(`[AutosaveService] Syncing ${pendingUploads.length} assets to R2`);
+      logAutosave(`Syncing ${pendingUploads.length} assets to R2`);
       this.updateState({ pendingCloudSyncs: pendingUploads.length });
       
       for (const assetId of pendingUploads) {
@@ -572,7 +954,7 @@ class AutosaveService {
           try {
             await this.uploadAssetToCloud(asset, projectId);
           } catch (error) {
-            console.error(`[AutosaveService] Failed to upload asset ${assetId}:`, error);
+            reportError(error, 'autosaveService.syncPendingAssets', `Failed to upload asset ${assetId}`);
           }
         }
       }
@@ -592,7 +974,7 @@ class AutosaveService {
           generatePreview: true
         },
         (stage, progress) => {
-          console.log(`[AutosaveService] Asset ${asset.id} ${stage}: ${progress.percentage}%`);
+          logAutosave(`Asset ${asset.id} ${stage}: ${progress.percentage}%`);
         }
       );
       
@@ -606,12 +988,12 @@ class AutosaveService {
           cloudError: undefined
         });
         
-        console.log(`[AutosaveService] Asset ${asset.id} uploaded to cloud: ${result.r2Key}`);
+        logAutosave(`Asset ${asset.id} uploaded to cloud: ${result.r2Key}`);
       } else {
         throw new Error(result.error || 'Upload failed');
       }
     } catch (error) {
-      console.error(`[AutosaveService] Asset upload failed: ${error.message}`);
+      reportError(error, 'autosaveService.uploadAssetToCloud', `Asset upload failed: ${error.message}`);
       throw error;
     }
   }

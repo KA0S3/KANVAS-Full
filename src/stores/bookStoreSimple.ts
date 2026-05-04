@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Book, BookViewMode, BookLibrarySettings, BookCoverPreset, LeatherColorPreset, WorldData } from '@/types/book';
 import { performanceMonitor } from '@/utils/performanceMonitor';
-import { hybridStorage } from '@/utils/compressedStorage';
 import { deleteProject } from '@/services/ProjectService';
 import { documentMutationService } from '@/services/DocumentMutationService';
 import { undoService } from '@/services/UndoService';
@@ -167,55 +166,22 @@ export const useBookStore = create<BookStore>()(
           // Record for undo
           undoService.recordAction('update', 'book', { ...state.books[bookId] }, previousState);
 
-          // NOTE: Per MASTER_PLAN.md low IO philosophy:
-          // - NO immediate Supabase saves (violates "NO per-action writes")
-          // - Metadata changes are batched by DocumentMutationService
-          // - Saves happen on 40-second timer OR manual save only
-          // - Project metadata (viewport, backgrounds, tags) syncs via DocumentMutationService.saveGlobalBackgrounds/saveViewport/saveGlobalTags
-
-          // If this is the current book, trigger DocumentMutationService batching for metadata
+          // Simplified: Only sync to Supabase if explicitly needed
+          // Let the 40-second timer handle batching for low IO
           const currentBookId = get().currentBookId;
           if (bookId === currentBookId && documentMutationService.getCurrentProjectId() === bookId) {
-            // Sync cover page settings via global backgrounds
-            if (updates.coverPageSettings) {
-              documentMutationService.saveGlobalBackgrounds(updates.coverPageSettings);
+            // Only queue non-cover settings for background sync
+            if (updates.worldData?.tags) {
+              documentMutationService.saveGlobalTags(updates.worldData.tags);
             }
-
-            // CRITICAL FIX: Use new saveCoverMetadata method for cover fields
-            // This provides better batching and error handling for cover metadata
-            const coverFields = {
-              color: updates.color,
-              gradient: updates.gradient,
-              leatherColor: updates.leatherColor,
-              isLeatherMode: updates.isLeatherMode,
-              coverPresetId: updates.coverPresetId,
-              coverImage: updates.coverImage,
-              coverPageSettings: updates.coverPageSettings
-            };
-
-            // Only call saveCoverMetadata if cover fields changed
-            if (Object.keys(coverFields).some(key => coverFields[key as keyof typeof coverFields] !== undefined)) {
-              // Filter out undefined values
-              const definedCoverFields = Object.fromEntries(
-                Object.entries(coverFields).filter(([_, v]) => v !== undefined)
-              );
-              documentMutationService.saveCoverMetadata(definedCoverFields).catch(err => {
-                console.error('[BookStore] Failed to save cover metadata:', err);
-              });
-            }
-
-            // Sync viewport settings
+            
+            // Only sync viewport if explicitly changed
             if (updates.worldData?.viewportOffset || updates.worldData?.viewportScale) {
               documentMutationService.saveViewport(
                 updates.worldData.viewportOffset?.x || book.worldData?.viewportOffset?.x || 0,
                 updates.worldData.viewportOffset?.y || book.worldData?.viewportOffset?.y || 0,
                 updates.worldData.viewportScale || book.worldData?.viewportScale || 1
               );
-            }
-
-            // Sync tags config
-            if (updates.worldData?.tags) {
-              documentMutationService.saveGlobalTags(updates.worldData.tags);
             }
           }
         },
@@ -409,11 +375,42 @@ export const useBookStore = create<BookStore>()(
     },
     {
       name: 'kanvas-world-storage',
-      storage: hybridStorage,
+      storage: {
+        getItem: (name) => {
+          const item = localStorage.getItem(name);
+          return item ? JSON.parse(item) : null;
+        },
+        setItem: (name, value) => {
+          localStorage.setItem(name, JSON.stringify(value));
+        },
+        removeItem: (name) => {
+          localStorage.removeItem(name);
+        },
+      },
       partialize: (state) => ({
         books: state.books,
         currentBookId: state.currentBookId,
         settings: state.settings,
+        viewMode: state.viewMode,
+        coverPresets: state.coverPresets,
+        leatherPresets: state.leatherPresets,
+        _isCreating: state._isCreating,
+        _lastCreationTime: state._lastCreationTime,
+        _pendingCreationTitle: state._pendingCreationTitle,
+        createBook: state.createBook,
+        updateBook: state.updateBook,
+        deleteBook: state.deleteBook,
+        reorderBooks: state.reorderBooks,
+        setCurrentBook: state.setCurrentBook,
+        getCurrentBook: state.getCurrentBook,
+        getAllBooks: state.getAllBooks,
+        updateWorldData: state.updateWorldData,
+        getWorldData: state.getWorldData,
+        setViewMode: state.setViewMode,
+        updateSettings: state.updateSettings,
+        exportBooks: state.exportBooks,
+        exportSingleBook: state.exportSingleBook,
+        importBooks: state.importBooks,
       }),
     }
   )

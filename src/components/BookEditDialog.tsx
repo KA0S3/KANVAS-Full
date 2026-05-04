@@ -161,6 +161,7 @@ const BookEditDialog = ({ book, open, onOpenChange, onBookUpdated }: BookEditDia
     if (!book) return;
 
     try {
+      // Simple direct update - no complex async stuff
       updateBook(book.id, {
         title,
         subheading,
@@ -169,12 +170,11 @@ const BookEditDialog = ({ book, open, onOpenChange, onBookUpdated }: BookEditDia
         gradient: isLeatherMode ? undefined : colorOptions.find(c => c.value === selectedColor)?.gradient,
         leatherColor: isLeatherMode ? selectedLeatherColor?.color : undefined,
         isLeatherMode,
-        coverPresetId: customCoverImage ? undefined : selectedCoverPreset, // Only save preset if no custom image
+        coverPresetId: customCoverImage ? undefined : selectedCoverPreset,
         coverImage: customCoverImage || undefined,
         coverPageSettings: {
           showCoverPage: true,
           baseStyle: isLeatherMode ? 'leather' : 'gradient',
-          coverImageData: customCoverImage || undefined,
           title: {
             text: title,
             position: titlePosition,

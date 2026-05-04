@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Settings Persistence</title>
+</head>
+<body>
+    <h1>Settings Persistence Test</h1>
+    <p>Open this page, make changes in BookEditDialog, then refresh to test persistence.</p>
+    
+    <h2>Current localStorage contents:</h2>
+    <pre id="storage-content"></pre>
+    
+    <button onclick="clearStorage()">Clear Storage</button>
+    <button onclick="refreshStorage()">Refresh Display</button>
+    
+    <script>
+        function refreshStorage() {
+            const storageContent = document.getElementById('storage-content');
+            const kanvasData = localStorage.getItem('kanvas-world-storage');
+            
+            if (kanvasData) {
+                try {
+                    const parsed = JSON.parse(kanvasData);
+                    storageContent.textContent = JSON.stringify(parsed, null, 2);
+                    
+                    // Check for cover settings specifically
+                    if (parsed.state && parsed.state.books) {
+                        console.log('Books found:', Object.keys(parsed.state.books));
+                        Object.entries(parsed.state.books).forEach(([id, book]) => {
+                            console.log(`Book ${id}:`, {
+                                title: book.title,
+                                coverPageSettings: book.coverPageSettings,
+                                color: book.color,
+                                leatherColor: book.leatherColor,
+                                isLeatherMode: book.isLeatherMode
+                            });
+                        });
+                    }
+                } catch (e) {
+                    storageContent.textContent = 'Error parsing storage: ' + e.message;
+                }
+            } else {
+                storageContent.textContent = 'No kanvas-world-storage found';
+            }
+        }
+        
+        function clearStorage() {
+            localStorage.removeItem('kanvas-world-storage');
+            refreshStorage();
+        }
+        
+        // Auto-refresh every 2 seconds
+        setInterval(refreshStorage, 2000);
+        refreshStorage();
+    </script>
+</body>
+</html>

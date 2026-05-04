@@ -1,6 +1,10 @@
 import type { BackgroundConfig } from '@/types/background';
 import { DEFAULT_BACKGROUND_CONFIG } from '@/types/background';
 import { indexedDBStorage } from './indexedDBStorage';
+import { r2UploadService } from '@/services/R2UploadService';
+import { useAuthStore } from '@/stores/authStore';
+import { useBookStore } from '@/stores/bookStoreSimple';
+import { useBackgroundStore } from '@/stores/backgroundStore';
 
 const STORAGE_PREFIX = 'background:';
 const METADATA_PREFIX = 'bgmeta:';
@@ -151,6 +155,42 @@ export async function setBackgroundAsync(assetId: string, config: BackgroundConf
   }
 }
 
+// Function to upload background image to R2
+async function uploadBackgroundToR2(assetId: string, base64Image: string): Promise<string | null> {
+  try {
+    const authStore = useAuthStore.getState();
+    const bookStore = useBookStore.getState();
+    
+    if (!authStore.isAuthenticated || !authStore.user || !bookStore.currentBookId) {
+      console.log(`[BackgroundStorage] Cannot upload to R2 - not authenticated or no project loaded`);
+      return null;
+    }
+
+    // Convert base64 to blob
+    const response = await fetch(base64Image);
+    const blob = await response.blob();
+    const file = new File([blob], `background-${assetId}.jpg`, { type: blob.type });
+
+    // Upload to R2
+    const result = await r2UploadService.uploadFile(
+      file,
+      `bg-${assetId}`,
+      bookStore.currentBookId
+    );
+
+    if (result.success && result.publicUrl) {
+      console.log(`[BackgroundStorage] Successfully uploaded background ${assetId} to R2: ${result.publicUrl}`);
+      return result.publicUrl;
+    } else {
+      console.error(`[BackgroundStorage] Failed to upload background ${assetId} to R2:`, result.error);
+      return null;
+    }
+  } catch (error) {
+    console.error(`[BackgroundStorage] Error uploading background ${assetId} to R2:`, error);
+    return null;
+  }
+}
+
 // Sync version for backward compatibility
 export function setBackground(assetId: string, config: BackgroundConfig): void {
   try {
@@ -158,13 +198,29 @@ export function setBackground(assetId: string, config: BackgroundConfig): void {
     console.log(`[BackgroundStorage] Saving background for ${assetId} to key ${storageKey}`);
     const configToStore = JSON.parse(JSON.stringify(config));
 
-    // CRITICAL FIX: Don't store large base64 images in localStorage/IndexedDB
-    // Images should be uploaded to R2 and referenced by URL only
-    // This follows low-IO principles and prevents localStorage bloat
+    // CRITICAL FIX: Upload large base64 images to R2 instead of storing locally
+    // This prevents localStorage quota exceeded errors
     if (configToStore.imageUrl?.startsWith('data:')) {
       if (configToStore.imageUrl.length > 2048) {
-        console.log(`[BackgroundStorage] Excluding large base64 image (${configToStore.imageUrl.length} bytes) - should be uploaded to R2`);
+        console.log(`[BackgroundStorage] Large base64 image detected (${configToStore.imageUrl.length} bytes), uploading to R2...`);
+        
+        // Upload to R2 asynchronously (don't block UI)
+        uploadBackgroundToR2(assetId, configToStore.imageUrl).then(r2Url => {
+          if (r2Url) {
+            // Update stored config with R2 URL
+            const updatedConfig = { ...configToStore, imageUrl: r2Url };
+            localStorage.setItem(storageKey, JSON.stringify(updatedConfig));
+            console.log(`[BackgroundStorage] Updated background ${assetId} with R2 URL`);
+            
+            // Trigger background store update
+            const { setBackground: updateBackground } = useBackgroundStore.getState();
+            updateBackground(assetId, updatedConfig);
+          }
+        });
+        
+        // Temporarily set to null until upload completes
         configToStore.imageUrl = null;
+        configToStore.r2UploadPending = true;
       } else {
         // Only keep small base64 images (< 2KB)
         console.log(`[BackgroundStorage] Keeping small base64 image (${configToStore.imageUrl.length} bytes)`);

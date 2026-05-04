@@ -716,6 +716,14 @@ class DocumentMutationService {
 
   // Immediate sync (for critical operations)
   async syncNow(): Promise<boolean> {
+    console.log(`[DocumentMutation] syncNow called:`, {
+      syncInProgress: this.syncInProgress,
+      isOnline: connectivityService.isOnline(),
+      currentProjectId: this.currentProjectId,
+      changedAssetsCount: Object.keys(this.changedAssets).length,
+      changedPositionsCount: Object.keys(this.changedPositions).length
+    });
+
     if (this.syncInProgress) {
       logDocument('syncNow: sync in progress, skipping');
       return false;
@@ -844,6 +852,12 @@ class DocumentMutationService {
   private async saveMetadataChanges(): Promise<void> {
     if (!this.currentProjectId || Object.keys(this.changedAssets).length === 0) return;
 
+    console.log(`[DocumentMutation] saveMetadataChanges called:`, {
+      currentProjectId: this.currentProjectId,
+      changedAssetsCount: Object.keys(this.changedAssets).length,
+      changedAssetIds: Object.keys(this.changedAssets)
+    });
+
     // Process assets and compress thumbnails if needed
     const processedAssets = await Promise.all(
       Object.values(this.changedAssets).map(async (asset) => {
@@ -917,15 +931,49 @@ class DocumentMutationService {
       });
     }
 
+    // Check authentication before making RPC call
+    const { data: { user } } = await supabase.auth.getUser();
+    console.log(`[DocumentMutation] Authentication check:`, {
+      hasUser: !!user,
+      userId: user?.id,
+      projectId: this.currentProjectId
+    });
+
+    if (!user) {
+      console.error('[DocumentMutation] Cannot save assets - no authenticated user');
+      throw new Error('User not authenticated');
+    }
+
     performanceMonitor.incrementDatabaseRequests();
     logDocument('saveMetadataChanges - Sending to RPC:', {
       p_project_id: this.currentProjectId,
       p_assets_count: optimizedChanges.length,
       p_assets: optimizedChanges
     });
+    
+    console.log(`[DocumentMutation] Calling save_assets RPC with:`, {
+      projectId: this.currentProjectId,
+      assetCount: optimizedChanges.length,
+      sampleAsset: optimizedChanges[0] ? {
+        id: optimizedChanges[0].asset_id,
+        name: optimizedChanges[0].name,
+        type: optimizedChanges[0].type
+      } : null
+    });
+
     const { error } = await supabase.rpc('save_assets', {
       p_project_id: this.currentProjectId,
       p_assets: optimizedChanges
+    });
+
+    console.log(`[DocumentMutation] save_assets RPC result:`, {
+      success: !error,
+      error: error ? {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      } : null
     });
 
     // Only clear changes after successful save

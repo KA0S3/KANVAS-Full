@@ -907,17 +907,143 @@ class AutosaveService {
       // Track localStorage write
       performanceMonitor.incrementLocalStorageWrites();
       
+      // Check available storage space before writing
+      if (!this.hasStorageSpace()) {
+        logAutosave('Storage space low, performing cleanup');
+        await this.cleanupOldStorageData();
+      }
+      
       const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
       const allData: Record<string, any> = storageData ? JSON.parse(storageData) : {};
       
       const userKey = `${userData.userId}_${userData.projectId || 'default'}`;
       allData[userKey] = userData;
 
-      localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(allData));
+      // Try to save with quota management
+      try {
+        localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(allData));
+      } catch (quotaError) {
+        // If still exceeds quota after cleanup, implement emergency cleanup
+        logAutosave('Quota still exceeded after cleanup, performing emergency cleanup');
+        await this.emergencyStorageCleanup();
+        
+        // Retry with minimal data
+        const minimalData = this.createMinimalUserData(userData);
+        const minimalAllData: Record<string, any> = { [userKey]: minimalData };
+        localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(minimalAllData));
+        
+        logAutosave('Saved with minimal data after emergency cleanup');
+      }
     } catch (error) {
       reportError(error, 'autosaveService.saveToLocalStorage', 'LocalStorage write failed');
       // Don't throw - local save failure shouldn't block cloud sync
     }
+  }
+
+  // Storage quota management methods
+  private hasStorageSpace(): boolean {
+    try {
+      // Check if we have reasonable space available (keep under 4MB to be safe)
+      const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
+      const currentSize = storageData ? new Blob([storageData]).size : 0;
+      const maxSize = 4 * 1024 * 1024; // 4MB limit
+      
+      // Consider storage full if using more than 80% of max size
+      return currentSize < (maxSize * 0.8);
+    } catch {
+      return false;
+    }
+  }
+
+  private async cleanupOldStorageData(): Promise<void> {
+    try {
+      const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
+      if (!storageData) return;
+
+      const allData: Record<string, any> = JSON.parse(storageData);
+      const entries = Object.entries(allData);
+      
+      // Sort by last save time, oldest first
+      entries.sort(([, a], [, b]) => {
+        const timeA = new Date(a.lastLocalSave || 0).getTime();
+        const timeB = new Date(b.lastLocalSave || 0).getTime();
+        return timeA - timeB;
+      });
+
+      // Keep only the most recent 10 entries
+      const keepCount = 10;
+      const recentEntries = entries.slice(-keepCount);
+      const cleanedData: Record<string, any> = {};
+      
+      recentEntries.forEach(([key, value]) => {
+        cleanedData[key] = value;
+      });
+
+      localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(cleanedData));
+      logAutosave(`Cleaned storage: kept ${keepCount} most recent entries`);
+    } catch (error) {
+      reportError(error, 'autosaveService.cleanupOldStorageData', 'Storage cleanup failed');
+    }
+  }
+
+  private async emergencyStorageCleanup(): Promise<void> {
+    try {
+      const storageData = localStorage.getItem(this.LOCAL_STORAGE_KEY);
+      if (!storageData) return;
+
+      const allData: Record<string, any> = JSON.parse(storageData);
+      const entries = Object.entries(allData);
+      
+      // Keep only the most recent 3 entries in emergency
+      const keepCount = 3;
+      
+      // Sort by last save time, newest first
+      entries.sort(([, a], [, b]) => {
+        const timeA = new Date(a.lastLocalSave || 0).getTime();
+        const timeB = new Date(b.lastLocalSave || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const recentEntries = entries.slice(0, keepCount);
+      const cleanedData: Record<string, any> = {};
+      
+      recentEntries.forEach(([key, value]) => {
+        cleanedData[key] = value;
+      });
+
+      localStorage.setItem(this.LOCAL_STORAGE_KEY, JSON.stringify(cleanedData));
+      logAutosave(`Emergency cleanup: kept only ${keepCount} most recent entries`);
+    } catch (error) {
+      reportError(error, 'autosaveService.emergencyStorageCleanup', 'Emergency cleanup failed');
+      // If even emergency cleanup fails, clear everything except current user
+      try {
+        localStorage.removeItem(this.LOCAL_STORAGE_KEY);
+        logAutosave('Cleared all storage due to quota error');
+      } catch (clearError) {
+        reportError(clearError, 'autosaveService.emergencyStorageCleanup', 'Failed to clear storage');
+      }
+    }
+  }
+
+  private createMinimalUserData(userData: any): any {
+    // Create minimal version of user data with only essential info
+    return {
+      userId: userData.userId,
+      projectId: userData.projectId,
+      assets: userData.assets ? Object.fromEntries(
+        Object.entries(userData.assets).slice(0, 5) // Keep only 5 most recent assets
+      ) : {},
+      backgrounds: userData.backgrounds ? Object.fromEntries(
+        Object.entries(userData.backgrounds).slice(0, 3) // Keep only 3 background configs
+      ) : {},
+      worldData: {
+        currentBook: userData.worldData?.currentBook,
+        // Skip global custom fields to save space
+      },
+      lastLocalSave: new Date().toISOString(),
+      lastCloudSync: userData.lastCloudSync,
+      // Skip screen positions to save space
+    };
   }
 
   // Load user data from localStorage on startup

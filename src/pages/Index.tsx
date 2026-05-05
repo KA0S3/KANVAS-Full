@@ -142,6 +142,12 @@ const Index = () => {
             const result = await documentMutationService.loadDocument(currentBook);
             success = result.success;
             if (result.success && result.data) {
+              console.log(`[Index] About to call loadWorldData with:`, {
+                hasWorldDocument: !!result.data.world_document,
+                assetKeys: result.data.world_document?.assets ? Object.keys(result.data.world_document.assets) : 'no assets',
+                assetCount: result.data.world_document?.assets ? Object.keys(result.data.world_document.assets).length : 0,
+                fullWorldDoc: result.data.world_document
+              });
               loadWorldData(result.data.world_document);
 
               // Restore backgrounds from world_document.backgrounds

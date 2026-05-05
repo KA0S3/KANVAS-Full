@@ -293,6 +293,13 @@ class DocumentMutationService {
         updated_at: project.updated_at
       };
 
+      console.log(`[DocumentMutation] Final result before returning:`, {
+        hasWorldDocument: !!result.world_document,
+        assetKeys: result.world_document?.assets ? Object.keys(result.world_document.assets) : 'no assets',
+        assetCount: result.world_document?.assets ? Object.keys(result.world_document.assets).length : 0,
+        fullResult: result
+      });
+
       // Cache the result
       this.documentCache.set(projectId, {
         data: result,
@@ -302,6 +309,12 @@ class DocumentMutationService {
 
       this.currentProjectId = projectId;
       this.currentVersion = result.version;
+
+      logDocument('Document loaded successfully:', {
+        projectId,
+        version: result.version,
+        assetCount: Object.keys(result.world_document.assets || {}).length
+      });
 
       return { success: true, data: result };
     } catch (error) {

@@ -988,8 +988,16 @@ export const useAssetStore = create<AssetStore>()(
 
   // World-aware methods
   loadWorldData: (worldData) => {
+    console.log(`[AssetStore] loadWorldData called with:`, {
+      hasWorldData: !!worldData,
+      assetCount: worldData?.assets ? Object.keys(worldData.assets).length : 0,
+      sampleAsset: worldData?.assets ? Object.values(worldData.assets)[0] : null
+    });
+
     if (worldData) {
       const bookId = get().getCurrentBookId();
+      console.log(`[AssetStore] Current book ID:`, bookId);
+      
       if (!bookId) {
         console.warn('[AssetStore] Cannot load world data - no current book');
         return;
@@ -1013,12 +1021,24 @@ export const useAssetStore = create<AssetStore>()(
         console.log(`[AssetStore] Migrated ${migratedCount} assets from 'other' to 'card' type`);
       }
 
+      console.log(`[AssetStore] About to update store with:`, {
+        bookId,
+        assetCount: Object.keys(migratedAssets).length,
+        assetIds: Object.keys(migratedAssets)
+      });
+
       set((state) => {
         const newBookAssets = { ...state.bookAssets };
         const newBookGlobalCustomFields = { ...state.bookGlobalCustomFields };
 
         newBookAssets[bookId] = migratedAssets;
         newBookGlobalCustomFields[bookId] = worldData.globalCustomFields || [];
+
+        console.log(`[AssetStore] Store updated. New state:`, {
+          totalBooks: Object.keys(newBookAssets).length,
+          currentBookAssets: Object.keys(newBookAssets[bookId] || {}).length,
+          currentBookId: bookId
+        });
 
         return {
           bookAssets: newBookAssets,

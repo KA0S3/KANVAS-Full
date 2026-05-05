@@ -160,6 +160,12 @@ const Index = () => {
                 fullWorldDoc: worldDocument
               });
               
+              // DETAILED DEBUG: Log the actual data structure
+              console.log('[Index] DETAILED DEBUG - worldDocument structure:', JSON.stringify(worldDocument, null, 2));
+              console.log('[Index] DETAILED DEBUG - result.data structure:', JSON.stringify(result.data, null, 2));
+              console.log('[Index] DETAILED DEBUG - worldDocument.assets:', JSON.stringify(worldDocument?.assets, null, 2));
+              console.log('[Index] DETAILED DEBUG - result.data.world_document.assets:', JSON.stringify(result.data?.world_document?.assets, null, 2));
+              
               // CRITICAL FIX: Check if assets exist and handle the case where they might be nested differently
               let finalWorldData = worldDocument;
               
@@ -177,6 +183,7 @@ const Index = () => {
                 assetKeys: finalWorldData?.assets ? Object.keys(finalWorldData.assets) : 'no assets',
                 assetCount: finalWorldData?.assets ? Object.keys(finalWorldData.assets).length : 0
               });
+              console.log('[Index] DETAILED DEBUG - finalWorldData.assets:', JSON.stringify(finalWorldData?.assets, null, 2));
               
               // Add delay to ensure all async operations complete
               setTimeout(() => {

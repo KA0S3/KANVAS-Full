@@ -996,6 +996,10 @@ export const useAssetStore = create<AssetStore>()(
       fullWorldData: worldData
     });
 
+    // DETAILED DEBUG: Log the actual data structure
+    console.log('[AssetStore] DETAILED DEBUG - worldData structure:', JSON.stringify(worldData, null, 2));
+    console.log('[AssetStore] DETAILED DEBUG - worldData.assets structure:', JSON.stringify(worldData?.assets, null, 2));
+
     if (worldData) {
       const bookId = get().getCurrentBookId();
       console.log(`[AssetStore] Current book ID:`, bookId);

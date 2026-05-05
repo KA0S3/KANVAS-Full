@@ -160,9 +160,27 @@ const Index = () => {
                 fullWorldDoc: worldDocument
               });
               
+              // CRITICAL FIX: Check if assets exist and handle the case where they might be nested differently
+              let finalWorldData = worldDocument;
+              
+              // If worldDocument.assets is empty but result.data has assets, try to get them directly
+              if ((!worldDocument.assets || Object.keys(worldDocument.assets).length === 0) && 
+                  result.data && result.data.world_document && result.data.world_document.assets) {
+                console.log('[Index] FIX: Using assets directly from result.data.world_document');
+                finalWorldData = {
+                  ...worldDocument,
+                  assets: result.data.world_document.assets
+                };
+              }
+              
+              console.log(`[Index] Final worldData being passed to loadWorldData:`, {
+                assetKeys: finalWorldData?.assets ? Object.keys(finalWorldData.assets) : 'no assets',
+                assetCount: finalWorldData?.assets ? Object.keys(finalWorldData.assets).length : 0
+              });
+              
               // Add delay to ensure all async operations complete
               setTimeout(() => {
-                loadWorldData(worldDocument);
+                loadWorldData(finalWorldData);
               }, 0);
 
               // Restore backgrounds from world_document.backgrounds

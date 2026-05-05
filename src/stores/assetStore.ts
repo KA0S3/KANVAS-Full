@@ -990,8 +990,10 @@ export const useAssetStore = create<AssetStore>()(
   loadWorldData: (worldData) => {
     console.log(`[AssetStore] loadWorldData called with:`, {
       hasWorldData: !!worldData,
+      worldDataKeys: worldData ? Object.keys(worldData) : 'no keys',
       assetCount: worldData?.assets ? Object.keys(worldData.assets).length : 0,
-      sampleAsset: worldData?.assets ? Object.values(worldData.assets)[0] : null
+      sampleAsset: worldData?.assets ? Object.values(worldData.assets)[0] : null,
+      fullWorldData: worldData
     });
 
     if (worldData) {
@@ -1005,6 +1007,12 @@ export const useAssetStore = create<AssetStore>()(
 
       // Migrate 'other' type to 'card' for database compatibility
       const assets = worldData.assets || {};
+      console.log(`[AssetStore] Extracted assets from worldData:`, {
+        assetsType: typeof assets,
+        assetsKeys: Object.keys(assets),
+        assetsLength: Object.keys(assets).length,
+        sampleAsset: Object.values(assets)[0]
+      });
       const migratedAssets: Record<string, any> = {};
       let migratedCount = 0;
 

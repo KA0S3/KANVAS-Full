@@ -203,12 +203,24 @@ class DocumentMutationService {
       const assetCount = project.asset_count || 0;
 
       // Load flat asset rows (MASTER_PLAN.md Rule 2)
+      console.log(`[DocumentMutation] Loading assets for project ${projectId}:`, {
+        assetCount,
+        loadAll: assetCount < 100
+      });
+
       const { data: assetsData, error: assetsError } = await supabase
         .rpc('load_assets', {
           p_project_id: projectId,
           p_parent_id: null,
           p_load_all: assetCount < 100 // Load all if small project
         });
+
+      console.log(`[DocumentMutation] load_assets RPC result:`, {
+        success: !assetsError,
+        error: assetsError,
+        dataCount: assetsData?.length || 0,
+        sampleData: assetsData?.slice(0, 2)
+      });
 
       if (assetsError) {
         reportError(assetsError, 'DocumentMutation.loadDocument', 'Failed to load assets');
@@ -219,9 +231,53 @@ class DocumentMutationService {
       // Restore compressed text fields from storage
       const restoredAssetsData = TextStorageOptimizer.restoreAssetsFromStorage(assetsData || []);
       
+      console.log(`[DocumentMutation] After text restoration:`, {
+        originalCount: assetsData?.length || 0,
+        restoredCount: restoredAssetsData.length,
+        sampleRestored: restoredAssetsData.slice(0, 2)
+      });
+
+      // CRITICAL FIX: Convert asset array to object format expected by loadWorldData
+      // load_assets RPC returns array, but loadWorldData expects object with IDs as keys
+      const assetsObject: Record<string, any> = {};
+      restoredAssetsData.forEach((asset: any) => {
+        // Map database fields to frontend asset structure
+        assetsObject[asset.asset_id] = {
+          id: asset.asset_id,
+          name: asset.name,
+          type: asset.type,
+          x: asset.x || 0,
+          y: asset.y || 0,
+          width: asset.width || 200,
+          height: asset.height || 150,
+          zIndex: asset.z_index || 0,
+          isExpanded: asset.is_expanded || false,
+          content: asset.content,
+          backgroundConfig: asset.background_config || {},
+          viewportConfig: asset.viewport_config || {},
+          customFields: asset.custom_fields?.customFields || [],
+          customFieldValues: asset.custom_fields?.customFieldValues || [],
+          tags: asset.custom_fields?.tags || [],
+          viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {},
+          thumbnail: asset.custom_fields?.thumbnail,
+          background: asset.custom_fields?.background,
+          description: asset.custom_fields?.description,
+          updatedAt: asset.updated_at,
+          // Add required fields that might not be in database
+          children: [],
+          parentId: asset.parent_id,
+          createdAt: asset.updated_at, // Use updated_at as fallback
+        };
+      });
+
+      console.log(`[DocumentMutation] Converted ${restoredAssetsData.length} assets to object format:`, {
+        assetIds: Object.keys(assetsObject),
+        sampleAsset: Object.values(assetsObject)[0]
+      });
+      
       const result = {
         world_document: {
-          assets: restoredAssetsData,
+          assets: assetsObject,
           backgrounds: project.backgrounds || {},
           tags: project.tags_config || {}
         },

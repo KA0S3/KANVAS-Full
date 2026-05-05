@@ -142,13 +142,20 @@ const Index = () => {
             const result = await documentMutationService.loadDocument(currentBook);
             success = result.success;
             if (result.success && result.data) {
+              // Clone world_document to prevent reference issues
+              const worldDocument = JSON.parse(JSON.stringify(result.data.world_document));
+              
               console.log(`[Index] About to call loadWorldData with:`, {
-                hasWorldDocument: !!result.data.world_document,
-                assetKeys: result.data.world_document?.assets ? Object.keys(result.data.world_document.assets) : 'no assets',
-                assetCount: result.data.world_document?.assets ? Object.keys(result.data.world_document.assets).length : 0,
-                fullWorldDoc: result.data.world_document
+                hasWorldDocument: !!worldDocument,
+                assetKeys: worldDocument?.assets ? Object.keys(worldDocument.assets) : 'no assets',
+                assetCount: worldDocument?.assets ? Object.keys(worldDocument.assets).length : 0,
+                fullWorldDoc: worldDocument
               });
-              loadWorldData(result.data.world_document);
+              
+              // Add delay to ensure all async operations complete
+              setTimeout(() => {
+                loadWorldData(worldDocument);
+              }, 0);
 
               // Restore backgrounds from world_document.backgrounds
               if (result.data.world_document?.backgrounds) {

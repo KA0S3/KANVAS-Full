@@ -142,6 +142,14 @@ const Index = () => {
             const result = await documentMutationService.loadDocument(currentBook);
             success = result.success;
             if (result.success && result.data) {
+              console.log(`[Index] DocumentMutation result:`, {
+                success: result.success,
+                hasData: !!result.data,
+                hasWorldDocument: !!result.data.world_document,
+                worldDocumentKeys: result.data.world_document ? Object.keys(result.data.world_document) : 'no keys',
+                fullResult: result.data
+              });
+              
               // Clone world_document to prevent reference issues
               const worldDocument = JSON.parse(JSON.stringify(result.data.world_document));
               

@@ -179,6 +179,13 @@ export const useAssetStore = create<AssetStore>()(
     const bookId = get().getCurrentBookId();
     if (!bookId || !get().isVirtualizedMode) return;
 
+    // Check if assets are already loaded to prevent redundant calls
+    const currentAssets = get().bookAssets[bookId];
+    if (currentAssets && Object.keys(currentAssets).length > 0) {
+      console.log('[AssetStore] Assets already loaded, skipping cache service call');
+      return;
+    }
+
     try {
       console.log('[AssetStore] Loading assets from cache service...');
       

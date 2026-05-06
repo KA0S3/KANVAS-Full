@@ -150,87 +150,34 @@ const Index = () => {
                 fullResult: result.data
               });
               
-              // Clone world_document to prevent reference issues
-              const worldDocument = JSON.parse(JSON.stringify(result.data.world_document));
+              // SIMPLE FIX: Directly load assets from DocumentMutation result
+              console.log('[Index] SIMPLE APPROACH: Loading assets directly from cloud');
               
-              console.log(`[Index] About to call loadWorldData with:`, {
-                hasWorldDocument: !!worldDocument,
-                assetKeys: worldDocument?.assets ? Object.keys(worldDocument.assets) : 'no assets',
-                assetCount: worldDocument?.assets ? Object.keys(worldDocument.assets).length : 0,
-                fullWorldDoc: worldDocument
-              });
+              // Get assets directly from DocumentMutation result
+              const cloudAssets = result.data?.world_document?.assets || result.data?.assets || {};
+              console.log('[Index] Cloud assets found:', Object.keys(cloudAssets).length);
               
-              // DETAILED DEBUG: Log the actual data structure
-              console.log('[Index] DETAILED DEBUG - worldDocument structure:', JSON.stringify(worldDocument, null, 2));
-              console.log('[Index] DETAILED DEBUG - result.data structure:', JSON.stringify(result.data, null, 2));
-              console.log('[Index] DETAILED DEBUG - worldDocument.assets:', JSON.stringify(worldDocument?.assets, null, 2));
-              console.log('[Index] DETAILED DEBUG - result.data.world_document.assets:', JSON.stringify(result.data?.world_document?.assets, null, 2));
-              
-              // UNCONDITIONAL FIX: Always check for assets in result.data directly
-              console.log('[Index] UNCONDITIONAL DEBUG: Checking all possible asset paths');
-              console.log('[Index] result.data keys:', Object.keys(result.data || {}));
-              console.log('[Index] result.data.world_document keys:', result.data?.world_document ? Object.keys(result.data.world_document) : 'no world_document');
-              console.log('[Index] result.data.world_document.assets exists:', !!result.data?.world_document?.assets);
-              console.log('[Index] result.data.assets exists:', !!result.data?.assets);
-              
-              // Force load assets from the correct path regardless of worldDocument.assets being empty
-              if (result.data?.world_document?.assets) {
-                console.log('[Index] FORCE FIX: Found assets in result.data.world_document.assets, overwriting worldDocument.assets');
-                worldDocument.assets = result.data.world_document.assets;
-              } else if (result.data?.assets) {
-                console.log('[Index] FORCE FIX: Found assets in result.data.assets, overwriting worldDocument.assets');
-                worldDocument.assets = result.data.assets;
-              } else {
-                console.log('[Index] ERROR: No assets found in any path');
-              }
-              
-              // CRITICAL FIX: Check if assets exist and handle the case where they might be nested differently
-              let finalWorldData = worldDocument;
-              
-              // If worldDocument.assets is empty but result.data has assets, try multiple paths
-              if (!worldDocument.assets || Object.keys(worldDocument.assets).length === 0) {
-                console.log('[Index] FIX: worldDocument.assets is empty, checking result.data structure');
-                console.log('[Index] result.data keys:', Object.keys(result.data || {}));
-                console.log('[Index] result.data.world_document keys:', result.data?.world_document ? Object.keys(result.data.world_document) : 'no world_document');
+              // Load assets directly into store - bypass all complex data transformation
+              if (Object.keys(cloudAssets).length > 0) {
+                console.log('[Index] Loading assets directly into store');
+                const assetStore = useAssetStore.getState();
+                const bookId = assetStore.getCurrentBookId();
                 
-                // Try direct path first - assets might be in world_document directly
-                if (result.data?.world_document && typeof result.data.world_document === 'object' && result.data.world_document.assets) {
-                  console.log('[Index] FIX: Using assets from result.data.world_document.assets');
-                  finalWorldData = {
-                    ...worldDocument,
-                    assets: result.data.world_document.assets
-                  };
-                }
-                // Try alternative path - assets might be directly in result.data
-                else if (result.data?.assets) {
-                  console.log('[Index] FIX: Using assets directly from result.data.assets');
-                  finalWorldData = {
-                    ...worldDocument,
-                    assets: result.data.assets
-                  };
-                }
-                // Try nested path from DocumentMutation structure
-                else if (result.data?.world_document?.world_document?.assets) {
-                  console.log('[Index] FIX: Using assets from result.data.world_document.world_document.assets');
-                  finalWorldData = {
-                    ...worldDocument,
-                    assets: result.data.world_document.world_document.assets
-                  };
-                } else {
-                  console.log('[Index] ERROR: Could not find assets in any expected path');
-                  console.log('[Index] Full result.data structure:', JSON.stringify(result.data, null, 2));
-                }
+                // Directly set assets in store using proper Zustand method
+                useAssetStore.setState({
+                  bookAssets: {
+                    ...assetStore.bookAssets,
+                    [bookId]: cloudAssets
+                  }
+                });
+                
+                console.log('[Index] Assets loaded directly into store:', Object.keys(cloudAssets).length);
               }
               
-              console.log(`[Index] Final worldData being passed to loadWorldData:`, {
-                assetKeys: finalWorldData?.assets ? Object.keys(finalWorldData.assets) : 'no assets',
-                assetCount: finalWorldData?.assets ? Object.keys(finalWorldData.assets).length : 0
-              });
-              console.log('[Index] DETAILED DEBUG - finalWorldData.assets:', JSON.stringify(finalWorldData?.assets, null, 2));
-              
-              // Add delay to ensure all async operations complete
+              // Still load world data for other stuff (backgrounds, tags, etc)
+              const worldDocument = JSON.parse(JSON.stringify(result.data.world_document || {}));
               setTimeout(() => {
-                loadWorldData(finalWorldData);
+                loadWorldData(worldDocument);
               }, 0);
 
               // Restore backgrounds from world_document.backgrounds

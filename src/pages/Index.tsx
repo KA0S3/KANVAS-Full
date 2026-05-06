@@ -169,14 +169,39 @@ const Index = () => {
               // CRITICAL FIX: Check if assets exist and handle the case where they might be nested differently
               let finalWorldData = worldDocument;
               
-              // If worldDocument.assets is empty but result.data has assets, try to get them directly
-              if ((!worldDocument.assets || Object.keys(worldDocument.assets).length === 0) && 
-                  result.data && result.data.world_document && result.data.world_document.assets) {
-                console.log('[Index] FIX: Using assets directly from result.data.world_document');
-                finalWorldData = {
-                  ...worldDocument,
-                  assets: result.data.world_document.assets
-                };
+              // If worldDocument.assets is empty but result.data has assets, try multiple paths
+              if (!worldDocument.assets || Object.keys(worldDocument.assets).length === 0) {
+                console.log('[Index] FIX: worldDocument.assets is empty, checking result.data structure');
+                console.log('[Index] result.data keys:', Object.keys(result.data || {}));
+                console.log('[Index] result.data.world_document keys:', result.data?.world_document ? Object.keys(result.data.world_document) : 'no world_document');
+                
+                // Try direct path first - assets might be in world_document directly
+                if (result.data?.world_document && typeof result.data.world_document === 'object' && result.data.world_document.assets) {
+                  console.log('[Index] FIX: Using assets from result.data.world_document.assets');
+                  finalWorldData = {
+                    ...worldDocument,
+                    assets: result.data.world_document.assets
+                  };
+                }
+                // Try alternative path - assets might be directly in result.data
+                else if (result.data?.assets) {
+                  console.log('[Index] FIX: Using assets directly from result.data.assets');
+                  finalWorldData = {
+                    ...worldDocument,
+                    assets: result.data.assets
+                  };
+                }
+                // Try nested path from DocumentMutation structure
+                else if (result.data?.world_document?.world_document?.assets) {
+                  console.log('[Index] FIX: Using assets from result.data.world_document.world_document.assets');
+                  finalWorldData = {
+                    ...worldDocument,
+                    assets: result.data.world_document.world_document.assets
+                  };
+                } else {
+                  console.log('[Index] ERROR: Could not find assets in any expected path');
+                  console.log('[Index] Full result.data structure:', JSON.stringify(result.data, null, 2));
+                }
               }
               
               console.log(`[Index] Final worldData being passed to loadWorldData:`, {

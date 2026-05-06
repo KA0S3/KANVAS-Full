@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { connectivityService } from '@/services/connectivityService';
 import { useAuthStore } from './authStore';
+import { getPlanConfig } from '@/config/plans';
 
 interface Quota {
   used: number;
@@ -43,13 +44,11 @@ interface CloudStore {
   updateQuotaUsage: (bytes: number) => void;
 }
 
-// Default quota limits based on plan
-const QUOTA_LIMITS = {
-  free: 100 * 1024 * 1024,    // 100MB
-  pro: 10 * 1024 * 1024 * 1024,  // 10GB
-  lifetime: 15 * 1024 * 1024 * 1024, // 15GB
-  owner: 10 * 1024 * 1024 * 1024, // 10GB
-} as const;
+// Helper function to get quota limit from plans configuration
+const getQuotaLimitForPlan = (planType: string): number => {
+  const planConfig = getPlanConfig(planType);
+  return planConfig ? planConfig.quotaBytes : 100 * 1024 * 1024; // Fallback to 100MB
+};
 
 export const useCloudStore = create<CloudStore>()(
   persist(
@@ -58,7 +57,7 @@ export const useCloudStore = create<CloudStore>()(
       syncEnabled: true,
       quota: {
         used: 0,
-        available: QUOTA_LIMITS.free,
+        available: getQuotaLimitForPlan('free'),
       },
       pendingUploads: 0,
       autosaveStatus: 'idle',
@@ -199,9 +198,10 @@ export const useCloudStore = create<CloudStore>()(
   )
 );
 
-// Helper function to get quota limit based on current plan
-export const getQuotaLimitForPlan = (plan: 'free' | 'pro' | 'lifetime' | 'owner'): number => {
-  return QUOTA_LIMITS[plan];
+// Helper function to get quota limit based on current plan (re-export for backward compatibility)
+export const getQuotaLimitForPlanExport = (plan: string): number => {
+  const planConfig = getPlanConfig(plan);
+  return planConfig ? planConfig.quotaBytes : 100 * 1024 * 1024; // Fallback to 100MB
 };
 
 // Helper function to update quota based on effective limits from authStore
@@ -225,7 +225,7 @@ export const updateQuotaBasedOnPlan = () => {
     }
   } else {
     // Fallback to free plan limits if effectiveLimits not available
-    const limit = QUOTA_LIMITS.free;
+    const limit = getQuotaLimitForPlan('free');
     useCloudStore.getState().setQuota(currentUsed, limit);
   }
 };

@@ -1029,15 +1029,23 @@ export const useAssetStore = create<AssetStore>()(
         console.warn('[AssetStore] Cannot load world data - no current book');
         return;
       }
+      
+      // CRITICAL FIX: Ensure assets object exists and has data
+      let assets = worldData.assets;
+      if (!assets || Object.keys(assets).length === 0) {
+        console.warn('[AssetStore] WARNING: worldData.assets is empty, checking for alternative data sources');
+        
+        // Check if assets might be in a different field
+        if (worldData.world_document?.assets) {
+          console.log('[AssetStore] Found assets in worldData.world_document.assets');
+          assets = worldData.world_document.assets;
+        } else {
+          console.error('[AssetStore] CRITICAL: No assets found in any expected field');
+          assets = {};
+        }
+      }
 
       // Migrate 'other' type to 'card' for database compatibility
-      const assets = worldData.assets || {};
-      console.log(`[AssetStore] Extracted assets from worldData:`, {
-        assetsType: typeof assets,
-        assetsKeys: Object.keys(assets),
-        assetsLength: Object.keys(assets).length,
-        sampleAsset: Object.values(assets)[0]
-      });
       const migratedAssets: Record<string, any> = {};
       let migratedCount = 0;
 
@@ -1065,7 +1073,7 @@ export const useAssetStore = create<AssetStore>()(
         const newBookGlobalCustomFields = { ...state.bookGlobalCustomFields };
 
         newBookAssets[bookId] = migratedAssets;
-        newBookGlobalCustomFields[bookId] = worldData.globalCustomFields || [];
+        newBookGlobalCustomFields[bookId] = worldData.globalCustomFields || []
 
         console.log(`[AssetStore] Store updated. New state:`, {
           totalBooks: Object.keys(newBookAssets).length,

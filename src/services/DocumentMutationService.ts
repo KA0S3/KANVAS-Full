@@ -321,6 +321,15 @@ class DocumentMutationService {
         assetCount: result.world_document?.assets ? Object.keys(result.world_document.assets).length : 0,
         fullResult: result
       });
+      
+      // CRITICAL FIX: Verify assets are properly included in world_document
+      if (!result.world_document?.assets || Object.keys(result.world_document.assets).length === 0) {
+        console.error('[DocumentMutation] CRITICAL ERROR: No assets in world_document despite successful loading', {
+          originalAssetsCount: restoredAssetsData.length,
+          worldDocumentAssets: result.world_document?.assets,
+          assetsObjectKeys: Object.keys(assetsObject)
+        });
+      }
 
       // Cache the result
       this.documentCache.set(projectId, {
@@ -1280,6 +1289,19 @@ class DocumentMutationService {
 
     // Update asset store with server data
     const assetStore = (await import('@/stores/assetStore')).useAssetStore.getState();
+    
+    // CRITICAL FIX: Ensure world_document exists before calling loadWorldData
+    if (!serverDoc.world_document) {
+      console.error('[DocumentMutation] CRITICAL ERROR: serverDoc.world_document is missing', serverDoc);
+      return;
+    }
+    
+    console.log('[DocumentMutation] About to call loadWorldData with:', {
+      hasWorldDocument: !!serverDoc.world_document,
+      assetsKeys: serverDoc.world_document.assets ? Object.keys(serverDoc.world_document.assets) : 'no assets',
+      assetCount: serverDoc.world_document.assets ? Object.keys(serverDoc.world_document.assets).length : 0
+    });
+    
     assetStore.loadWorldData(serverDoc.world_document);
 
     // Restore backgrounds from world_document.backgrounds to backgroundStore

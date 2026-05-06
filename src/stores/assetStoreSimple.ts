@@ -137,8 +137,19 @@ export const useAssetStore = create<AssetStore>()(
       // Initialize cache service for this book
       assetCacheService.initialize(supabase, bookId);
       
-      // Load assets from cache service (will pull from server if needed)
-      await get().loadAssetsFromCache();
+      // Store assets directly if provided (from DocumentMutation)
+      if (worldData?.assets) {
+        console.log('[AssetStore] Storing assets from worldData in virtualized mode:', Object.keys(worldData.assets).length);
+        set((state) => ({
+          bookAssets: {
+            ...state.bookAssets,
+            [bookId]: worldData.assets
+          }
+        }));
+      } else {
+        // Load assets from cache service only if not provided
+        await get().loadAssetsFromCache();
+      }
       
       // Load global custom fields
       if (worldData?.globalCustomFields) {

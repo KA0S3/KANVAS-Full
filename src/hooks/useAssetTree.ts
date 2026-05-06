@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useAssetStore } from '@/stores/assetStore';
+import { useAssetStore } from '@/stores/assetStoreSimple';
 import { 
   buildAssetTree, 
   flattenTree, 

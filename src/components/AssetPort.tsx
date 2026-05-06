@@ -6,7 +6,7 @@ import { AssetCreationModalImproved } from "./asset/AssetCreationModalImproved";
 import { AssetEditModalImproved } from "./asset/AssetEditModalImproved";
 import { EmptySpaceContextMenu } from "./EmptySpaceContextMenu";
 import { useAssetTree } from "@/hooks/useAssetTree";
-import { useAssetStore } from "@/stores/assetStore";
+import { useAssetStore } from "@/stores/assetStoreSimple";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useBackgroundStore } from "@/stores/backgroundStore";
 import { useAuthStore } from "@/stores/authStore";

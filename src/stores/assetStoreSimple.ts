@@ -132,6 +132,12 @@ export const useAssetStore = create<AssetStore>()(
     if (!bookId) return;
 
     console.log('[AssetStore] Loading world data for book:', bookId, 'virtualized:', get().isVirtualizedMode);
+    console.log('[AssetStore] worldData structure:', {
+      keys: Object.keys(worldData || {}),
+      hasAssets: !!worldData?.assets,
+      assetKeys: worldData?.assets ? Object.keys(worldData.assets) : 'no assets',
+      worldDataSample: worldData
+    });
 
     if (get().isVirtualizedMode) {
       // Initialize cache service for this book
@@ -147,6 +153,7 @@ export const useAssetStore = create<AssetStore>()(
           }
         }));
       } else {
+        console.log('[AssetStore] No assets in worldData, calling loadAssetsFromCache');
         // Load assets from cache service only if not provided
         await get().loadAssetsFromCache();
       }

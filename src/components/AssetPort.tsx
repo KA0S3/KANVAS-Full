@@ -951,6 +951,12 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     }
     
     return displayAssets.map((asset) => {
+      // CRITICAL FIX: Validate asset before rendering to prevent React error #130
+      if (!asset || !asset.id) {
+        console.error('[AssetPort] Invalid asset in displayAssets:', asset);
+        return null;
+      }
+      
       // When inside a parent asset, position relative to parent's bounds
       let displayAsset = { ...asset };
       
@@ -975,7 +981,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
           isEditingBackground={isEditingBackground}
         />
       );
-    });
+    }).filter(Boolean); // Filter out null assets
   })()}
         </div>
       </div>

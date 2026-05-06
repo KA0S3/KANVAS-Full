@@ -252,18 +252,18 @@ class DocumentMutationService {
           }
         }
 
-        // Map database fields to frontend asset structure
+        // Map database fields to frontend asset structure with comprehensive defaults
         assetsObject[asset.asset_id] = {
-          id: asset.asset_id,
-          name: asset.name,
-          type: asset.type,
+          id: asset.asset_id || '',
+          name: asset.name || 'Unnamed Asset',
+          type: asset.type || 'card',
           x: asset.x || 0,
           y: asset.y || 0,
           width: asset.width || 200,
           height: asset.height || 150,
           zIndex: asset.z_index || 0,
           isExpanded: asset.is_expanded || false,
-          content,
+          content: content || '',
           backgroundConfig: asset.background_config || {},
           viewportConfig: asset.viewport_config || {},
           customFields: asset.custom_fields?.customFields || [],
@@ -271,14 +271,26 @@ class DocumentMutationService {
           tags: asset.custom_fields?.tags || [],
           viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {},
           // Prioritize extracted thumbnail from content, then fallback to custom_fields
-          thumbnail: extractedThumbnail || asset.custom_fields?.thumbnail,
-          background: asset.custom_fields?.background,
-          description: asset.custom_fields?.description,
-          updatedAt: asset.updated_at,
+          thumbnail: extractedThumbnail || asset.custom_fields?.thumbnail || '',
+          background: asset.custom_fields?.background || '',
+          description: asset.custom_fields?.description || '',
+          updatedAt: asset.updated_at || Date.now(),
           // Add required fields that might not be in database
           children: [],
-          parentId: asset.parent_id,
-          createdAt: asset.updated_at, // Use updated_at as fallback
+          parentId: asset.parent_id || null,
+          createdAt: asset.updated_at || Date.now(),
+          // CRITICAL: Add missing required fields to prevent React error #130
+          isLocked: false,
+          borderShape: 'square',
+          showTagBorder: false,
+          cloudStatus: 'local',
+          cloudId: null,
+          cloudPath: null,
+          cloudSize: null,
+          cloudUpdatedAt: null,
+          cloudError: null,
+          deletedAt: null,
+          file: null,
         };
       });
 

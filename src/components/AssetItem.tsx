@@ -88,11 +88,17 @@ const colorMap = {
 };
 
 export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDoubleClick, isSelected, onResize, onEdit, onSelectAndFocus, isEditingBackground = false, onCreateAsset }: AssetItemProps) {
-  const Icon = iconMap[asset.type];
-  const colorClass = colorMap[asset.type];
+  // CRITICAL FIX: Validate asset data to prevent React error #130
+  if (!asset || !asset.id) {
+    console.error('[AssetItem] Invalid asset data:', asset);
+    return null;
+  }
+
+  const Icon = iconMap[asset.type] || File;
+  const colorClass = colorMap[asset.type] || 'text-muted-foreground';
   const { getAssetTags } = useTagStore();
 
-  const assetTags = getAssetTags(asset.id);
+  const assetTags = getAssetTags(asset.id) || [];
   const hasTags = assetTags && assetTags.length > 0;
   const firstTagColor = hasTags ? assetTags[0]?.color : null;
 

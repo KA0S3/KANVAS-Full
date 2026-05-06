@@ -474,6 +474,7 @@ const Index = () => {
       } else {
         console.log('[Index] Skipping empty book world data to preserve loaded assets');
       }
+    }, 100);
 
       // Restore backgrounds from book's worldData if present
       if (book.worldData?.backgrounds) {

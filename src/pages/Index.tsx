@@ -422,17 +422,29 @@ const Index = () => {
         
         // CRITICAL FIX: Load world data directly to AssetStore, bypassing localStorage
         // This prevents quota exceeded errors from large world data
+        
+        // Extract assets from the correct location - DocumentMutation stores them in result.data.assets
+        const assets = result.data.assets || {};
         const worldDocument = result.data.world_document || result.data;
-        if (worldDocument) {
+        
+        // Create a combined worldData with assets from the correct location
+        const combinedWorldData = {
+          ...worldDocument,
+          assets: assets // Use assets from result.data.assets where DocumentMutation actually stores them
+        };
+        
+        if (combinedWorldData) {
           console.log('[Index] Loading world data directly to AssetStore:', {
-            assetCount: Object.keys(worldDocument.assets || {}).length,
-            hasAssets: !!(worldDocument.assets && Object.keys(worldDocument.assets).length > 0),
-            dataSource: result.data.world_document ? 'world_document' : 'direct'
+            assetCount: Object.keys(combinedWorldData.assets || {}).length,
+            hasAssets: !!(combinedWorldData.assets && Object.keys(combinedWorldData.assets).length > 0),
+            dataSource: 'combined',
+            originalAssetsCount: Object.keys(assets || {}).length,
+            worldDocumentAssetsCount: Object.keys(worldDocument?.assets || {}).length
           });
           
           // Load directly to AssetStore to avoid localStorage quota issues
-          loadWorldData(worldDocument);
-          loadTagWorldData(worldDocument);
+          loadWorldData(combinedWorldData);
+          loadTagWorldData(combinedWorldData);
         }
       } else if (result.error === 'Project not found') {
         // Book doesn't exist on server yet - create it

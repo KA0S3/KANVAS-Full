@@ -160,21 +160,18 @@ const Index = () => {
               const cloudAssets = result.data?.world_document?.assets || result.data?.assets || {};
               console.log('[Index] Cloud assets found:', Object.keys(cloudAssets).length);
               
-              // Load assets directly into store - bypass all complex data transformation
+              // Load assets through proper store method to maintain virtualized mode
               if (Object.keys(cloudAssets).length > 0) {
-                console.log('[Index] Loading assets directly into store');
+                console.log('[Index] Loading assets through proper loadWorldData method');
                 const assetStore = useAssetStore.getState();
-                const bookId = assetStore.getCurrentBookId();
                 
-                // Directly set assets in store using proper Zustand method
-                useAssetStore.setState({
-                  bookAssets: {
-                    ...assetStore.bookAssets,
-                    [bookId]: cloudAssets
-                  }
+                // Use loadWorldData to ensure virtualized mode integration and hierarchy reconstruction
+                assetStore.loadWorldData({ 
+                  assets: cloudAssets,
+                  globalCustomFields: result.data?.world_document?.globalCustomFields || {}
                 });
                 
-                console.log('[Index] Assets loaded directly into store:', Object.keys(cloudAssets).length);
+                console.log('[Index] Assets loaded through loadWorldData:', Object.keys(cloudAssets).length);
               }
               
               // Still load world data for other stuff (backgrounds, tags, etc)

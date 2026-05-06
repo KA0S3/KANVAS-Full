@@ -139,6 +139,29 @@ export const useAssetStore = create<AssetStore>()(
       worldDataSample: worldData
     });
 
+    // Helper function to reconstruct asset hierarchy from parentId relationships
+    const reconstructAssetHierarchy = (assets: Record<string, Asset>): Record<string, Asset> => {
+      const reconstructedAssets: Record<string, Asset> = {};
+      
+      // First pass: copy all assets with empty children arrays
+      Object.entries(assets).forEach(([id, asset]) => {
+        reconstructedAssets[id] = {
+          ...asset,
+          children: [], // Start with empty children array
+        };
+      });
+      
+      // Second pass: build children arrays from parentId relationships
+      Object.entries(reconstructedAssets).forEach(([id, asset]) => {
+        if (asset.parentId && reconstructedAssets[asset.parentId]) {
+          reconstructedAssets[asset.parentId].children.push(id);
+        }
+      });
+      
+      console.log('[AssetStore] Reconstructed hierarchy for', Object.keys(assets).length, 'assets');
+      return reconstructedAssets;
+    };
+
     if (get().isVirtualizedMode) {
       // Initialize cache service for this book
       assetCacheService.initialize(supabase, bookId);
@@ -146,10 +169,12 @@ export const useAssetStore = create<AssetStore>()(
       // Store assets directly if provided (from DocumentMutation)
       if (worldData?.assets) {
         console.log('[AssetStore] Storing assets from worldData in virtualized mode:', Object.keys(worldData.assets).length);
+        // Reconstruct hierarchy before storing
+        const reconstructedAssets = reconstructAssetHierarchy(worldData.assets);
         set((state) => ({
           bookAssets: {
             ...state.bookAssets,
-            [bookId]: worldData.assets
+            [bookId]: reconstructedAssets
           }
         }));
       } else {
@@ -171,13 +196,15 @@ export const useAssetStore = create<AssetStore>()(
       // Legacy mode: load all assets at once
       if (worldData?.assets) {
         const assets = worldData.assets;
+        // Reconstruct hierarchy before storing
+        const reconstructedAssets = reconstructAssetHierarchy(assets);
         set((state) => ({
           bookAssets: {
             ...state.bookAssets,
-            [bookId]: assets
+            [bookId]: reconstructedAssets
           }
         }));
-        console.log('[AssetStore] Loaded', Object.keys(assets).length, 'assets in legacy mode');
+        console.log('[AssetStore] Loaded', Object.keys(assets).length, 'assets in legacy mode with hierarchy reconstruction');
       }
       
       // Load global custom fields

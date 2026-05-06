@@ -16,7 +16,6 @@ import SideAdBanner from "@/components/SideAdBanner";
 import { QuotaWarningBar } from "@/components/QuotaWarningBar";
 import { EnhancedAccountModal } from "@/components/account/EnhancedAccountModal";
 import { UndoStatus } from "@/components/UndoStatus";
-import { useAssetStore } from "@/stores/assetStore";
 import { useAuthStore } from '@/stores/authStore';
 import { useTagStore } from "@/stores/tagStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -24,6 +23,7 @@ import { useBackgroundStore } from "@/stores/backgroundStore";
 import type { BackgroundConfig } from "@/types/background";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
+import { useAssetStore } from "@/stores/assetStoreSimple";
 import { audioEngine } from "@/services/AudioEngine";
 import { autosaveService } from '@/services/autosaveService';
 import { documentMutationService } from '@/services/DocumentMutationService';
@@ -47,7 +47,7 @@ const Index = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCloudLoading, setIsCloudLoading] = useState(false);
   const createWorldButtonRef = useRef<HTMLButtonElement>(null);
-  const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId } = useAssetStore(); // Using getCurrentBookAssets method
+  const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId, enableVirtualizedMode } = useAssetStore(); // Using getCurrentBookAssets method
   const { loadWorldData: loadTagWorldData } = useTagStore();
   const { currentBookId, setCurrentBook, getAllBooks, deleteBook, updateWorldData } = useBookStore(); // Adding back book store - confirmed working
   const { theme } = useThemeStore(); // Adding back theme store - confirmed working
@@ -60,10 +60,13 @@ const Index = () => {
   // Fallback functions and values
   const getBackground = () => null;
 
-  // Initialize auth on mount
+  // Initialize auth and enable virtualized mode on mount
   useEffect(() => {
     initializeAuth();
-  }, [initializeAuth]);
+    // Enable virtualized asset loading for scalability
+    enableVirtualizedMode();
+    console.log('[Index] Virtualized asset mode enabled for scalability');
+  }, [initializeAuth, enableVirtualizedMode]);
 
   // Load data from cloud when user authenticates - LOW I/O OPTIMIZED
   // Sync project metadata from Supabase to local bookStore on sign-in only

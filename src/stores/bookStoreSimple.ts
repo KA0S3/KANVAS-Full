@@ -383,9 +383,10 @@ export const useBookStore = create<BookStore>()(
           return value ? JSON.parse(value) : null;
         },
         setItem: (name, value) => {
+          // Remove large data before saving to localStorage
+          const cleanValue = JSON.parse(JSON.stringify(value)); // Deep clone to avoid modifying original
+          
           try {
-            // Remove large data before saving to localStorage
-            const cleanValue = { ...value };
             if (cleanValue.state && cleanValue.state.books) {
               Object.keys(cleanValue.state.books).forEach(bookId => {
                 const book = cleanValue.state.books[bookId];
@@ -413,14 +414,30 @@ export const useBookStore = create<BookStore>()(
           } catch (error) {
             console.error('[BookStore] Error saving to localStorage:', error);
             if (error instanceof Error && error.message.includes('quota')) {
-              // Emergency cleanup and retry
+              // Emergency cleanup and retry with cleaned data
               console.log('[BookStore] Storage quota exceeded, performing emergency cleanup...');
               StorageCleanup.clearAllKanvasData();
               try {
-                localStorage.setItem(name, JSON.stringify(value));
+                // Try saving cleaned data again, not original large data
+                localStorage.setItem(name, JSON.stringify(cleanValue));
                 console.log('[BookStore] Successfully saved after cleanup');
               } catch (retryError) {
                 console.error('[BookStore] Still failed to save after cleanup:', retryError);
+                // Last resort: save minimal data
+                try {
+                  const minimalData = {
+                    state: {
+                      books: {},
+                      currentBookId: cleanValue.state?.currentBookId,
+                      settings: cleanValue.state?.settings,
+                      viewMode: cleanValue.state?.viewMode
+                    }
+                  };
+                  localStorage.setItem(name, JSON.stringify(minimalData));
+                  console.log('[BookStore] Saved minimal data after all retries failed');
+                } catch (finalError) {
+                  console.error('[BookStore] Even minimal save failed:', finalError);
+                }
               }
             }
           }
@@ -455,75 +472,5 @@ export const useBookStore = create<BookStore>()(
         importBooks: state.importBooks,
       }),
     },
-  });
-},
-
-getWorldData: (bookId) => {
-  const state = get();
-  const book = state.books[bookId];
-  return book ? book.worldData : null;
-},
-
-setViewMode: (mode) => {
-  set({ viewMode: mode });
-},
-
-updateSettings: (settingsUpdates) => {
-  set((state) => ({
-    settings: {
-      ...state.settings,
-      ...settingsUpdates,
-    },
-  }));
-},
-
-exportBooks: () => {
-  const state = get();
-  return JSON.stringify({
-    books: state.books,
-    settings: state.settings,
-    exportedAt: new Date().toISOString(),
-  }, null, 2);
-},
-
-exportSingleBook: (bookId) => {
-  const state = get();
-  const book = state.books[bookId];
-  if (!book) {
-    throw new Error(`Book with ID ${bookId} not found`);
-  }
-  return JSON.stringify({
-    books: { [bookId]: book },
-    settings: state.settings,
-    exportedAt: new Date().toISOString(),
-  }, null, 2);
-},
-
-importBooks: (data, mode = 'replace') => {
-  try {
-    const parsed = JSON.parse(data);
-    
-    if (!parsed.books || typeof parsed.books !== 'object') {
-      throw new Error('Invalid data format');
-        leatherPresets: state.leatherPresets,
-        _isCreating: state._isCreating,
-        _lastCreationTime: state._lastCreationTime,
-        _pendingCreationTitle: state._pendingCreationTitle,
-        createBook: state.createBook,
-        updateBook: state.updateBook,
-        deleteBook: state.deleteBook,
-        reorderBooks: state.reorderBooks,
-        setCurrentBook: state.setCurrentBook,
-        getCurrentBook: state.getCurrentBook,
-        getAllBooks: state.getAllBooks,
-        updateWorldData: state.updateWorldData,
-        getWorldData: state.getWorldData,
-        setViewMode: state.setViewMode,
-        updateSettings: state.updateSettings,
-        exportBooks: state.exportBooks,
-        exportSingleBook: state.exportSingleBook,
-        importBooks: state.importBooks,
-      }),
-    }
-  )
+  ),
 );

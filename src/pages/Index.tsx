@@ -23,7 +23,7 @@ import { useBackgroundStore } from "@/stores/backgroundStore";
 import type { BackgroundConfig } from "@/types/background";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
-import { useAssetStore } from "@/stores/assetStoreSimple";
+import { useAssetStore } from "@/stores/assetStore";
 import { audioEngine } from "@/services/AudioEngine";
 import { autosaveService } from '@/services/autosaveService';
 import { documentMutationService } from '@/services/DocumentMutationService';
@@ -47,7 +47,7 @@ const Index = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCloudLoading, setIsCloudLoading] = useState(false);
   const createWorldButtonRef = useRef<HTMLButtonElement>(null);
-  const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId, enableVirtualizedMode } = useAssetStore(); // Using getCurrentBookAssets method
+  const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId } = useAssetStore(); // Using getCurrentBookAssets method
   const { loadWorldData: loadTagWorldData } = useTagStore();
   const { currentBookId, setCurrentBook, getAllBooks, deleteBook, updateWorldData } = useBookStore(); // Adding back book store - confirmed working
   const { theme } = useThemeStore(); // Adding back theme store - confirmed working
@@ -60,13 +60,11 @@ const Index = () => {
   // Fallback functions and values
   const getBackground = () => null;
 
-  // Initialize auth and enable virtualized mode on mount
+  // Initialize auth on mount
   useEffect(() => {
     initializeAuth();
-    // Enable virtualized asset loading for scalability
-    enableVirtualizedMode();
-    console.log('[Index] Virtualized asset mode enabled for scalability');
-  }, [initializeAuth, enableVirtualizedMode]);
+    console.log('[Index] Auth initialized');
+  }, [initializeAuth]);
 
   // Load data from cloud when user authenticates - LOW I/O OPTIMIZED
   // Sync project metadata from Supabase to local bookStore on sign-in only

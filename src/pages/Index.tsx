@@ -166,6 +166,24 @@ const Index = () => {
               console.log('[Index] DETAILED DEBUG - worldDocument.assets:', JSON.stringify(worldDocument?.assets, null, 2));
               console.log('[Index] DETAILED DEBUG - result.data.world_document.assets:', JSON.stringify(result.data?.world_document?.assets, null, 2));
               
+              // UNCONDITIONAL FIX: Always check for assets in result.data directly
+              console.log('[Index] UNCONDITIONAL DEBUG: Checking all possible asset paths');
+              console.log('[Index] result.data keys:', Object.keys(result.data || {}));
+              console.log('[Index] result.data.world_document keys:', result.data?.world_document ? Object.keys(result.data.world_document) : 'no world_document');
+              console.log('[Index] result.data.world_document.assets exists:', !!result.data?.world_document?.assets);
+              console.log('[Index] result.data.assets exists:', !!result.data?.assets);
+              
+              // Force load assets from the correct path regardless of worldDocument.assets being empty
+              if (result.data?.world_document?.assets) {
+                console.log('[Index] FORCE FIX: Found assets in result.data.world_document.assets, overwriting worldDocument.assets');
+                worldDocument.assets = result.data.world_document.assets;
+              } else if (result.data?.assets) {
+                console.log('[Index] FORCE FIX: Found assets in result.data.assets, overwriting worldDocument.assets');
+                worldDocument.assets = result.data.assets;
+              } else {
+                console.log('[Index] ERROR: No assets found in any path');
+              }
+              
               // CRITICAL FIX: Check if assets exist and handle the case where they might be nested differently
               let finalWorldData = worldDocument;
               

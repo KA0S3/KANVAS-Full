@@ -406,6 +406,20 @@ export const useAssetStore = create<AssetStore>()(
     
     // If updating background config, track metadata changes (MASTER_PLAN.md state-based tracking)
     // Note: markAssetChanged is already called above for all updates
+    // CRITICAL FIX: Add explicit auto-save trigger for background changes
+    if (updates.backgroundConfig !== undefined) {
+      const state = useAssetStore.getState();
+      const bookId = state.getCurrentBookId();
+      if (bookId) {
+        const bookAssets = state.bookAssets[bookId] || {};
+        const asset = bookAssets[assetId];
+        if (asset) {
+          // Trigger immediate save for background changes
+          documentMutationService.markAssetChanged(assetId, asset);
+          console.log(`[AssetStore] Background config changed for asset ${assetId}, triggering auto-save`);
+        }
+      }
+    }
   },
 
   // Delete an asset and all its descendants recursively

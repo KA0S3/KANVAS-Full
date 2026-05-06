@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Persistence Test Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        .test-result { padding: 8px; margin: 4px 0; border-radius: 4px; }
+        .pass { background-color: #10b981; color: white; }
+        .fail { background-color: #ef4444; color: white; }
+        .pending { background-color: #f59e0b; color: white; }
+        .info { background-color: #3b82f6; color: white; }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6">Supabase/R2 Data Persistence Test Suite</h1>
+        
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Configuration</h2>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Supabase URL:</label>
+                    <input type="text" id="supabaseUrl" class="w-full p-2 border rounded" placeholder="https://your-project.supabase.co">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Supabase Anon Key:</label>
+                    <input type="password" id="supabaseKey" class="w-full p-2 border rounded" placeholder="eyJhbGciOi...">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Test User Email:</label>
+                    <input type="email" id="testEmail" class="w-full p-2 border rounded" placeholder="test@example.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Test User Password:</label>
+                    <input type="password" id="testPassword" class="w-full p-2 border rounded" placeholder="password">
+                </div>
+            </div>
+            <button onclick="initializeSupabase()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                Initialize Supabase
+            </button>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Test Results</h2>
+            <div id="testResults"></div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h3 class="text-lg font-semibold mb-4">Database Tests</h3>
+                <button onclick="runDatabaseTests()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 mb-4">
+                    Run Database Tests
+                </button>
+                <div id="databaseResults"></div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <h3 class="text-lg font-semibold mb-4">File Upload Tests</h3>
+                <button onclick="runFileUploadTests()" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 mb-4">
+                    Run File Upload Tests
+                </button>
+                <div id="fileUploadResults"></div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6 mt-6">
+            <h3 class="text-lg font-semibold mb-4">Comprehensive Test</h3>
+            <button onclick="runFullTestSuite()" class="bg-indigo-500 text-white px-6 py-3 rounded hover:bg-indigo-600">
+                Run Full Test Suite
+            </button>
+            <div id="fullTestResults" class="mt-4"></div>
+        </div>
+    </div>
+
+    <script>
+        let supabase = null;
+        let testProjectId = null;
+        let testUserId = null;
+
+        function initializeSupabase() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                addResult('config', 'Please provide Supabase URL and Anon Key', 'fail');
+                return;
+            }
+
+            try {
+                supabase = createClient(url, key);
+                addResult('config', 'Supabase client initialized successfully', 'pass');
+            } catch (error) {
+                addResult('config', `Failed to initialize Supabase: ${error.message}`, 'fail');
+            }
+        }
+
+        async function signInTestUser() {
+            const email = document.getElementById('testEmail').value;
+            const password = document.getElementById('testPassword').value;
+            
+            if (!email || !password) {
+                addResult('auth', 'Please provide test user credentials', 'fail');
+                return null;
+            }
+
+            try {
+                const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+                if (error) throw error;
+                testUserId = data.user.id;
+                addResult('auth', `Signed in as ${email}`, 'pass');
+                return data.user;
+            } catch (error) {
+                addResult('auth', `Sign in failed: ${error.message}`, 'fail');
+                return null;
+            }
+        }
+
+        async function runDatabaseTests() {
+            if (!supabase) {
+                addResult('database', 'Please initialize Supabase first', 'fail');
+                return;
+            }
+
+            const user = await signInTestUser();
+            if (!user) return;
+
+            // Test 1: Project Creation
+            await testProjectCreation();
+            
+            // Test 2: Asset Creation and Metadata
+            await testAssetCreation();
+            
+            // Test 3: Custom Fields
+            await testCustomFields();
+            
+            // Test 4: Book Cover Settings
+            await testBookCoverSettings();
+            
+            // Test 5: Asset Updates
+            await testAssetUpdates();
+            
+            // Test 6: Project Loading
+            await testProjectLoading();
+        }
+
+        async function testProjectCreation() {
+            try {
+                const projectName = `Test Project ${Date.now()}`;
+                const { data, error } = await supabase.rpc('create_project', {
+                    p_name: projectName,
+                    p_description: 'Test project for data persistence verification'
+                });
+
+                if (error) throw error;
+                testProjectId = data;
+                addResult('project-creation', `Project created with ID: ${data}`, 'pass');
+            } catch (error) {
+                addResult('project-creation', `Project creation failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function testAssetCreation() {
+            if (!testProjectId) {
+                addResult('asset-creation', 'No project ID available', 'fail');
+                return;
+            }
+
+            try {
+                const testAssets = [
+                    {
+                        asset_id: `test-asset-${Date.now()}-1`,
+                        parent_id: null,
+                        name: 'Test Card Asset',
+                        type: 'card',
+                        x: 100,
+                        y: 100,
+                        width: 200,
+                        height: 150,
+                        z_index: 1,
+                        is_expanded: false,
+                        content: 'This is test content',
+                        background_config: { color: '#ff0000' },
+                        viewport_config: { zoom: 1.0 },
+                        custom_fields: {
+                            customFields: [],
+                            customFieldValues: [],
+                            tags: ['test-tag'],
+                            thumbnail: null,
+                            background: null,
+                            description: 'Test asset description',
+                            viewportDisplaySettings: {}
+                        }
+                    },
+                    {
+                        asset_id: `test-asset-${Date.now()}-2`,
+                        parent_id: null,
+                        name: 'Test Image Asset',
+                        type: 'image',
+                        x: 300,
+                        y: 100,
+                        width: 250,
+                        height: 200,
+                        z_index: 2,
+                        is_expanded: false,
+                        content: null,
+                        background_config: { color: '#00ff00' },
+                        viewport_config: { zoom: 1.0 },
+                        custom_fields: {
+                            customFields: [],
+                            customFieldValues: [],
+                            tags: ['image-tag'],
+                            thumbnail: null,
+                            background: null,
+                            description: 'Test image asset',
+                            viewportDisplaySettings: {}
+                        }
+                    }
+                ];
+
+                const { error } = await supabase.rpc('save_assets', {
+                    p_project_id: testProjectId,
+                    p_assets: testAssets
+                });
+
+                if (error) throw error;
+                addResult('asset-creation', `Created ${testAssets.length} test assets`, 'pass');
+            } catch (error) {
+                addResult('asset-creation', `Asset creation failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function testCustomFields() {
+            if (!testProjectId) {
+                addResult('custom-fields', 'No project ID available', 'fail');
+                return;
+            }
+
+            try {
+                const assetWithCustomFields = {
+                    asset_id: `test-asset-${Date.now()}-custom`,
+                    parent_id: null,
+                    name: 'Asset with Custom Fields',
+                    type: 'card',
+                    x: 500,
+                    y: 100,
+                    width: 200,
+                    height: 150,
+                    z_index: 3,
+                    is_expanded: false,
+                    content: 'Asset with custom fields',
+                    background_config: { color: '#0000ff' },
+                    viewport_config: { zoom: 1.0 },
+                    custom_fields: {
+                        customFields: [
+                            { id: 'field1', label: 'Test Field 1', type: 'text', displayInViewport: false, isGlobal: false },
+                            { id: 'field2', label: 'Test Field 2', type: 'image', displayInViewport: true, isGlobal: false }
+                        ],
+                        customFieldValues: [
+                            { fieldId: 'field1', value: 'Test value for field 1' },
+                            { fieldId: 'field2', value: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==' }
+                        ],
+                        tags: ['custom-field-test'],
+                        thumbnail: null,
+                        background: null,
+                        description: 'Asset with comprehensive custom fields',
+                        viewportDisplaySettings: { showInViewport: true }
+                    }
+                };
+
+                const { error } = await supabase.rpc('save_assets', {
+                    p_project_id: testProjectId,
+                    p_assets: [assetWithCustomFields]
+                });
+
+                if (error) throw error;
+                addResult('custom-fields', 'Asset with custom fields created successfully', 'pass');
+            } catch (error) {
+                addResult('custom-fields', `Custom fields test failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function testBookCoverSettings() {
+            if (!testProjectId) {
+                addResult('book-cover', 'No project ID available', 'fail');
+                return;
+            }
+
+            try {
+                const coverSettings = {
+                    cover_image: 'https://picsum.photos/seed/testcover/400/600.jpg',
+                    color: '#8b5cf6',
+                    gradient: 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+                    leather_color: '#8B4513',
+                    is_leather_mode: true,
+                    cover_page_settings: {
+                        showCoverPage: true,
+                        title: {
+                            text: 'Test Book Title',
+                            position: { x: 50, y: 30 },
+                            style: { type: 'serif', color: '#ffffff', size: 'large' }
+                        },
+                        subheading: {
+                            text: 'Test Subtitle',
+                            position: { x: 50, y: 50 },
+                            style: { type: 'sans-serif', color: '#cccccc', size: 'medium' }
+                        },
+                        description: {
+                            text: 'Test book description for cover page',
+                            position: { x: 50, y: 70 },
+                            style: { type: 'serif', color: '#aaaaaa', size: 'small' }
+                        }
+                    }
+                };
+
+                const { error } = await supabase.rpc('save_project', {
+                    p_project_id: testProjectId,
+                    p_cover_image: coverSettings.cover_image,
+                    p_color: coverSettings.color,
+                    p_gradient: coverSettings.gradient,
+                    p_leather_color: coverSettings.leather_color,
+                    p_is_leather_mode: coverSettings.is_leather_mode,
+                    p_cover_page_settings: coverSettings.cover_page_settings
+                });
+
+                if (error) throw error;
+                addResult('book-cover', 'Book cover settings saved successfully', 'pass');
+            } catch (error) {
+                addResult('book-cover', `Book cover test failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function testAssetUpdates() {
+            if (!testProjectId) {
+                addResult('asset-updates', 'No project ID available', 'fail');
+                return;
+            }
+
+            try {
+                // Test position updates
+                const positionUpdates = [
+                    { asset_id: `test-asset-${Date.now()}-1`, x: 150, y: 150, z_index: 5 },
+                    { asset_id: `test-asset-${Date.now()}-2`, x: 350, y: 200, z_index: 6 }
+                ];
+
+                const { error: positionError } = await supabase.rpc('save_positions', {
+                    p_project_id: testProjectId,
+                    p_positions: positionUpdates
+                });
+
+                if (positionError) throw positionError;
+                addResult('position-updates', 'Position updates saved successfully', 'pass');
+
+                // Test metadata updates
+                const metadataUpdates = [
+                    {
+                        asset_id: `test-asset-${Date.now()}-3`,
+                        parent_id: null,
+                        name: 'Updated Asset Name',
+                        type: 'card',
+                        x: 100,
+                        y: 300,
+                        width: 220,
+                        height: 170,
+                        z_index: 7,
+                        is_expanded: true,
+                        content: 'Updated content',
+                        background_config: { color: '#ff00ff' },
+                        viewport_config: { zoom: 1.5 },
+                        custom_fields: {
+                            customFields: [],
+                            customFieldValues: [],
+                            tags: ['updated-tag'],
+                            thumbnail: null,
+                            background: null,
+                            description: 'Updated description',
+                            viewportDisplaySettings: {}
+                        }
+                    }
+                ];
+
+                const { error: metadataError } = await supabase.rpc('save_assets', {
+                    p_project_id: testProjectId,
+                    p_assets: metadataUpdates
+                });
+
+                if (metadataError) throw metadataError;
+                addResult('metadata-updates', 'Metadata updates saved successfully', 'pass');
+            } catch (error) {
+                addResult('asset-updates', `Asset updates test failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function testProjectLoading() {
+            if (!testProjectId) {
+                addResult('project-loading', 'No project ID available', 'fail');
+                return;
+            }
+
+            try {
+                // Load project metadata
+                const { data: projectData, error: projectError } = await supabase.rpc('load_project', {
+                    p_project_id: testProjectId
+                });
+
+                if (projectError) throw projectError;
+                const project = projectData[0];
+
+                addResult('project-loading', `Project loaded: ${project.name}`, 'pass');
+                addResult('project-metadata', `Cover image: ${project.cover_image ? 'Present' : 'Missing'}`, 'info');
+                addResult('project-metadata', `Leather mode: ${project.is_leather_mode}`, 'info');
+                addResult('project-metadata', `Cover settings: ${project.cover_page_settings ? 'Present' : 'Missing'}`, 'info');
+
+                // Load assets
+                const { data: assetsData, error: assetsError } = await supabase.rpc('load_assets', {
+                    p_project_id: testProjectId,
+                    p_load_all: true
+                });
+
+                if (assetsError) throw assetsError;
+                
+                addResult('asset-loading', `Loaded ${assetsData.length} assets`, 'pass');
+                
+                // Check custom fields in loaded assets
+                const assetsWithCustomFields = assetsData.filter(asset => 
+                    asset.custom_fields && (
+                        asset.custom_fields.customFields || 
+                        asset.custom_fields.customFieldValues || 
+                        asset.custom_fields.tags
+                    )
+                );
+                addResult('custom-fields-loading', `${assetsWithCustomFields.length} assets have custom fields`, 'info');
+
+            } catch (error) {
+                addResult('project-loading', `Project loading test failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function runFileUploadTests() {
+            if (!supabase) {
+                addResult('file-upload', 'Please initialize Supabase first', 'fail');
+                return;
+            }
+
+            const user = await signInTestUser();
+            if (!user) return;
+
+            if (!testProjectId) {
+                await testProjectCreation();
+            }
+
+            // Test R2 upload functionality
+            await testR2Upload();
+        }
+
+        async function testR2Upload() {
+            try {
+                // Create a test file
+                const testFile = new File(['Test file content'], 'test-file.txt', { type: 'text/plain' });
+                const assetId = `test-asset-${Date.now()}-file`;
+
+                // Try to get upload URL
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    throw new Error('No active session');
+                }
+
+                const uploadResponse = await fetch(`${supabase.supabaseUrl}/functions/v1/getUploadUrls`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${session.access_token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        project_id: testProjectId,
+                        files: [{ asset_id: assetId, size_bytes: testFile.size }]
+                    })
+                });
+
+                if (!uploadResponse.ok) {
+                    const error = await uploadResponse.json();
+                    throw new Error(error.error || 'Failed to get upload URL');
+                }
+
+                const uploadData = await uploadResponse.json();
+                addResult('r2-upload-url', 'R2 upload URL obtained successfully', 'pass');
+
+                // Test actual upload
+                const uploadInfo = uploadData.uploadUrls[0];
+                const uploadResult = await fetch(uploadInfo.signedUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': testFile.type },
+                    body: testFile
+                });
+
+                if (!uploadResult.ok) {
+                    throw new Error(`Upload failed: ${uploadResult.status}`);
+                }
+
+                addResult('r2-upload', 'File uploaded to R2 successfully', 'pass');
+
+                // Register file in database
+                const { error: registerError } = await supabase.rpc('create_file', {
+                    p_project_id: testProjectId,
+                    p_asset_id: assetId,
+                    p_storage_key: uploadInfo.path,
+                    p_mime_type: testFile.type,
+                    p_size_bytes: testFile.size
+                });
+
+                if (registerError) throw registerError;
+                addResult('file-registration', 'File registered in database successfully', 'pass');
+
+            } catch (error) {
+                addResult('r2-upload', `R2 upload test failed: ${error.message}`, 'fail');
+            }
+        }
+
+        async function runFullTestSuite() {
+            document.getElementById('fullTestResults').innerHTML = '<div class="test-result info">Running full test suite...</div>';
+            
+            await runDatabaseTests();
+            await runFileUploadTests();
+            
+            // Generate summary
+            const allResults = document.querySelectorAll('.test-result');
+            const passCount = document.querySelectorAll('.test-result.pass').length;
+            const failCount = document.querySelectorAll('.test-result.fail').length;
+            const infoCount = document.querySelectorAll('.test-result.info').length;
+            
+            const summary = `
+                <div class="mt-4 p-4 bg-gray-100 rounded">
+                    <h4 class="font-semibold mb-2">Test Summary</h4>
+                    <div class="pass">✓ Passed: ${passCount}</div>
+                    <div class="fail">✗ Failed: ${failCount}</div>
+                    <div class="info">ℹ Info: ${infoCount}</div>
+                    <div class="text-sm mt-2">Total Tests: ${allResults.length}</div>
+                </div>
+            `;
+            
+            document.getElementById('fullTestResults').innerHTML = summary;
+        }
+
+        function addResult(category, message, status) {
+            const container = document.getElementById('databaseResults') || 
+                            document.getElementById('fileUploadResults') || 
+                            document.getElementById('testResults');
+            
+            if (container) {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = `test-result ${status}`;
+                resultDiv.innerHTML = `<strong>${category}:</strong> ${message}`;
+                container.appendChild(resultDiv);
+            }
+        }
+
+        // Auto-initialize if URL parameters are provided
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const url = urlParams.get('url');
+            const key = urlParams.get('key');
+            const email = urlParams.get('email');
+            const password = urlParams.get('password');
+            
+            if (url && key) {
+                document.getElementById('supabaseUrl').value = url;
+                document.getElementById('supabaseKey').value = key;
+            }
+            if (email && password) {
+                document.getElementById('testEmail').value = email;
+                document.getElementById('testPassword').value = password;
+            }
+        });
+    </script>
+</body>
+</html>

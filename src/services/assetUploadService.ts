@@ -1,3 +1,5 @@
+// DEPRECATED: This service is no longer used. Use R2UploadService instead.
+// Kept for backward compatibility only.
 import { supabase } from '@/lib/supabase';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useAuthStore } from '@/stores/authStore';

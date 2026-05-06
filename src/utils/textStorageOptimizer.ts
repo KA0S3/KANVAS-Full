@@ -6,7 +6,7 @@
 
 // Simple compression for text fields
 export class TextStorageOptimizer {
-  private static readonly COMPRESSION_MARKER = '§';
+  private static readonly COMPRESSION_MARKER = '§§COMPRESSED§§';
   private static readonly MAX_UNCOMPRESSED_LENGTH = 100;
 
   /**
@@ -41,7 +41,7 @@ export class TextStorageOptimizer {
       return compressed;
     }
 
-    return compressed.substring(1);
+    return compressed.substring(this.COMPRESSION_MARKER.length);
   }
 
   /**

@@ -290,8 +290,22 @@ const Index = () => {
         
         // Load world data if we were in a book view and the book has world data
         if (cachedState.appPhase === 'BOOK_VIEW' && book.worldData) {
-          loadWorldData(book.worldData);
-          loadTagWorldData(book.worldData);
+          // CRITICAL FIX: Only load worldData if it has assets or if we don't already have assets loaded
+          const currentAssets = useAssetStore.getState().getCurrentBookAssets();
+          const hasAssets = Object.keys(currentAssets).length > 0;
+          const bookHasAssets = book.worldData.assets && Object.keys(book.worldData.assets).length > 0;
+          
+          if (bookHasAssets || !hasAssets) {
+            console.log('[Index] Restoring cached world data:', {
+              bookHasAssets,
+              hasAssets,
+              willLoad: bookHasAssets || !hasAssets
+            });
+            loadWorldData(book.worldData);
+            loadTagWorldData(book.worldData);
+          } else {
+            console.log('[Index] Skipping empty cached world data to preserve loaded assets');
+          }
         }
       }
 
@@ -443,8 +457,23 @@ const Index = () => {
     setTimeout(() => {
       setCurrentBook(book.id);
       documentMutationService.setProjectId(book.id);
-      loadWorldData(book.worldData);
-      loadTagWorldData(book.worldData);
+      
+      // CRITICAL FIX: Only load worldData if it has assets or if we don't already have assets loaded
+      const currentAssets = useAssetStore.getState().getCurrentBookAssets();
+      const hasAssets = Object.keys(currentAssets).length > 0;
+      const bookHasAssets = book.worldData.assets && Object.keys(book.worldData.assets).length > 0;
+      
+      if (bookHasAssets || !hasAssets) {
+        console.log('[Index] Loading book world data:', {
+          bookHasAssets,
+          hasAssets,
+          willLoad: bookHasAssets || !hasAssets
+        });
+        loadWorldData(book.worldData);
+        loadTagWorldData(book.worldData);
+      } else {
+        console.log('[Index] Skipping empty book world data to preserve loaded assets');
+      }
 
       // Restore backgrounds from book's worldData if present
       if (book.worldData?.backgrounds) {

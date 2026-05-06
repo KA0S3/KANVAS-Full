@@ -13,6 +13,29 @@ interface UpgradeModalState {
   requiredBytes: number;
 }
 
+// Helper function to convert technical errors to user-friendly messages
+const getUserFriendlyErrorMessage = (technicalError: string): string => {
+  if (technicalError.includes('quota') || technicalError.includes('Quota')) {
+    return 'Storage quota exceeded. Please upgrade your plan to continue uploading.';
+  }
+  if (technicalError.includes('network') || technicalError.includes('connection')) {
+    return 'Network connection failed. Please check your internet connection and try again.';
+  }
+  if (technicalError.includes('timeout')) {
+    return 'Upload timed out. Please try again with a smaller file or better connection.';
+  }
+  if (technicalError.includes('unauthorized') || technicalError.includes('auth')) {
+    return 'Authentication failed. Please sign in again.';
+  }
+  if (technicalError.includes('file too large') || technicalError.includes('size')) {
+    return 'File is too large. Please choose a smaller file or upgrade your plan.';
+  }
+  if (technicalError.includes('invalid') || technicalError.includes('format')) {
+    return 'Invalid file format. Please choose a supported file type.';
+  }
+  return 'An unexpected error occurred. Please try again later.';
+};
+
 export function useAssetCreation() {
   const { createAsset, updateAsset } = useAssetStore();
   const { syncEnabled, quota } = useCloudStore();
@@ -37,6 +60,15 @@ export function useAssetCreation() {
     // SAFEGUARD: Only allow creation if explicitly triggered by user click
     if (!options?.fromUserClick) {
       throw new Error("Asset creation blocked: not triggered by user click");
+    }
+    
+    // CRITICAL FIX: Validate required fields before cloud upload
+    if (!assetData.name?.trim()) {
+      throw new Error('Asset name is required');
+    }
+    
+    if (!options?.projectId && !options?.skipCloud) {
+      throw new Error('Project ID is required for cloud upload');
     }
     
     console.log('Creating asset from modal');
@@ -110,18 +142,22 @@ export function useAssetCreation() {
         }
         
         // Handle upload failure but keep local asset
+        const userFriendlyError = getUserFriendlyErrorMessage(result.error || 'Unknown upload error');
         updateAsset(assetId, { 
           cloudStatus: 'failed',
-          cloudError: result.error || 'Unknown upload error'
+          cloudError: userFriendlyError
         });
         
         console.error('Cloud upload failed:', result.error);
       }
     } catch (error) {
       // Handle unexpected errors but preserve local asset
+      const errorMessage = error instanceof Error ? error.message : 'Unexpected error';
+      const userFriendlyMessage = getUserFriendlyErrorMessage(errorMessage);
+      
       updateAsset(assetId, { 
         cloudStatus: 'failed',
-        cloudError: error instanceof Error ? error.message : 'Unexpected error'
+        cloudError: userFriendlyMessage
       });
       
       console.error('Unexpected error during cloud upload:', error);

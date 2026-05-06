@@ -162,7 +162,15 @@ class SoftDeleteService {
           y: asset.y,
           width: asset.width,
           height: asset.height,
-          z_index: 0, // Default z_index
+          z_index: (() => {
+            // CRITICAL FIX: Calculate z-index using same logic as AssetItem.tsx
+            const area = (asset.width || 200) * (asset.height || 150);
+            const maxArea = 500 * 400;
+            const minArea = 50 * 50;
+            const normalizedArea = Math.max(minArea, Math.min(maxArea, area));
+            const zIndexRange = 900;
+            return 1000 - Math.floor(((normalizedArea - minArea) / (maxArea - minArea)) * zIndexRange);
+          })(),
           is_expanded: false,
           content: asset.content || null,
           background_config: asset.backgroundConfig || {},

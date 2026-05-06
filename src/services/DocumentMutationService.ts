@@ -241,6 +241,17 @@ class DocumentMutationService {
       // load_assets RPC returns array, but loadWorldData expects object with IDs as keys
       const assetsObject: Record<string, any> = {};
       restoredAssetsData.forEach((asset: any) => {
+        // Extract thumbnail from content if it contains the delimiter pattern
+        let extractedThumbnail = null;
+        let content = asset.content;
+        if (content && content.includes('__THUMBNAIL__') && content.includes('__END_THUMBNAIL__')) {
+          const thumbnailMatch = content.match(/__THUMBNAIL__(.*?)__END_THUMBNAIL__(.*)/);
+          if (thumbnailMatch) {
+            extractedThumbnail = thumbnailMatch[1];
+            content = thumbnailMatch[2] || null;
+          }
+        }
+
         // Map database fields to frontend asset structure
         assetsObject[asset.asset_id] = {
           id: asset.asset_id,
@@ -252,14 +263,15 @@ class DocumentMutationService {
           height: asset.height || 150,
           zIndex: asset.z_index || 0,
           isExpanded: asset.is_expanded || false,
-          content: asset.content,
+          content,
           backgroundConfig: asset.background_config || {},
           viewportConfig: asset.viewport_config || {},
           customFields: asset.custom_fields?.customFields || [],
           customFieldValues: asset.custom_fields?.customFieldValues || [],
           tags: asset.custom_fields?.tags || [],
           viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {},
-          thumbnail: asset.custom_fields?.thumbnail,
+          // Prioritize extracted thumbnail from content, then fallback to custom_fields
+          thumbnail: extractedThumbnail || asset.custom_fields?.thumbnail,
           background: asset.custom_fields?.background,
           description: asset.custom_fields?.description,
           updatedAt: asset.updated_at,
@@ -270,16 +282,26 @@ class DocumentMutationService {
         };
       });
 
+      // CRITICAL FIX: Reconstruct children hierarchy from parent_id relationships
+      // This preserves the asset tree structure that would otherwise be lost
+      restoredAssetsData.forEach((asset: any) => {
+        if (asset.parent_id && assetsObject[asset.parent_id]) {
+          assetsObject[asset.parent_id].children.push(asset.asset_id);
+        }
+      });
+
       console.log(`[DocumentMutation] Converted ${restoredAssetsData.length} assets to object format:`, {
         assetIds: Object.keys(assetsObject),
-        sampleAsset: Object.values(assetsObject)[0]
+        sampleAsset: Object.values(assetsObject)[0],
+        hierarchyReconstructed: true
       });
       
       const result = {
         world_document: {
           assets: assetsObject,
           backgrounds: project.backgrounds || {},
-          tags: project.tags_config || {}
+          tags: project.tags_config || {},
+          assetTags: {} // CRITICAL FIX: Add assetTags field for consistency with expected structure
         },
         version: project.last_version || 0,
         cover_config: {
@@ -962,6 +984,18 @@ class DocumentMutationService {
           viewportDisplaySettings: asset.viewportDisplaySettings || {}
         };
 
+        // CRITICAL FIX: Validate custom_fields size to prevent truncation
+        const customFieldsSize = JSON.stringify(customFieldsObj).length;
+        if (customFieldsSize >= 2048) {
+          console.warn(`[DocumentMutation] Asset ${asset.id} custom_fields too large (${customFieldsSize} bytes), will be truncated. Consider reducing custom field data.`);
+          logDocument('Custom fields size warning:', {
+            assetId: asset.id,
+            assetName: asset.name,
+            size: customFieldsSize,
+            maxSize: 2048
+          });
+        }
+
         // Migrate 'other' type to 'card' for database compatibility
         const assetType = asset.type === 'other' ? 'card' : asset.type;
 
@@ -974,7 +1008,14 @@ class DocumentMutationService {
           y: Math.round(asset.y || 0),
           width: Math.round(asset.width || 0),
           height: Math.round(asset.height || 0),
-          z_index: 0,
+          z_index: (() => {
+            const area = (asset.width || 200) * (asset.height || 150);
+            const maxArea = 500 * 400;
+            const minArea = 50 * 50;
+            const normalizedArea = Math.max(minArea, Math.min(maxArea, area));
+            const zIndexRange = 900;
+            return 1000 - Math.floor(((normalizedArea - minArea) / (maxArea - minArea)) * zIndexRange);
+          })(),
           is_expanded: asset.isExpanded || false,
           content,
           background_config: asset.backgroundConfig || {},

@@ -376,31 +376,27 @@ export const useBookStore = create<BookStore>()(
     },
     {
       name: 'kanvas-world-storage',
+      // Clean up large data before storage
       storage: {
         getItem: (name) => {
-          try {
-            const item = localStorage.getItem(name);
-            if (!item) return null;
-            
-            // Check storage usage before loading
-            StorageCleanup.checkAndCleanup();
-            
-            return JSON.parse(item);
-          } catch (error) {
-            console.error('[BookStore] Error loading from localStorage:', error);
-            return null;
-          }
+          const value = localStorage.getItem(name);
+          return value ? JSON.parse(value) : null;
         },
         setItem: (name, value) => {
           try {
-            // Clean up storage before saving to prevent quota exceeded
-            StorageCleanup.checkAndCleanup();
-            
-            // Remove large base64 images from books before saving
+            // Remove large data before saving to localStorage
             const cleanValue = { ...value };
             if (cleanValue.state && cleanValue.state.books) {
               Object.keys(cleanValue.state.books).forEach(bookId => {
                 const book = cleanValue.state.books[bookId];
+                
+                // CRITICAL FIX: Exclude worldData from localStorage to prevent quota exceeded errors
+                // World data with assets is too large for localStorage and should be loaded from Supabase
+                if (book.worldData) {
+                  console.log(`[BookStore] Excluding worldData from localStorage: ${bookId}`);
+                  delete book.worldData;
+                }
+                
                 if (book.coverImage && book.coverImage.startsWith('data:image/') && book.coverImage.length > 50000) {
                   console.log(`[BookStore] Excluding large cover image from localStorage: ${bookId}`);
                   // Don't save large images to localStorage, they'll be handled separately
@@ -439,6 +435,76 @@ export const useBookStore = create<BookStore>()(
         settings: state.settings,
         viewMode: state.viewMode,
         coverPresets: state.coverPresets,
+        leatherPresets: state.leatherPresets,
+        _isCreating: state._isCreating,
+        _lastCreationTime: state._lastCreationTime,
+        _pendingCreationTitle: state._pendingCreationTitle,
+        createBook: state.createBook,
+        updateBook: state.updateBook,
+        deleteBook: state.deleteBook,
+        reorderBooks: state.reorderBooks,
+        setCurrentBook: state.setCurrentBook,
+        getCurrentBook: state.getCurrentBook,
+        getAllBooks: state.getAllBooks,
+        updateWorldData: state.updateWorldData,
+        getWorldData: state.getWorldData,
+        setViewMode: state.setViewMode,
+        updateSettings: state.updateSettings,
+        exportBooks: state.exportBooks,
+        exportSingleBook: state.exportSingleBook,
+        importBooks: state.importBooks,
+      }),
+    },
+  });
+},
+
+getWorldData: (bookId) => {
+  const state = get();
+  const book = state.books[bookId];
+  return book ? book.worldData : null;
+},
+
+setViewMode: (mode) => {
+  set({ viewMode: mode });
+},
+
+updateSettings: (settingsUpdates) => {
+  set((state) => ({
+    settings: {
+      ...state.settings,
+      ...settingsUpdates,
+    },
+  }));
+},
+
+exportBooks: () => {
+  const state = get();
+  return JSON.stringify({
+    books: state.books,
+    settings: state.settings,
+    exportedAt: new Date().toISOString(),
+  }, null, 2);
+},
+
+exportSingleBook: (bookId) => {
+  const state = get();
+  const book = state.books[bookId];
+  if (!book) {
+    throw new Error(`Book with ID ${bookId} not found`);
+  }
+  return JSON.stringify({
+    books: { [bookId]: book },
+    settings: state.settings,
+    exportedAt: new Date().toISOString(),
+  }, null, 2);
+},
+
+importBooks: (data, mode = 'replace') => {
+  try {
+    const parsed = JSON.parse(data);
+    
+    if (!parsed.books || typeof parsed.books !== 'object') {
+      throw new Error('Invalid data format');
         leatherPresets: state.leatherPresets,
         _isCreating: state._isCreating,
         _lastCreationTime: state._lastCreationTime,

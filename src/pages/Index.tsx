@@ -417,15 +417,17 @@ const Index = () => {
       if (result.success && result.data) {
         console.log('[Index] Loaded document for sync:', result.data.version);
         
-        // CRITICAL FIX: Update the local book store with fetched world data
-        // This ensures assets loaded from server are available locally
+        // CRITICAL FIX: Load world data directly to AssetStore, bypassing localStorage
+        // This prevents quota exceeded errors from large world data
         if (result.data.world_document) {
-          console.log('[Index] Updating book store with fetched world data:', {
+          console.log('[Index] Loading world data directly to AssetStore:', {
             assetCount: Object.keys(result.data.world_document.assets || {}).length,
             hasAssets: !!(result.data.world_document.assets && Object.keys(result.data.world_document.assets).length > 0)
           });
           
-          updateWorldData(book.id, result.data.world_document);
+          // Load directly to AssetStore to avoid localStorage quota issues
+          loadWorldData(result.data.world_document);
+          loadTagWorldData(result.data.world_document);
         }
       } else if (result.error === 'Project not found') {
         // Book doesn't exist on server yet - create it

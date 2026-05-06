@@ -49,7 +49,7 @@ const Index = () => {
   const createWorldButtonRef = useRef<HTMLButtonElement>(null);
   const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId } = useAssetStore(); // Using getCurrentBookAssets method
   const { loadWorldData: loadTagWorldData } = useTagStore();
-  const { currentBookId, setCurrentBook, getAllBooks, deleteBook } = useBookStore(); // Adding back book store - confirmed working
+  const { currentBookId, setCurrentBook, getAllBooks, deleteBook, updateWorldData } = useBookStore(); // Adding back book store - confirmed working
   const { theme } = useThemeStore(); // Adding back theme store - confirmed working
   // const { getBackground } = useBackgroundStore(); // Temporarily disabled to debug
   const { appPhase, showLibrary, setTransitioning, setAppPhase } = useMediaStore(); // Adding back media store - confirmed working
@@ -416,6 +416,17 @@ const Index = () => {
       const result = await documentMutationService.loadDocument(book.id);
       if (result.success && result.data) {
         console.log('[Index] Loaded document for sync:', result.data.version);
+        
+        // CRITICAL FIX: Update the local book store with fetched world data
+        // This ensures assets loaded from server are available locally
+        if (result.data.world_document) {
+          console.log('[Index] Updating book store with fetched world data:', {
+            assetCount: Object.keys(result.data.world_document.assets || {}).length,
+            hasAssets: !!(result.data.world_document.assets && Object.keys(result.data.world_document.assets).length > 0)
+          });
+          
+          updateWorldData(book.id, result.data.world_document);
+        }
       } else if (result.error === 'Project not found') {
         // Book doesn't exist on server yet - create it
         console.log('[Index] Book not found on server, creating project...');

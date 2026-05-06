@@ -174,8 +174,10 @@ const Index = () => {
                 console.log('[Index] Assets loaded through loadWorldData:', Object.keys(cloudAssets).length);
               }
               
-              // Still load world data for other stuff (backgrounds, tags, etc)
+              // Still load world data for other stuff (backgrounds, tags, etc) - but NOT assets
               const worldDocument = JSON.parse(JSON.stringify(result.data.world_document || {}));
+              // Remove assets to prevent overwriting the assets already loaded from DocumentMutation
+              delete worldDocument.assets;
               setTimeout(() => {
                 loadWorldData(worldDocument);
               }, 0);

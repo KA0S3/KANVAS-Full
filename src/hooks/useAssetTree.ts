@@ -29,6 +29,13 @@ export const useAssetTree = () => {
 
   // Subscribe to bookAssets for reactivity - ensures re-render when assets load from storage
   const assets = getCurrentBookAssets();
+  
+  // Debug logging to track asset loading
+  console.log('🎯 useAssetTree: Assets loaded from store', {
+    assetCount: Object.keys(assets).length,
+    assetIds: Object.keys(assets),
+    currentBookId: useAssetStore.getState().getCurrentBookId()
+  });
 
   // Tree state for UI (expansion, selection)
   const [treeState, setTreeState] = useState<AssetTreeState>({

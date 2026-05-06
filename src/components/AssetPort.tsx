@@ -491,9 +491,24 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   }, [isTouchDragging, handleTouchMove, handleTouchEnd]);
 
   // Get assets to display based on current context
-  const displayAssets = enteredAssetId && assets && assets[enteredAssetId]
-    ? assets[enteredAssetId].children.map(childId => assets[childId]).filter(Boolean) || []
-    : getRootAssets();
+  const displayAssets = useMemo(() => {
+    console.log('🎯 AssetPort: Calculating displayAssets', {
+      enteredAssetId,
+      hasAssets: !!assets,
+      assetsKeys: assets ? Object.keys(assets) : 'no assets',
+      getRootAssetsCount: getRootAssets().length
+    });
+
+    if (enteredAssetId && assets && assets[enteredAssetId]) {
+      const children = assets[enteredAssetId].children.map(childId => assets[childId]).filter(Boolean) || [];
+      console.log('🎯 AssetPort: Showing child assets for parent', enteredAssetId, ':', children.map(c => ({ id: c.id, name: c.name })));
+      return children;
+    } else {
+      const rootAssets = getRootAssets();
+      console.log('🎯 AssetPort: Showing root assets:', rootAssets.map(c => ({ id: c.id, name: c.name })));
+      return rootAssets;
+    }
+  }, [enteredAssetId, assets, getRootAssets]);
 
   // Build breadcrumb path with asset IDs
   const getBreadcrumbPath = () => {
@@ -908,47 +923,57 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
 
         {/* Simple container without transforms */}
         <div className="viewport-container" style={{ width: '100%', height: '100%', position: 'relative' }}>
-         {displayAssets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center text-muted-foreground" style={{ height: '100%' }}>
-             <Sparkles className="w-8 h-8 mb-2 opacity-50" />
-             <p className="text-sm">
-               {enteredAssetId ? 'No child assets' : 'No assets yet'}
-             </p>
-             <p className="text-xs opacity-70">
-               {enteredAssetId 
-                 ? 'Double-click parent assets to add children' 
-                 : 'Add your first asset to get started'
-               }
-             </p>
-           </div>
-         ) : (
-          displayAssets.map((asset) => {
-            // When inside a parent asset, position relative to parent's bounds
-            let displayAsset = { ...asset };
-            
-            if (enteredAssetId && assets && assets[enteredAssetId]) {
-              const parentAsset = assets[enteredAssetId];
-              // For nested assets, just use the stored coordinates as-is since we're not using transforms
-              displayAsset = asset;
-            }
-            
-            return (
-              <AssetItem
-                key={asset.id}
-                asset={displayAsset}
-                onDelete={handleDeleteAsset}
-                onMouseDown={handleMouseDown}
-                onTouchStart={handleTouchStart}
-                onDoubleClick={handleAssetDoubleClick}
-                isSelected={selectedAsset === asset.id}
-                onResize={handleResize}
-                onEdit={handleEditAsset}
-                onSelectAndFocus={handleAssetDoubleClick}
-                isEditingBackground={isEditingBackground}
-              />
-            );
-          })
-         )}
+         {(() => {
+    console.log('🎯 AssetPort: About to render assets', {
+      displayAssetsCount: displayAssets.length,
+      displayAssets: displayAssets.map(a => ({ id: a.id, name: a.name, type: a.type })),
+      enteredAssetId,
+      currentBook: currentBook?.id
+    });
+    
+    if (displayAssets.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center text-muted-foreground" style={{ height: '100%' }}>
+           <Sparkles className="w-8 h-8 mb-2 opacity-50" />
+           <p className="text-sm">
+             {enteredAssetId ? 'No child assets' : 'No assets yet'}
+           </p>
+           <p className="text-xs opacity-70">
+             {enteredAssetId 
+               ? 'Double-click parent assets to add children' 
+               : 'Add your first asset to get started'}
+           </p>
+         </div>
+      );
+    }
+    
+    return displayAssets.map((asset) => {
+      // When inside a parent asset, position relative to parent's bounds
+      let displayAsset = { ...asset };
+      
+      if (enteredAssetId && assets && assets[enteredAssetId]) {
+        const parentAsset = assets[enteredAssetId];
+        // For nested assets, just use the stored coordinates as-is since we're not using transforms
+        displayAsset = asset;
+      }
+      
+      return (
+        <AssetItem
+          key={asset.id}
+          asset={displayAsset}
+          onDelete={handleDeleteAsset}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          onDoubleClick={handleAssetDoubleClick}
+          isSelected={selectedAsset === asset.id}
+          onResize={handleResize}
+          onEdit={handleEditAsset}
+          onSelectAndFocus={handleAssetDoubleClick}
+          isEditingBackground={isEditingBackground}
+        />
+      );
+    });
+  })()}
         </div>
       </div>
 

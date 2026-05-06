@@ -34,7 +34,9 @@ export const useAssetTree = () => {
   console.log('🎯 useAssetTree: Assets loaded from store', {
     assetCount: Object.keys(assets).length,
     assetIds: Object.keys(assets),
-    currentBookId: useAssetStore.getState().getCurrentBookId()
+    currentBookId: useAssetStore.getState().getCurrentBookId(),
+    assetsData: assets,
+    bookAssets: useAssetStore.getState().bookAssets
   });
 
   // Tree state for UI (expansion, selection)

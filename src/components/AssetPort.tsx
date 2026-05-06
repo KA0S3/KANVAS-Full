@@ -928,7 +928,10 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       displayAssetsCount: displayAssets.length,
       displayAssets: displayAssets.map(a => ({ id: a.id, name: a.name, type: a.type })),
       enteredAssetId,
-      currentBook: currentBook?.id
+      currentBook: currentBook?.id,
+      rawDisplayAssets: displayAssets,
+      assetsFromStore: assets,
+      getRootAssetsResult: getRootAssets()
     });
     
     if (displayAssets.length === 0) {

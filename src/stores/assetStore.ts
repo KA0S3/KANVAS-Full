@@ -102,7 +102,14 @@ export const useAssetStore = create<AssetStore>()(
   getCurrentBookAssets: () => {
     const state = get();
     const bookId = state.getCurrentBookId();
-    return state.bookAssets[bookId] || {};
+    const assets = state.bookAssets[bookId] || {};
+    console.log('🎯 AssetStore.getCurrentBookAssets:', {
+      bookId,
+      bookAssetsKeys: Object.keys(state.bookAssets),
+      assetsForBook: assets,
+      assetsCount: Object.keys(assets).length
+    });
+    return assets;
   },
 
   // Get current book's global custom fields

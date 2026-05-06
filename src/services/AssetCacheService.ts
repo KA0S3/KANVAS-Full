@@ -72,15 +72,16 @@ class AssetCacheService {
       // Use documentMutationService for proper integration
       const { documentMutationService } = await import('@/services/DocumentMutationService');
       
-      // Get paginated assets using existing service
-      const result = await documentMutationService.queryAssetsPaginated(null, null, options.limit);
+      // Load full document using existing working method
+      const result = await documentMutationService.loadDocument(bookId);
       
-      // queryAssetsPaginated returns direct object, not wrapped in success/error
-      if (!result) {
-        throw new Error('Failed to load assets');
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to load assets');
       }
       
-      const assets: AssetMetadata[] = (result.assets || []).map((asset: any) => ({
+      // Extract assets from the loaded document
+      const assetsData = result.data.assets || {};
+      const assets: AssetMetadata[] = Object.values(assetsData).map((asset: any) => ({
         id: asset.id,
         name: asset.name,
         type: asset.type,
@@ -88,8 +89,8 @@ class AssetCacheService {
         y: asset.y,
         width: asset.width,
         height: asset.height,
-        parentId: asset.parent_id,
-        updatedAt: new Date(asset.updated_at).getTime(),
+        parentId: asset.parentId,
+        updatedAt: new Date(asset.updatedAt).getTime(),
         hasContent: !!asset.content
       }));
       
@@ -123,15 +124,15 @@ class AssetCacheService {
     try {
       console.log('[AssetCache] Loading full asset:', assetId);
       
-      // Use documentMutationService to load specific assets
+      // Use documentMutationService to load full document
       const { documentMutationService } = await import('@/services/DocumentMutationService');
-      const result = await documentMutationService.loadAssetChunk([assetId]);
+      const result = await documentMutationService.loadDocument(this.currentBookId || '');
       
-      if (!result.success || !result.assets) {
+      if (!result.success || !result.data) {
         throw new Error(result.error || 'Failed to load asset');
       }
       
-      const asset = result.assets[assetId];
+      const asset = result.data.assets?.[assetId];
       if (!asset) {
         throw new Error('Asset not found');
       }

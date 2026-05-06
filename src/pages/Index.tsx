@@ -422,15 +422,17 @@ const Index = () => {
         
         // CRITICAL FIX: Load world data directly to AssetStore, bypassing localStorage
         // This prevents quota exceeded errors from large world data
-        if (result.data.world_document) {
+        const worldDocument = result.data.world_document || result.data;
+        if (worldDocument) {
           console.log('[Index] Loading world data directly to AssetStore:', {
-            assetCount: Object.keys(result.data.world_document.assets || {}).length,
-            hasAssets: !!(result.data.world_document.assets && Object.keys(result.data.world_document.assets).length > 0)
+            assetCount: Object.keys(worldDocument.assets || {}).length,
+            hasAssets: !!(worldDocument.assets && Object.keys(worldDocument.assets).length > 0),
+            dataSource: result.data.world_document ? 'world_document' : 'direct'
           });
           
           // Load directly to AssetStore to avoid localStorage quota issues
-          loadWorldData(result.data.world_document);
-          loadTagWorldData(result.data.world_document);
+          loadWorldData(worldDocument);
+          loadTagWorldData(worldDocument);
         }
       } else if (result.error === 'Project not found') {
         // Book doesn't exist on server yet - create it

@@ -1639,41 +1639,44 @@ class DocumentMutationService {
     try {
       performanceMonitor.incrementDatabaseRequests();
 
-      const { data, error } = await supabase
-        .rpc('query_assets_by_parent_paginated', {
-          p_project_id: this.currentProjectId,
-          p_parent_asset_id: parentId,
-          p_cursor: cursor,
-          p_limit: Math.min(limit, 500) // Max 500 per page
-        });
-
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
+      // Use the working loadDocument method instead of broken RPC
+      const result = await this.loadDocument(this.currentProjectId);
+      
+      if (!result.success || !result.data) {
         return { assets: [], nextCursor: null, hasMore: false };
       }
 
-      // Extract pagination info from last row
-      const lastRow = data[data.length - 1];
-      const nextCursor = lastRow?.next_cursor || null;
-      const hasMore = lastRow?.has_more || false;
+      // Extract assets from the loaded document
+      const assetsData = result.data.assets || {};
+      const allAssets = Object.values(assetsData);
+      
+      // Filter by parent if specified
+      const filteredAssets = parentId 
+        ? allAssets.filter((asset: any) => asset.parentId === parentId)
+        : allAssets.filter((asset: any) => !asset.parentId);
+      
+      // Apply pagination
+      const startIndex = cursor ? parseInt(cursor) : 0;
+      const paginatedAssets = filteredAssets.slice(startIndex, startIndex + limit);
+      
+      const hasMore = startIndex + limit < filteredAssets.length;
+      const nextCursor = hasMore ? String(startIndex + limit) : null;
 
-      // Remove pagination fields from assets
-      const assets = data.map(row => ({
-        asset_id: row.asset_id,
-        parent_asset_id: row.parent_asset_id,
-        name: row.name,
-        type: row.type,
-        x: row.x,
-        y: row.y,
-        width: row.width,
-        height: row.height,
-        z_index: row.z_index,
-        is_expanded: row.is_expanded,
-        background_config: row.background_config,
-        viewport_config: row.viewport_config,
-        cloud_status: row.cloud_status,
-        cloud_path: row.cloud_path
+      // Convert to expected format
+      const assets = paginatedAssets.map((asset: any) => ({
+        id: asset.id,
+        name: asset.name,
+        type: asset.type,
+        x: asset.x,
+        y: asset.y,
+        width: asset.width,
+        height: asset.height,
+        z_index: asset.zIndex || 0,
+        is_expanded: asset.isExpanded || false,
+        background_config: asset.backgroundConfig,
+        viewport_config: asset.viewportConfig,
+        cloud_status: asset.cloudStatus,
+        cloud_path: asset.cloudPath
       }));
 
       return { assets, nextCursor, hasMore };

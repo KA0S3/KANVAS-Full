@@ -155,12 +155,19 @@ const Index = () => {
               console.log('[Index] SIMPLE APPROACH: Loading assets directly from cloud');
               
               // Get assets directly from DocumentMutation result
-              const cloudAssets = result.data?.world_document?.assets || result.data?.assets || {};
+              const cloudAssets = result.data?.world_document?.assets || {};
               console.log('[Index] Cloud assets found:', Object.keys(cloudAssets).length);
               
               // Load assets through proper store method to maintain virtualized mode
               if (Object.keys(cloudAssets).length > 0) {
                 console.log('[Index] Loading assets through proper loadWorldData method');
+                
+                // Ensure book ID is set before loading assets
+                if (!currentBookId || currentBookId === 'null') {
+                  console.warn('[Index] Book ID not set, setting it before loading assets');
+                  setCurrentBook(currentBook);
+                }
+                
                 const assetStore = useAssetStore.getState();
                 
                 // Use loadWorldData to ensure virtualized mode integration and hierarchy reconstruction
@@ -176,9 +183,20 @@ const Index = () => {
               const worldDocument = JSON.parse(JSON.stringify(result.data.world_document || {}));
               // Remove assets to prevent overwriting the assets already loaded from DocumentMutation
               delete worldDocument.assets;
-              setTimeout(() => {
-                loadWorldData(worldDocument);
-              }, 0);
+              
+              // Only load worldData if it has meaningful content (not just empty objects)
+              const hasMeaningfulData = Object.keys(worldDocument).length > 0 && 
+                Object.values(worldDocument).some(value => 
+                  value && typeof value === 'object' && Object.keys(value).length > 0
+                );
+              
+              if (hasMeaningfulData) {
+                setTimeout(() => {
+                  loadWorldData(worldDocument);
+                }, 0);
+              } else {
+                console.log('[Index] Skipping empty worldData to prevent overwriting loaded assets');
+              }
 
               // Restore backgrounds from world_document.backgrounds
               if (result.data.world_document?.backgrounds) {

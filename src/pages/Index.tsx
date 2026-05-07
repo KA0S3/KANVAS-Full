@@ -136,11 +136,11 @@ const Index = () => {
           console.log(`[Index] Synced ${syncedCount} new projects and updated ${updatedCount} existing projects from Supabase`);
           
           // Load full data for current book if one is selected
-          const currentBook = currentBookId;
+          const targetBookId = getTargetBookId();
           let success = false;
           
-          if (currentBook && currentBook !== 'null') {
-            const result = await documentMutationService.loadDocument(currentBook);
+          if (targetBookId) {
+            const result = await documentMutationService.loadDocument(targetBookId);
             success = result.success;
             if (result.success && result.data) {
               console.log(`[Index] DocumentMutation result:`, {
@@ -151,73 +151,22 @@ const Index = () => {
                 fullResult: result.data
               });
               
-              // SIMPLE FIX: Directly load assets from DocumentMutation result
-              console.log('[Index] SIMPLE APPROACH: Loading assets directly from cloud');
-              
-              // Get assets directly from DocumentMutation result
-              const cloudAssets = result.data?.world_document?.assets || {};
-              console.log('[Index] Cloud assets found:', Object.keys(cloudAssets).length);
-              
-              // Load assets through proper store method to maintain virtualized mode
-              if (Object.keys(cloudAssets).length > 0) {
-                console.log('[Index] Loading assets through proper loadWorldData method');
-                
-                // Ensure book ID is set before loading assets
-                if (!currentBookId || currentBookId === 'null') {
-                  console.warn('[Index] Book ID not set, setting it before loading assets');
-                  setCurrentBook(currentBook);
-                }
-                
-                const assetStore = useAssetStore.getState();
-                
-                // Use loadWorldData to ensure virtualized mode integration and hierarchy reconstruction
-                assetStore.loadWorldData({ 
-                  assets: cloudAssets,
-                  globalCustomFields: result.data?.world_document?.globalCustomFields || {}
-                });
-                
-                console.log('[Index] Assets loaded through loadWorldData:', Object.keys(cloudAssets).length);
+              // Set book ID for future operations (in case it changed)
+              if (currentBookId !== targetBookId) {
+                console.log('[Index] Setting book ID for future operations:', targetBookId);
+                setCurrentBook(targetBookId);
               }
               
-              // Still load world data for other stuff (backgrounds, tags, etc) - but NOT assets
-              const worldDocument = JSON.parse(JSON.stringify(result.data.world_document || {}));
-              // Remove assets to prevent overwriting the assets already loaded from DocumentMutation
-              delete worldDocument.assets;
+              // Load all world document data using unified approach
+              success = await loadWorldDocumentData(result, targetBookId, {
+                loadAssets: true,
+                loadBackgrounds: true,
+                loadTags: true,
+                skipIfAssetsExist: false
+              });
               
-              // Only load worldData if it has meaningful content (not just empty objects)
-              const hasMeaningfulData = Object.keys(worldDocument).length > 0 && 
-                Object.values(worldDocument).some(value => 
-                  value && typeof value === 'object' && Object.keys(value).length > 0
-                );
-              
-              if (hasMeaningfulData) {
-                setTimeout(() => {
-                  loadWorldData(worldDocument);
-                }, 0);
-              } else {
-                console.log('[Index] Skipping empty worldData to prevent overwriting loaded assets');
-              }
-
-              // Restore backgrounds from world_document.backgrounds
-              if (result.data.world_document?.backgrounds) {
-                const backgroundStore = useBackgroundStore.getState();
-                const backgrounds = result.data.world_document.backgrounds;
-                console.log('[Index] Restoring', Object.keys(backgrounds).length, 'backgrounds for current book');
-
-                Object.entries(backgrounds).forEach(([key, config]) => {
-                  const clonedConfig = backgroundStore.cloneConfig(config as BackgroundConfig);
-                  backgroundStore.setBackground(key, clonedConfig);
-                });
-              }
-
-              // Restore tags from world_document.tags and assetTags
-              if (result.data.world_document?.tags || result.data.world_document?.assetTags) {
-                const tagData = {
-                  tags: result.data.world_document.tags || {},
-                  assetTags: result.data.world_document.assetTags || {}
-                };
-                console.log('[Index] Restoring tags:', Object.keys(tagData.tags).length, 'tags and', Object.keys(tagData.assetTags).length, 'asset tag associations');
-                loadTagWorldData(tagData);
+              if (!success) {
+                console.error('[Index] Failed to load world document data');
               }
             }
           } else {
@@ -296,24 +245,29 @@ const Index = () => {
         setCurrentBook(cachedState.currentBookId);
         documentMutationService.setProjectId(cachedState.currentBookId);
         
-        // Load world data if we were in a book view and the book has world data
+        // Load world data if we were in a book view and book has world data
         if (cachedState.appPhase === 'BOOK_VIEW' && book.worldData) {
-          // CRITICAL FIX: Only load worldData if it has assets or if we don't already have assets loaded
-          const currentAssets = useAssetStore.getState().getCurrentBookAssets();
-          const hasAssets = Object.keys(currentAssets).length > 0;
-          const bookHasAssets = book.worldData.assets && Object.keys(book.worldData.assets).length > 0;
+          // Create a mock document result for the unified function
+          const mockDocumentResult = {
+            success: true,
+            data: {
+              world_document: book.worldData
+            }
+          };
           
-          if (bookHasAssets || !hasAssets) {
-            console.log('[Index] Restoring cached world data:', {
-              bookHasAssets,
-              hasAssets,
-              willLoad: bookHasAssets || !hasAssets
-            });
-            loadWorldData(book.worldData);
-            loadTagWorldData(book.worldData);
-          } else {
-            console.log('[Index] Skipping empty cached world data to preserve loaded assets');
-          }
+          // Use unified function for consistent data loading (async call in useEffect)
+          loadWorldDocumentData(mockDocumentResult, book.id, {
+            loadAssets: true,
+            loadBackgrounds: true,
+            loadTags: true,
+            skipIfAssetsExist: true // Preserve existing assets if they exist
+          }).then(loadSuccess => {
+            if (!loadSuccess) {
+              console.error('[Index] Failed to restore cached world data');
+            }
+          }).catch(err => {
+            console.error('[Index] Error restoring cached world data:', err);
+          });
         }
       }
 
@@ -387,6 +341,136 @@ const Index = () => {
     getCurrentBookAssets, // Include getCurrentBookAssets to capture viewport changes
   ]);
 
+  // Helper function for consistent book ID resolution
+  const getTargetBookId = (fallbackId?: string) => {
+    const targetId = fallbackId || currentBookId;
+    if (!targetId || targetId === 'null') {
+      console.error('[Index] Cannot resolve target book ID - no valid book ID available');
+      return null;
+    }
+    return targetId;
+  };
+
+  // Unified function to load world document data consistently
+  // This eliminates duplicate logic and ensures consistent data structure handling
+  const loadWorldDocumentData = async (
+    documentResult: any, 
+    targetBookId: string,
+    options: {
+      loadAssets?: boolean;
+      loadBackgrounds?: boolean;
+      loadTags?: boolean;
+      skipIfAssetsExist?: boolean;
+    } = {}
+  ) => {
+    const {
+      loadAssets = true,
+      loadBackgrounds = true,
+      loadTags = true,
+      skipIfAssetsExist = false
+    } = options;
+
+    console.log('[Index] loadWorldDocumentData called:', {
+      targetBookId,
+      hasData: !!documentResult?.data,
+      hasWorldDocument: !!documentResult?.data?.world_document,
+      options
+    });
+
+    if (!documentResult?.data?.world_document) {
+      console.error('[Index] loadWorldDocumentData: No world_document found in result');
+      return false;
+    }
+
+    const worldDocument = documentResult.data.world_document;
+    let success = true;
+
+    // ASSET LOADING - Unified approach using world_document.assets
+    if (loadAssets) {
+      const assets = worldDocument.assets || {};
+      console.log('[Index] Loading assets from world_document.assets:', Object.keys(assets).length);
+
+      // Check if we should skip loading assets (for optimization)
+      if (skipIfAssetsExist) {
+        const currentAssets = useAssetStore.getState().getCurrentBookAssets();
+        const hasAssets = Object.keys(currentAssets).length > 0;
+        const bookHasAssets = Object.keys(assets).length > 0;
+        
+        if (bookHasAssets && hasAssets) {
+          console.log('[Index] Skipping asset loading to preserve existing assets');
+        } else {
+          // Load assets through proper store method to maintain virtualized mode
+          if (Object.keys(assets).length > 0) {
+            console.log('[Index] Loading assets through proper loadWorldData method');
+            
+            const assetStore = useAssetStore.getState();
+            assetStore.loadWorldData({ 
+              assets: assets,
+              globalCustomFields: worldDocument.globalCustomFields || {}
+            }, targetBookId);
+            
+            console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
+          }
+        }
+      } else {
+        // Load assets unconditionally
+        if (Object.keys(assets).length > 0) {
+          console.log('[Index] Loading assets unconditionally');
+          
+          const assetStore = useAssetStore.getState();
+          assetStore.loadWorldData({ 
+            assets: assets,
+            globalCustomFields: worldDocument.globalCustomFields || {}
+          }, targetBookId);
+          
+          console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
+        }
+      }
+    }
+
+    // BACKGROUND RESTORATION - Unified approach
+    if (loadBackgrounds && worldDocument.backgrounds) {
+      const backgroundStore = useBackgroundStore.getState();
+      const backgrounds = worldDocument.backgrounds;
+      console.log('[Index] Restoring', Object.keys(backgrounds).length, 'backgrounds');
+
+      Object.entries(backgrounds).forEach(([key, config]) => {
+        const clonedConfig = backgroundStore.cloneConfig(config as BackgroundConfig);
+        backgroundStore.setBackground(key, clonedConfig);
+      });
+    }
+
+    // TAG RESTORATION - Unified approach
+    if (loadTags && (worldDocument.tags || worldDocument.assetTags)) {
+      const tagData = {
+        tags: worldDocument.tags || {},
+        assetTags: worldDocument.assetTags || {}
+      };
+      console.log('[Index] Restoring tags:', Object.keys(tagData.tags).length, 'tags and', Object.keys(tagData.assetTags).length, 'asset tag associations');
+      loadTagWorldData(tagData);
+    }
+
+    // Load other world data (excluding assets to prevent overwriting)
+    const worldDataForOtherStuff = JSON.parse(JSON.stringify(worldDocument));
+    delete worldDataForOtherStuff.assets; // Remove assets to prevent overwriting
+    
+    // Only load worldData if it has meaningful content (not just empty objects)
+    const hasMeaningfulData = Object.keys(worldDataForOtherStuff).length > 0 && 
+      Object.values(worldDataForOtherStuff).some(value => 
+        value && typeof value === 'object' && Object.keys(value).length > 0
+      );
+    
+    if (hasMeaningfulData) {
+      setTimeout(() => {
+        loadWorldData(worldDataForOtherStuff);
+      }, 0);
+    } else {
+      console.log('[Index] Skipping empty worldData to prevent overwriting loaded assets');
+    }
+
+    return success;
+  };
+
   const handleBackgroundSave = () => {
     // Force re-render of components that depend on background config
     setBackgroundRefreshTrigger(prev => prev + 1);
@@ -435,31 +519,17 @@ const Index = () => {
       if (result.success && result.data) {
         console.log('[Index] Loaded document for sync:', result.data.version);
         
-        // CRITICAL FIX: Load world data directly to AssetStore, bypassing localStorage
-        // This prevents quota exceeded errors from large world data
+        // Use unified function for consistent data loading
+        // This fixes the conflicting asset path issue by using world_document.assets consistently
+        const loadSuccess = await loadWorldDocumentData(result, book.id, {
+          loadAssets: true,
+          loadBackgrounds: true,
+          loadTags: true,
+          skipIfAssetsExist: false
+        });
         
-        // Extract assets from the correct location - DocumentMutation stores them in result.data.assets
-        const assets = result.data.assets || {};
-        const worldDocument = result.data.world_document || result.data;
-        
-        // Create a combined worldData with assets from the correct location
-        const combinedWorldData = {
-          ...worldDocument,
-          assets: assets // Use assets from result.data.assets where DocumentMutation actually stores them
-        };
-        
-        if (combinedWorldData) {
-          console.log('[Index] Loading world data directly to AssetStore:', {
-            assetCount: Object.keys(combinedWorldData.assets || {}).length,
-            hasAssets: !!(combinedWorldData.assets && Object.keys(combinedWorldData.assets).length > 0),
-            dataSource: 'combined',
-            originalAssetsCount: Object.keys(assets || {}).length,
-            worldDocumentAssetsCount: Object.keys(worldDocument?.assets || {}).length
-          });
-          
-          // Load directly to AssetStore to avoid localStorage quota issues
-          loadWorldData(combinedWorldData);
-          loadTagWorldData(combinedWorldData);
+        if (!loadSuccess) {
+          console.error('[Index] Failed to load world document data in handleEnterBook');
         }
       } else if (result.error === 'Project not found') {
         // Book doesn't exist on server yet - create it
@@ -488,40 +558,34 @@ const Index = () => {
       }
     }
     
-    // Store the book data for after animation
-    setTimeout(() => {
-      setCurrentBook(book.id);
-      documentMutationService.setProjectId(book.id);
+    // Store the book data immediately - no setTimeout to avoid timing issues
+    setCurrentBook(book.id);
+    documentMutationService.setProjectId(book.id);
+    
+    // Use unified function for consistent book world data loading
+    if (book.worldData) {
+      // Create a mock document result for unified function
+      const mockDocumentResult = {
+        success: true,
+        data: {
+          world_document: book.worldData
+        }
+      };
       
-      // CRITICAL FIX: Only load worldData if it has assets or if we don't already have assets loaded
-      const currentAssets = useAssetStore.getState().getCurrentBookAssets();
-      const hasAssets = Object.keys(currentAssets).length > 0;
-      const bookHasAssets = book.worldData.assets && Object.keys(book.worldData.assets).length > 0;
-      
-      if (bookHasAssets || !hasAssets) {
-        console.log('[Index] Loading book world data:', {
-          bookHasAssets,
-          hasAssets,
-          willLoad: bookHasAssets || !hasAssets
-        });
-        loadWorldData(book.worldData);
-        loadTagWorldData(book.worldData);
-      } else {
-        console.log('[Index] Skipping empty book world data to preserve loaded assets');
-      }
-      
-      // Restore backgrounds from book's worldData if present
-      if (book.worldData?.backgrounds) {
-        const backgroundStore = useBackgroundStore.getState();
-        const backgrounds = book.worldData.backgrounds;
-        console.log('[Index] Restoring', Object.keys(backgrounds).length, 'backgrounds from book worldData');
-
-        Object.entries(backgrounds).forEach(([key, config]) => {
-          const clonedConfig = backgroundStore.cloneConfig(config as BackgroundConfig);
-          backgroundStore.setBackground(key, clonedConfig);
-        });
-      }
-    }, 100);
+      // Use unified function for consistent data loading
+      loadWorldDocumentData(mockDocumentResult, book.id, {
+        loadAssets: true,
+        loadBackgrounds: true,
+        loadTags: true,
+        skipIfAssetsExist: true // Preserve existing assets if they exist
+      }).then(loadSuccess => {
+        if (!loadSuccess) {
+          console.error('[Index] Failed to load book world data');
+        }
+      }).catch(err => {
+        console.error('[Index] Error loading book world data:', err);
+      });
+    }
   };
 
   const handleBookEntryComplete = () => {

@@ -30,7 +30,7 @@ interface AssetStore {
   getCurrentBookGlobalCustomFields: () => GlobalCustomField[];
   
   // World-aware actions
-  loadWorldData: (worldData: any) => void;
+  loadWorldData: (worldData: any, bookIdOverride?: string) => void;
   getWorldData: () => any;
   clearWorldData: () => void;
   clearBookData: (bookId: string) => void;
@@ -1008,41 +1008,28 @@ export const useAssetStore = create<AssetStore>()(
   },
 
   // World-aware methods
-  loadWorldData: (worldData) => {
-    console.log(`[AssetStore] loadWorldData called with:`, {
+  loadWorldData: (worldData, bookIdOverride?: string) => {
+    console.log(`[AssetStore] loadWorldData called:`, {
       hasWorldData: !!worldData,
-      worldDataKeys: worldData ? Object.keys(worldData) : 'no keys',
       assetCount: worldData?.assets ? Object.keys(worldData.assets).length : 0,
-      sampleAsset: worldData?.assets ? Object.values(worldData.assets)[0] : null,
-      fullWorldData: worldData
+      bookId: bookIdOverride || get().getCurrentBookId()
     });
 
-    // DETAILED DEBUG: Log the actual data structure
-    console.log('[AssetStore] DETAILED DEBUG - worldData structure:', JSON.stringify(worldData, null, 2));
-    console.log('[AssetStore] DETAILED DEBUG - worldData.assets structure:', JSON.stringify(worldData?.assets, null, 2));
-
     if (worldData) {
-      const bookId = get().getCurrentBookId();
-      console.log(`[AssetStore] Current book ID:`, bookId);
+      const bookId = bookIdOverride || get().getCurrentBookId();
+      console.log(`[AssetStore] Using book ID:`, bookId, bookIdOverride ? '(override)' : '(current)');
       
       if (!bookId) {
         console.warn('[AssetStore] Cannot load world data - no current book');
         return;
       }
       
-      // CRITICAL FIX: Ensure assets object exists and has data
-      let assets = worldData.assets;
+      // ENFORCE CONSISTENT DATA STRUCTURE: Use worldData.assets consistently
+      // This removes fallback logic that encouraged inconsistent asset paths
+      const assets = worldData.assets || {};
+      
       if (!assets || Object.keys(assets).length === 0) {
-        console.warn('[AssetStore] WARNING: worldData.assets is empty, checking for alternative data sources');
-        
-        // Check if assets might be in a different field
-        if (worldData.world_document?.assets) {
-          console.log('[AssetStore] Found assets in worldData.world_document.assets');
-          assets = worldData.world_document.assets;
-        } else {
-          console.error('[AssetStore] CRITICAL: No assets found in any expected field');
-          assets = {};
-        }
+        console.warn('[AssetStore] WARNING: worldData.assets is empty');
       }
 
       // Migrate 'other' type to 'card' for database compatibility

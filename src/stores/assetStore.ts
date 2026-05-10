@@ -1325,14 +1325,16 @@ export const useAssetStore = create<AssetStore>()(
 
   // World-aware methods
   loadWorldData: (worldData, bookIdOverride?: string) => {
+    const bookId = bookIdOverride || get().getCurrentBookId();
     console.log(`[AssetStore] loadWorldData called:`, {
       hasWorldData: !!worldData,
       assetCount: worldData?.assets ? Object.keys(worldData.assets).length : 0,
-      bookId: bookIdOverride || get().getCurrentBookId()
+      bookId: bookId,
+      bookIdOverride: bookIdOverride || null,
+      currentBookId: get().getCurrentBookId()
     });
 
     if (worldData) {
-      const bookId = bookIdOverride || get().getCurrentBookId();
       console.log(`[AssetStore] Using book ID:`, bookId, bookIdOverride ? '(override)' : '(current)');
       
       if (!bookId) {

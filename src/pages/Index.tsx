@@ -316,12 +316,12 @@ const Index = () => {
     if (currentViewportId && currentBookAssets[currentViewportId]) {
       const viewportAsset = currentBookAssets[currentViewportId];
       currentState.viewportAsset = {
-        id: viewportAsset.id,
+        id: viewportAsset.asset_id,
         x: viewportAsset.x ?? 0,
         y: viewportAsset.y ?? 0,
         width: viewportAsset.width ?? 100,
         height: viewportAsset.height ?? 100,
-        viewportConfig: viewportAsset.viewportConfig ?? {
+        viewportConfig: viewportAsset.viewport_config ?? {
           zoom: 1,
           panX: 0,
           panY: 0
@@ -396,8 +396,25 @@ const Index = () => {
         const hasAssets = Object.keys(currentAssets).length > 0;
         const bookHasAssets = Object.keys(assets).length > 0;
         
+        console.log('[Index] skipIfAssetsExist check:', {
+          hasAssets,
+          bookHasAssets,
+          currentAssetCount: Object.keys(currentAssets).length,
+          incomingAssetCount: Object.keys(assets).length
+        });
+        
+        // Only skip if we have existing assets AND the incoming assets are not empty
+        // This prevents the case where assets are lost due to empty incoming data
         if (bookHasAssets && hasAssets) {
           console.log('[Index] Skipping asset loading to preserve existing assets');
+        } else if (!bookHasAssets && hasAssets) {
+          console.log('[Index] WARNING: Book has no assets but store has assets - this indicates a sync issue');
+          // Load anyway to ensure consistency
+          const assetStore = useAssetStore.getState();
+          assetStore.loadWorldData({ 
+            assets: assets,
+            globalCustomFields: worldDocument.globalCustomFields || {}
+          }, targetBookId);
         } else {
           // Load assets through proper store method to maintain virtualized mode
           if (Object.keys(assets).length > 0) {
@@ -407,9 +424,11 @@ const Index = () => {
             assetStore.loadWorldData({ 
               assets: assets,
               globalCustomFields: worldDocument.globalCustomFields || {}
-            });
+            }, targetBookId);
             
             console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
+          } else {
+            console.log('[Index] No assets to load - incoming assets array is empty');
           }
         }
       } else {
@@ -421,7 +440,7 @@ const Index = () => {
           assetStore.loadWorldData({ 
             assets: assets,
             globalCustomFields: worldDocument.globalCustomFields || {}
-          });
+          }, targetBookId);
           
           console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
         }

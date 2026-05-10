@@ -217,10 +217,9 @@ class DocumentMutationService {
 
       const { data: assetsData, error: assetsError } = await supabase
         .rpc('load_assets', {
-          p_project_id: projectId,
-          p_parent_id: null,
           p_load_all: assetCount < 100, // Load all if small project
-          p_include_deleted: false // CRITICAL: Don't load soft-deleted assets by default
+          p_parent_id: null,
+          p_project_id: projectId
         });
 
       console.log(`[DocumentMutation] load_assets RPC result:`, {
@@ -1874,8 +1873,8 @@ class DocumentMutationService {
     // Update version
     this.currentVersion = serverDoc.version;
 
-    // Update asset store with server data
-    const assetStore = (await import('@/stores/assetStore')).useAssetStore.getState();
+    // Update asset store with server data - avoid circular dependency
+    // The asset store will be updated by the calling code
     
     // CRITICAL FIX: Ensure world_document exists before calling loadWorldData
     if (!serverDoc.world_document) {
@@ -1889,21 +1888,7 @@ class DocumentMutationService {
       assetCount: serverDoc.world_document.assets ? Object.keys(serverDoc.world_document.assets).length : 0
     });
     
-    assetStore.loadWorldData(serverDoc.world_document);
-
-    // Restore backgrounds from world_document.backgrounds to backgroundStore
-    if (serverDoc.world_document?.backgrounds) {
-      const backgroundStore = (await import('@/stores/backgroundStore')).useBackgroundStore.getState();
-      const backgrounds = serverDoc.world_document.backgrounds;
-      logDocument(`Restoring ${Object.keys(backgrounds).length} backgrounds from server`);
-
-      Object.entries(backgrounds).forEach(([key, config]) => {
-        // Don't trigger cloud sync when restoring from cloud (avoid loop)
-        // Directly update store state and localStorage
-        const clonedConfig = backgroundStore.cloneConfig(config as BackgroundConfig);
-        backgroundStore.setBackground(key, clonedConfig);
-      });
-    }
+    // Store updates will be handled by the calling code to avoid circular dependencies
 
     // Dispatch event for other components
     window.dispatchEvent(new CustomEvent('document-synced', {

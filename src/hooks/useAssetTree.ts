@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useAssetStore } from '@/stores/assetStoreSimple';
+import { useAssetStore } from '@/stores/assetStore';
 import { 
   buildAssetTree, 
   flattenTree, 
@@ -8,7 +8,7 @@ import {
   type AssetTreeState,
   type AssetOperations 
 } from '@/types/asset';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 export const useAssetTree = () => {
   const {

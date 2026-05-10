@@ -3,7 +3,7 @@ import { ChevronRight, ChevronDown, Folder, File, Plus, Trash2, Move } from 'luc
 import { useAssetTree } from '@/hooks/useAssetTree';
 import { AssetContextMenu } from '@/components/AssetContextMenu';
 import type { AssetNode } from '@/types/asset';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 interface AssetTreeItemProps {
   node: AssetNode;

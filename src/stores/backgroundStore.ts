@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { BackgroundConfig, BackgroundStore } from '@/types/background';
 import { DEFAULT_BACKGROUND_CONFIG, getAssetKey } from '@/types/background';
-import { getBackground as getBackgroundFromStorage, setBackground as setBackgroundToStorage, loadAllBackgrounds, loadAllBackgroundsAsync } from '@/utils/backgroundStorage';
+import { getBackgroundAsync as getBackgroundFromIndexedDB, setBackgroundAsync as setBackgroundToIndexedDB, loadAllBackgroundsAsync, migrateBackgroundFormat } from '@/utils/backgroundStorage';
 import { documentMutationService } from '@/services/DocumentMutationService';
 import { useAssetStore } from '@/stores/assetStore';
+import { storeCoordinator } from '@/services/StoreCoordinator';
 import { logBackground, reportError } from '@/utils/logger';
 
 const storeInitTime = Date.now();
@@ -12,37 +13,28 @@ logBackground('============================================');
 logBackground('STORE INITIALIZING at', storeInitTime);
 logBackground('============================================');
 
-// Debounce timers for background saves to prevent excessive writes
-const backgroundSaveDebouncers = new Map<string, number>();
-const BACKGROUND_DEBOUNCE_MS = 500; // 500ms debounce for background changes
-
-// Global cleanup function to clear all background save timers
-export const clearAllBackgroundTimers = () => {
-  logBackground(`Clearing ${backgroundSaveDebouncers.size} background save timers`);
-  backgroundSaveDebouncers.forEach((timerId) => {
-    clearTimeout(timerId);
-  });
-  backgroundSaveDebouncers.clear();
-};
+// StoreCoordinator now handles all debouncing and coordination
+// Legacy debouncing removed to prevent race conditions
 
 export const useBackgroundStore = create<BackgroundStore>()(
   subscribeWithSelector(
     (set, get) => {
       // Add cleanup on page unload to prevent memory leaks
       if (typeof window !== 'undefined') {
-        window.addEventListener('beforeunload', clearAllBackgroundTimers);
-        window.addEventListener('pagehide', clearAllBackgroundTimers);
+        window.addEventListener('beforeunload', () => storeCoordinator.cleanup());
+        window.addEventListener('pagehide', () => storeCoordinator.cleanup());
       }
-        // Initialize configs from localStorage on store creation
+        // Run migration first to convert any old format backgrounds
+        migrateBackgroundFormat();
+        
+        // Initialize configs from IndexedDB on store creation
         logBackground('Running store creator function...');
-        const initialConfigs = loadAllBackgrounds() || {};
-        const configCount = Object.keys(initialConfigs).length;
-        logBackground(`Initial sync load complete: ${configCount} backgrounds found`);
+        const initialConfigs = {};
+        logBackground(`Initial sync load complete: ${Object.keys(initialConfigs).length} backgrounds found`);
 
-        // Async load images from IndexedDB to restore actual image URLs
-        // The sync load only gets metadata (with imageUrl: null), we need to fetch the actual images
-        if (configCount > 0) {
-          logBackground('Starting async IndexedDB image load...');
+        // Async load from IndexedDB to restore actual image URLs
+        if (Object.keys(initialConfigs).length > 0) {
+          logBackground('Starting async IndexedDB load...');
           loadAllBackgroundsAsync().then(loadedConfigs => {
             const loadedCount = Object.keys(loadedConfigs).length;
             const configsWithImages = Object.entries(loadedConfigs).filter(([_, config]) => config.imageUrl).length;
@@ -75,16 +67,19 @@ export const useBackgroundStore = create<BackgroundStore>()(
               return state.cloneConfig(state.configs[key]);
             }
 
-            // Fallback to localStorage and update store
-            const localStorageConfig = getBackgroundFromStorage(key);
-            set((state) => ({
-              configs: {
-                ...state.configs,
-                [key]: localStorageConfig,
-              },
-            }));
+            // Return default config and trigger async load from IndexedDB
+            getBackgroundFromIndexedDB(assetId).then(indexedDBConfig => {
+              set((state) => ({
+                configs: {
+                  ...state.configs,
+                  [key]: indexedDBConfig,
+                },
+              }));
+            }).catch(error => {
+              reportError(error, 'BackgroundStore.getBackground', 'Failed to load from IndexedDB');
+            });
 
-            return localStorageConfig;
+            return JSON.parse(JSON.stringify(DEFAULT_BACKGROUND_CONFIG));
           },
 
           setBackground: (assetId: string, config: BackgroundConfig) => {
@@ -101,49 +96,33 @@ export const useBackgroundStore = create<BackgroundStore>()(
               },
             }));
 
-            // Debounce localStorage and cloud sync to prevent excessive writes
-            // Clear existing timer for this asset
-            if (backgroundSaveDebouncers.has(key)) {
-              clearTimeout(backgroundSaveDebouncers.get(key)!);
+            // Use StoreCoordinator for coordinated sync instead of individual debouncing
+            // This prevents race conditions with other stores
+            storeCoordinator.queueSyncOperation({
+              type: 'background_config',
+              assetId,
+              data: { config: clonedConfig },
+              priority: 'medium'
+            });
+
+            // Also queue asset background update if this is an asset background
+            if (key.startsWith('asset:')) {
+              const actualAssetId = key.substring(6);
+              storeCoordinator.queueSyncOperation({
+                type: 'asset_background',
+                assetId: actualAssetId,
+                data: { backgroundConfig: clonedConfig },
+                priority: 'medium'
+              });
             }
 
-            // Set new debounced timer
-            backgroundSaveDebouncers.set(key, window.setTimeout(() => {
-              // Persist to localStorage
-              setBackgroundToStorage(key, clonedConfig);
-              logBackground(`Saved background to localStorage for ${assetId}`);
-              
-              // Sync backgrounds using saveGlobalBackgrounds (MASTER_PLAN.md state-based tracking)
-              // This stores all background configs in world_document.backgrounds as single source of truth
-              // Only sync if a project is loaded (user has entered a book)
-              const updatedConfigs = {
-                ...get().configs,
-                [key]: clonedConfig
-              };
-              if (documentMutationService.getCurrentProjectId()) {
-                documentMutationService.saveGlobalBackgrounds(updatedConfigs);
-                
-                // Also mark the asset as changed so the background gets saved to backgroundConfig
-                // Extract the actual asset ID from the key (remove "asset:" prefix if present)
-                const actualAssetId = key.startsWith('asset:') ? key.substring(6) : assetId;
-                const assetStore = useAssetStore.getState();
-                const asset = assetStore.getAssetById(actualAssetId);
-                if (asset) {
-                  // Update the asset's backgroundConfig field
-                  const updatedAsset = {
-                    ...asset,
-                    backgroundConfig: clonedConfig
-                  };
-                  documentMutationService.markAssetChanged(actualAssetId, updatedAsset);
-                  logBackground(`Marked asset ${actualAssetId} as changed with backgroundConfig`);
-                }
-              } else {
-                logBackground('Background saved locally - will sync when book is entered');
-              }
-              
-              // Clean up timer
-              backgroundSaveDebouncers.delete(key);
-            }, BACKGROUND_DEBOUNCE_MS));
+            // Persist to IndexedDB immediately for responsive UI
+            // Coordinator will handle cloud sync debouncing
+            setBackgroundToIndexedDB(assetId, clonedConfig).then(() => {
+              logBackground(`Saved background to IndexedDB for ${assetId}`);
+            }).catch(error => {
+              reportError(error, 'BackgroundStore.setBackground', 'Failed to save to IndexedDB');
+            });
           },
 
           cloneConfig: (config: BackgroundConfig): BackgroundConfig => {
@@ -197,7 +176,7 @@ export const useBackgroundStore = create<BackgroundStore>()(
           },
 
           cleanup: () => {
-            clearAllBackgroundTimers();
+            storeCoordinator.cleanup();
           },
         };
       }

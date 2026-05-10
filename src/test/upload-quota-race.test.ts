@@ -17,6 +17,17 @@ import {
 } from './utils/testFixtures';
 
 // Mock services
+const mockUnifiedUploadService = {
+  upload: vi.fn(),
+  uploadWithVariants: vi.fn(),
+  retryUpload: vi.fn(),
+  getPublicUrl: vi.fn(),
+  onCloudRetry: vi.fn(),
+  isBackendAvailable: vi.fn(),
+  getStatus: vi.fn(),
+};
+
+// Legacy mock for backward compatibility in tests
 const mockAssetUploadService = {
   getUploadUrls: vi.fn(),
   uploadFile: vi.fn(),
@@ -28,7 +39,12 @@ const mockAssetUploadService = {
 const mockCloudStore = {
   currentStorageUsage: 0,
   maxStorageBytes: 100 * 1024 * 1024, // 100MB
-  checkQuota: vi.fn(),
+  checkQuota: vi.fn((size: number) => {
+    return {
+      allowed: mockCloudStore.currentStorageUsage + size <= mockCloudStore.maxStorageBytes,
+      remaining: Math.max(0, mockCloudStore.maxStorageBytes - mockCloudStore.currentStorageUsage - size)
+    };
+  }),
   updateUsage: vi.fn(),
 };
 
@@ -41,7 +57,44 @@ describe('Upload Flow Quota Race Conditions', () => {
     mockCloudStore.currentStorageUsage = 0;
     mockCloudStore.maxStorageBytes = 100 * 1024 * 1024;
     
-    // Setup default mock responses
+    // Setup default mock responses with quota awareness
+    mockUnifiedUploadService.upload.mockImplementation(async (file, options) => {
+      const quotaCheck = mockCloudStore.checkQuota(file.size);
+      if (!quotaCheck.allowed) {
+        return {
+          success: false,
+          backend: 'r2',
+          error: 'Quota exceeded'
+        };
+      }
+      
+      // Simulate upload delay and update usage
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 50));
+      mockCloudStore.currentStorageUsage += file.size;
+      
+      return {
+        success: true,
+        backend: 'r2',
+        r2Key: `test/path/${options.assetId}.jpg`,
+        publicUrl: `https://test-r2-url.com/${options.assetId}.jpg`
+      };
+    });
+    
+    mockUnifiedUploadService.uploadWithVariants.mockResolvedValue({
+      success: true,
+      backend: 'r2',
+      r2Key: 'test/path/asset.jpg',
+      publicUrl: 'https://test-r2-url.com/asset.jpg'
+    });
+    
+    mockUnifiedUploadService.isBackendAvailable.mockReturnValue(true);
+    mockUnifiedUploadService.getStatus.mockReturnValue({
+      r2Configured: true,
+      availableBackends: ['r2', 'supabase'],
+      defaultBackend: 'r2'
+    });
+    
+    // Legacy mocks for backward compatibility
     mockAssetUploadService.getUploadUrls.mockResolvedValue({
       uploadUrls: [
         {
@@ -77,8 +130,8 @@ describe('Upload Flow Quota Race Conditions', () => {
         async () => {
           const assetSize = 20 * 1024 * 1024; // 20MB each
           
-          // Check quota
-          const quotaCheck = await mockAssetUploadService.checkQuota(assetSize);
+          // Check quota using cloud store
+          const quotaCheck = mockCloudStore.checkQuota(assetSize);
           if (!quotaCheck.allowed) {
             throw new Error('Quota exceeded');
           }
@@ -86,11 +139,18 @@ describe('Upload Flow Quota Race Conditions', () => {
           // Simulate upload delay
           await new Promise(resolve => setTimeout(resolve, 10));
           
-          // Complete upload
-          const result = await mockAssetUploadService.completeUpload({
-            assetId: `asset-${index}`,
-            size: assetSize,
-          });
+          // Complete upload using unified service
+          const result = await mockUnifiedUploadService.upload(
+            new File(['test'], `asset-${index}.jpg`),
+            {
+              assetId: `asset-${index}`,
+              projectId: 'test-project'
+            }
+          );
+          
+          if (!result.success) {
+            throw new Error(result.error || 'Upload failed');
+          }
           
           return result;
         }

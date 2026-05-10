@@ -5,7 +5,7 @@ import { useAssetTree } from '@/hooks/useAssetTree';
 import { useTagStore } from '@/stores/tagStore';
 import { useAssetStore } from '@/stores/assetStore';
 import { useTagInitializer } from '@/hooks/useTagInitializer';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 interface AssetTreeContainerProps {
   onAssetSelect?: (assetId: string) => void;

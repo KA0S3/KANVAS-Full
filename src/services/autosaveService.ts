@@ -5,7 +5,7 @@ import { useBackgroundStore } from '@/stores/backgroundStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { documentMutationService, type SyncStatus } from './DocumentMutationService';
-import { r2UploadService } from './R2UploadService';
+import { unifiedUploadService } from './UnifiedUploadService';
 import { logAutosave, reportError } from '@/utils/logger';
 import { performanceMonitor } from '@/utils/performanceMonitor';
 
@@ -1091,16 +1091,17 @@ class AutosaveService {
     if (!asset.file) return;
 
     try {
-      const result = await r2UploadService.uploadWithVariants(
+      const result = await unifiedUploadService.uploadWithVariants(
         asset.file,
-        asset.id,
-        projectId,
         {
+          assetId: asset.id,
+          projectId,
+          generateVariants: true,
           generateThumbnail: true,
-          generatePreview: true
-        },
-        (stage, progress) => {
-          logAutosave(`Asset ${asset.id} ${stage}: ${progress.percentage}%`);
+          generatePreview: true,
+          onProgress: (progress) => {
+            logAutosave(`Asset ${asset.id}: ${progress.percentage}%`);
+          }
         }
       );
       
@@ -1143,6 +1144,268 @@ class AutosaveService {
     });
     
     return positions;
+  }
+
+  // Data restoration functionality (from useHybridAutosave)
+  private validateRestoredData = (savedData: any): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    if (!savedData || typeof savedData !== 'object') {
+      errors.push('Invalid saved data format');
+      return { isValid: false, errors };
+    }
+    
+    // Validate assets if present
+    if (savedData.assets) {
+      if (typeof savedData.assets !== 'object') {
+        errors.push('Assets must be an object');
+      } else {
+        Object.entries(savedData.assets).forEach(([id, asset]) => {
+          if (!asset || typeof asset !== 'object') {
+            errors.push(`Invalid asset format for ${id}`);
+          } else {
+            const assetObj = asset as any;
+            if (!assetObj.id || !assetObj.name || !assetObj.type) {
+              errors.push(`Asset ${id} missing required fields`);
+            }
+          }
+        });
+      }
+    }
+    
+    // Validate global custom fields if present
+    if (savedData.worldData?.globalCustomFields) {
+      if (!Array.isArray(savedData.worldData.globalCustomFields)) {
+        errors.push('Global custom fields must be an array');
+      } else {
+        savedData.worldData.globalCustomFields.forEach((field: any, index: number) => {
+          if (!field || typeof field !== 'object') {
+            errors.push(`Invalid global custom field format at index ${index}`);
+          } else if (!field.id || !field.label || !field.type) {
+            errors.push(`Global custom field at index ${index} missing required fields`);
+          }
+        });
+      }
+    }
+    
+    return { isValid: errors.length === 0, errors };
+  };
+
+  private checkVersionCompatibility = (savedData: any): boolean => {
+    const currentVersion = '3.9.7'; // Get from package.json or app version
+    const savedVersion = savedData.version || 'unknown';
+    
+    // For now, assume compatibility - can be enhanced later
+    logAutosave(`Version check: saved=${savedVersion}, current=${currentVersion}`);
+    return true;
+  };
+
+  private attemptPartialRestoration = (savedData: any, errors: string[]): void => {
+    logAutosave('Data validation failed, attempting partial restoration:', errors);
+    
+    const assetStore = useAssetStore.getState();
+    const backgroundStore = useBackgroundStore.getState();
+    const bookStore = useBookStore.getState();
+    
+    try {
+      // Attempt to restore valid assets
+      if (savedData.assets && typeof savedData.assets === 'object') {
+        const validAssets: Record<string, any> = {};
+        Object.entries(savedData.assets).forEach(([id, asset]) => {
+          if (asset && typeof asset === 'object') {
+            const assetObj = asset as any;
+            if (assetObj.id && assetObj.name && assetObj.type) {
+              validAssets[id] = asset;
+            }
+          }
+        });
+        
+        if (Object.keys(validAssets).length > 0) {
+          logAutosave(`Partially restoring ${Object.keys(validAssets).length} valid assets`);
+          assetStore.restoreAssets(validAssets);
+        }
+      }
+      
+      // Attempt to restore valid global custom fields
+      if (savedData.worldData?.globalCustomFields && Array.isArray(savedData.worldData.globalCustomFields)) {
+        const validFields = savedData.worldData.globalCustomFields.filter((field: any) => 
+          field && typeof field === 'object' && field.id && field.label && field.type
+        );
+        
+        if (validFields.length > 0) {
+          logAutosave(`Partially restoring ${validFields.length} valid global custom fields`);
+          assetStore.restoreGlobalCustomFields(validFields);
+        }
+      }
+      
+      // Restore backgrounds (they're simpler and less prone to corruption)
+      if (savedData.backgrounds && typeof savedData.backgrounds === 'object') {
+        logAutosave('Restoring backgrounds');
+        Object.entries(savedData.backgrounds).forEach(([key, config]) => {
+          backgroundStore.setBackground(key, config as any);
+        });
+      }
+      
+      // Restore current book
+      if (savedData.worldData?.currentBook) {
+        logAutosave('Setting current book:', savedData.worldData.currentBook);
+        bookStore.setCurrentBook(savedData.worldData.currentBook);
+      }
+      
+      logAutosave('Partial restoration completed');
+    } catch (error) {
+      reportError(error, 'autosaveService.attemptPartialRestoration', 'Partial restoration failed');
+    }
+  };
+
+  private detectConflicts = (savedData: any, currentData: any): any[] => {
+    const conflicts: any[] = [];
+    
+    // Check for asset conflicts
+    if (savedData.assets && currentData.assets) {
+      Object.keys(savedData.assets).forEach(assetId => {
+        if (currentData.assets[assetId]) {
+          const savedAsset = savedData.assets[assetId];
+          const currentAsset = currentData.assets[assetId];
+          
+          // Simple conflict detection based on timestamps
+          if (savedAsset.updatedAt && currentAsset.updatedAt) {
+            const savedTime = new Date(savedAsset.updatedAt);
+            const currentTime = new Date(currentAsset.updatedAt);
+            
+            if (currentTime > savedTime) {
+              conflicts.push({
+                type: 'asset',
+                id: assetId,
+                localData: currentAsset,
+                remoteData: savedAsset,
+                resolution: 'local-wins' // Default strategy
+              });
+            }
+          }
+        }
+      });
+    }
+    
+    return conflicts;
+  };
+
+  // Public restoration methods
+  async restoreUserData(userId: string, projectId?: string): Promise<boolean> {
+    try {
+      const savedData = await this.loadUserData(userId, projectId);
+      if (!savedData) {
+        logAutosave('No saved data found for restoration');
+        return false;
+      }
+
+      logAutosave('Restoring saved data:', savedData);
+      
+      // Check version compatibility
+      if (!this.checkVersionCompatibility(savedData)) {
+        logAutosave('Version compatibility check failed, proceeding anyway');
+      }
+      
+      // Validate data first
+      const validation = this.validateRestoredData(savedData);
+      if (!validation.isValid) {
+        logAutosave('Data validation failed:', validation.errors);
+        // Attempt partial restoration with valid data
+        this.attemptPartialRestoration(savedData, validation.errors);
+        return false;
+      }
+      
+      // Check for conflicts with current data
+      const assetStore = useAssetStore.getState();
+      const currentData = {
+        assets: assetStore.getCurrentBookAssets(),
+      };
+      
+      const conflicts = this.detectConflicts(savedData, currentData);
+      if (conflicts.length > 0) {
+        logAutosave(`Detected ${conflicts.length} conflicts, using server-wins strategy`);
+        // For now, proceed with restoration (server-wins strategy)
+        // TODO: Add user notification for conflicts
+      }
+      
+      // Proceed with full restoration
+      await this.performFullRestoration(savedData);
+      return true;
+    } catch (error) {
+      reportError(error, 'autosaveService.restoreUserData', 'Critical restoration failure');
+      return false;
+    }
+  }
+
+  private async performFullRestoration(savedData: any): Promise<void> {
+    try {
+      const assetStore = useAssetStore.getState();
+      const backgroundStore = useBackgroundStore.getState();
+      const bookStore = useBookStore.getState();
+
+      // Step 1: Restore assets
+      if (savedData.assets && Object.keys(savedData.assets).length > 0) {
+        logAutosave('Restoring assets:', Object.keys(savedData.assets).length);
+        try {
+          assetStore.restoreAssets(savedData.assets);
+          logAutosave('Assets restored successfully');
+        } catch (error) {
+          reportError(error, 'autosaveService.performFullRestoration', 'Failed to restore assets');
+          // Continue with other restoration to prevent complete failure
+        }
+      }
+
+      // Step 2: Restore backgrounds
+      if (savedData.backgrounds && Object.keys(savedData.backgrounds).length > 0) {
+        logAutosave('Restoring backgrounds');
+        Object.entries(savedData.backgrounds).forEach(([key, config]) => {
+          // Type assertion to ensure config matches BackgroundConfig interface
+          backgroundStore.setBackground(key, config as any);
+        });
+      }
+
+      // Step 3: Restore world data
+      if (savedData.worldData) {
+        logAutosave('Restoring world data');
+        
+        // Restore current book if different
+        if (savedData.worldData.currentBook && savedData.worldData.currentBook !== bookStore.currentBookId) {
+          logAutosave('Setting current book:', savedData.worldData.currentBook);
+          bookStore.setCurrentBook(savedData.worldData.currentBook);
+        }
+
+        // Restore global custom fields if available
+        if (savedData.worldData.globalCustomFields && Array.isArray(savedData.worldData.globalCustomFields)) {
+          logAutosave('Restoring global custom fields:', savedData.worldData.globalCustomFields.length);
+          try {
+            assetStore.restoreGlobalCustomFields(savedData.worldData.globalCustomFields);
+            logAutosave('Global custom fields restored successfully');
+          } catch (error) {
+            reportError(error, 'autosaveService.performFullRestoration', 'Failed to restore global custom fields');
+            // Continue with other restoration to prevent complete failure
+          }
+        }
+      }
+
+      // Step 4: Restore screen positions
+      if (savedData.screenPositions && Object.keys(savedData.screenPositions).length > 0) {
+        logAutosave('Restoring screen positions');
+        Object.entries(savedData.screenPositions).forEach(([assetId, position]: [string, any]) => {
+          const asset = assetStore.getAssetById(assetId);
+          if (asset) {
+            assetStore.updateAssetPosition(assetId, position.x, position.y);
+            if (position.width && position.height) {
+              assetStore.updateAssetSize(assetId, position.width, position.height);
+            }
+          }
+        });
+      }
+
+      logAutosave('Data restoration completed successfully');
+    } catch (error) {
+      reportError(error, 'autosaveService.performFullRestoration', 'Failed to restore saved data');
+      throw error;
+    }
   }
 }
 

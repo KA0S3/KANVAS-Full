@@ -3,7 +3,7 @@
  * Adds custom fields, viewport display settings, and other advanced features
  */
 
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 export interface Point {
   x: number;
@@ -84,15 +84,7 @@ export interface ViewportDisplaySettings {
   portraitBlur: number; // 0 = no blur, 1 = full blur
 }
 
-export interface ExtendedAsset extends Asset {
-  description?: string;
-  customFields: CustomField[];
-  customFieldValues: CustomFieldValue[];
-  thumbnail?: string; // Base64 encoded image
-  background?: string; // Base64 encoded image
-  tags?: string[];
-  viewportDisplaySettings?: ViewportDisplaySettings;
-}
+// ExtendedAsset interface removed - now using unified Asset interface from assetInterfaces.ts
 
 export interface GeneratorData {
   type: 'character' | 'city' | 'item' | 'location';
@@ -135,38 +127,60 @@ export const DEFAULT_VIEWPORT: ViewportConfig = {
 };
 
 /**
- * Create a new asset with defaults
+ * Create a new asset with defaults using unified Asset interface
  */
 export function createAsset(
   name: string,
   parentId: string | null,
   position: Point = { x: 100, y: 100 }
-): ExtendedAsset {
-  const id = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+): Asset {
+  const asset_id = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   
   return {
-    id,
+    asset_id,
+    parent_id: parentId,
     name,
     type: 'other',
-    description: '',
-    thumbnail: undefined,
-    background: undefined,
     x: position.x,
     y: position.y,
     width: 200,
     height: 150,
-    parentId,
+    z_index: 0,
+    is_expanded: false,
+    content: null,
+    background_config: {
+      mode: 'color',
+      color: '#ffffff',
+      imageUrl: null
+    },
+    viewport_config: {
+      zoom: 1,
+      pan_x: 0,
+      pan_y: 0
+    },
+    custom_fields: {
+      customFields: [],
+      customFieldValues: [],
+      tags: [],
+      viewportDisplaySettings: { ...DEFAULT_VIEWPORT_DISPLAY_SETTINGS },
+      thumbnail: undefined,
+      background: undefined,
+      description: ''
+    },
+    updated_at: new Date().toISOString(),
     children: [],
-    tags: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    customFields: [],
-    customFieldValues: [],
-    viewportDisplaySettings: { ...DEFAULT_VIEWPORT_DISPLAY_SETTINGS },
-    isExpanded: false,
-    isLocked: false,
-    borderShape: 'square',
-    showTagBorder: false,
+    created_at: Date.now(),
+    is_locked: false,
+    border_shape: 'square',
+    show_tag_border: false,
+    deleted_at: null,
+    cloud_status: 'local',
+    cloud_id: null,
+    cloud_path: null,
+    cloud_size: null,
+    cloud_updated_at: null,
+    cloud_error: null,
+    file: null
   };
 }
 

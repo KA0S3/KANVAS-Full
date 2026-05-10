@@ -10,6 +10,15 @@ import { ownerKeyService } from '@/services/ownerKeyService';
 import type { User } from '@supabase/supabase-js';
 import { performanceMonitor } from '@/utils/performanceMonitor';
 import { logAuth, reportError } from '@/utils/logger';
+import { 
+  getStorageBehavior, 
+  shouldUseLocalStorage, 
+  shouldSyncToCloud, 
+  shouldPersistData, 
+  shouldSyncMetadata, 
+  shouldMonitorQuota,
+  validateStorageOperation 
+} from '@/config/plans';
 
 type Plan = 'guest' | 'free' | 'pro' | 'lifetime' | 'owner';
 
@@ -76,6 +85,15 @@ interface AuthStore {
   checkForMigrationConflicts: (userId: string) => Promise<MigrationConflict | null>;
   shouldShowGuestImport: () => Promise<boolean>;
   executeDataMigration: (strategy: any, userId: string) => Promise<MigrationResult>;
+  
+  // Plan-based storage behavior methods
+  getStorageBehavior: () => ReturnType<typeof getStorageBehavior>;
+  shouldUseLocalStorage: () => boolean;
+  shouldSyncToCloud: () => boolean;
+  shouldPersistData: () => boolean;
+  shouldSyncMetadata: () => boolean;
+  shouldMonitorQuota: () => boolean;
+  validateStorageOperation: (operation: 'localStorage' | 'cloudSync' | 'metadataSync' | 'quotaMonitoring') => boolean;
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -843,6 +861,42 @@ export const useAuthStore = create<AuthStore>()(
   },
 
   // Enhanced auth methods for provider conflict resolution
+
+  // Plan-based storage behavior methods
+  getStorageBehavior: () => {
+    const state = get();
+    return getStorageBehavior(state.plan);
+  },
+
+  shouldUseLocalStorage: () => {
+    const state = get();
+    return shouldUseLocalStorage(state.plan);
+  },
+
+  shouldSyncToCloud: () => {
+    const state = get();
+    return shouldSyncToCloud(state.plan);
+  },
+
+  shouldPersistData: () => {
+    const state = get();
+    return shouldPersistData(state.plan);
+  },
+
+  shouldSyncMetadata: () => {
+    const state = get();
+    return shouldSyncMetadata(state.plan);
+  },
+
+  shouldMonitorQuota: () => {
+    const state = get();
+    return shouldMonitorQuota(state.plan);
+  },
+
+  validateStorageOperation: (operation: 'localStorage' | 'cloudSync' | 'metadataSync' | 'quotaMonitoring') => {
+    const state = get();
+    return validateStorageOperation(state.plan, operation);
+  },
 
   // Check if user exists and what providers they have (OPTIMIZED - minimal DB calls)
   checkUserExists: async (email: string) => {

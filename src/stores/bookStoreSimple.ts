@@ -7,6 +7,9 @@ import { documentMutationService } from '@/services/DocumentMutationService';
 import { undoService } from '@/services/UndoService';
 import { softDeleteService } from '@/services/SoftDeleteService';
 import { StorageCleanup } from '@/utils/storageCleanup';
+import { storeCoordinator } from '@/services/StoreCoordinator';
+import { useAuthStore } from '@/stores/authStore';
+import { storageQuotaMonitor } from '@/utils/storageQuotaMonitor';
 
 const defaultCoverPresets: BookCoverPreset[] = [
   { id: 'cosmic-blue', name: 'Cosmic Blue', color: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' },
@@ -167,22 +170,31 @@ export const useBookStore = create<BookStore>()(
           // Record for undo
           undoService.recordAction('update', 'book', { ...state.books[bookId] }, previousState);
 
-          // Simplified: Only sync to Supabase if explicitly needed
-          // Let the 40-second timer handle batching for low IO
+          // Use StoreCoordinator for coordinated sync (prevents race conditions)
           const currentBookId = get().currentBookId;
           if (bookId === currentBookId && documentMutationService.getCurrentProjectId() === bookId) {
-            // Only queue non-cover settings for background sync
+            // Queue global tags changes through coordinator
             if (updates.worldData?.tags) {
-              documentMutationService.saveGlobalTags(updates.worldData.tags);
+              storeCoordinator.queueSyncOperation({
+                type: 'global_tags',
+                data: { tags: updates.worldData.tags },
+                priority: 'low' // Low priority for global data (preserves low IO)
+              });
             }
             
-            // Only sync viewport if explicitly changed
+            // Queue viewport changes through coordinator
             if (updates.worldData?.viewportOffset || updates.worldData?.viewportScale) {
-              documentMutationService.saveViewport(
-                updates.worldData.viewportOffset?.x || book.worldData?.viewportOffset?.x || 0,
-                updates.worldData.viewportOffset?.y || book.worldData?.viewportOffset?.y || 0,
-                updates.worldData.viewportScale || book.worldData?.viewportScale || 1
-              );
+              storeCoordinator.queueSyncOperation({
+                type: 'viewport_change',
+                data: { 
+                  viewport: {
+                    offsetX: updates.worldData.viewportOffset?.x || book.worldData?.viewportOffset?.x || 0,
+                    offsetY: updates.worldData.viewportOffset?.y || book.worldData?.viewportOffset?.y || 0,
+                    scale: updates.worldData.viewportScale || book.worldData?.viewportScale || 1
+                  }
+                },
+                priority: 'medium' // Medium priority for viewport changes (responsive)
+              });
             }
           }
         },
@@ -388,14 +400,30 @@ export const useBookStore = create<BookStore>()(
           
           try {
             if (cleanValue.state && cleanValue.state.books) {
+              // Check if user is guest - include worldData for guest users only
+              const authStore = useAuthStore.getState();
+              const isGuest = authStore.plan === 'guest' && !authStore.isAuthenticated;
+              
               Object.keys(cleanValue.state.books).forEach(bookId => {
                 const book = cleanValue.state.books[bookId];
                 
-                // CRITICAL FIX: Exclude worldData from localStorage to prevent quota exceeded errors
-                // World data with assets is too large for localStorage and should be loaded from Supabase
+                // PLAN-BASED STORAGE: Include worldData for guest users, exclude for cloud users
                 if (book.worldData) {
-                  console.log(`[BookStore] Excluding worldData from localStorage: ${bookId}`);
-                  delete book.worldData;
+                  if (isGuest) {
+                    // Guest users: Keep worldData but compress it to prevent quota issues
+                    console.log(`[BookStore] Including worldData for guest user: ${bookId}`);
+                    // For guest users, we keep the worldData but might need to compress large assets
+                    if (book.worldData.assets) {
+                      const assetCount = Object.keys(book.worldData.assets).length;
+                      if (assetCount > 100) {
+                        console.warn(`[BookStore] Guest user has ${assetCount} assets, may cause localStorage quota issues`);
+                      }
+                    }
+                  } else {
+                    // Cloud users: Exclude worldData as it will be synced to cloud
+                    console.log(`[BookStore] Excluding worldData for cloud user (${authStore.plan}): ${bookId}`);
+                    delete book.worldData;
+                  }
                 }
                 
                 if (book.coverImage && book.coverImage.startsWith('data:image/') && book.coverImage.length > 50000) {
@@ -411,32 +439,85 @@ export const useBookStore = create<BookStore>()(
             }
             
             localStorage.setItem(name, JSON.stringify(cleanValue));
+            
+            // Check quota after successful save for guest users
+            const authStore = useAuthStore.getState();
+            if (authStore.plan === 'guest' && storageQuotaMonitor.shouldMonitor()) {
+              const quota = storageQuotaMonitor.getStorageQuota();
+              if (quota.isNearLimit || quota.isOverLimit) {
+                console.warn('[BookStore] Storage quota issue detected after save:', {
+                  percentage: `${quota.percentage.toFixed(1)}%`,
+                  isNearLimit: quota.isNearLimit,
+                  isOverLimit: quota.isOverLimit
+                });
+                
+                // Trigger intelligent cleanup
+                storageQuotaMonitor.checkQuotaAndCleanup();
+              }
+            }
           } catch (error) {
             console.error('[BookStore] Error saving to localStorage:', error);
             if (error instanceof Error && error.message.includes('quota')) {
-              // Emergency cleanup and retry with cleaned data
-              console.log('[BookStore] Storage quota exceeded, performing emergency cleanup...');
-              StorageCleanup.clearAllKanvasData();
-              try {
-                // Try saving cleaned data again, not original large data
-                localStorage.setItem(name, JSON.stringify(cleanValue));
-                console.log('[BookStore] Successfully saved after cleanup');
-              } catch (retryError) {
-                console.error('[BookStore] Still failed to save after cleanup:', retryError);
-                // Last resort: save minimal data
-                try {
-                  const minimalData = {
-                    state: {
-                      books: {},
-                      currentBookId: cleanValue.state?.currentBookId,
-                      settings: cleanValue.state?.settings,
-                      viewMode: cleanValue.state?.viewMode
+              // Emergency cleanup using intelligent quota monitor
+              console.log('[BookStore] Storage quota exceeded, performing intelligent cleanup...');
+              
+              // Use the quota monitor for intelligent cleanup first
+              if (storageQuotaMonitor.shouldMonitor()) {
+                storageQuotaMonitor.checkQuotaAndCleanup().then(() => {
+                  // Retry save after intelligent cleanup
+                  try {
+                    localStorage.setItem(name, JSON.stringify(cleanValue));
+                    console.log('[BookStore] Successfully saved after intelligent cleanup');
+                  } catch (retryError) {
+                    console.error('[BookStore] Still failed to save after intelligent cleanup:', retryError);
+                    // Fallback to emergency cleanup
+                    StorageCleanup.clearAllKanvasData();
+                    try {
+                      localStorage.setItem(name, JSON.stringify(cleanValue));
+                      console.log('[BookStore] Successfully saved after emergency cleanup');
+                    } catch (finalError) {
+                      console.error('[BookStore] Even minimal save failed:', finalError);
+                      // Last resort: save minimal data
+                      try {
+                        const minimalData = {
+                          state: {
+                            books: {},
+                            currentBookId: cleanValue.state?.currentBookId,
+                            settings: cleanValue.state?.settings,
+                            viewMode: cleanValue.state?.viewMode
+                          }
+                        };
+                        localStorage.setItem(name, JSON.stringify(minimalData));
+                        console.log('[BookStore] Saved minimal data after all retries failed');
+                      } catch (minimalError) {
+                        console.error('[BookStore] Even minimal save failed:', minimalError);
+                      }
                     }
-                  };
-                  localStorage.setItem(name, JSON.stringify(minimalData));
-                  console.log('[BookStore] Saved minimal data after all retries failed');
-                } catch (finalError) {
-                  console.error('[BookStore] Even minimal save failed:', finalError);
+                  }
+                });
+              } else {
+                // Fallback to original emergency cleanup if quota monitoring not available
+                StorageCleanup.clearAllKanvasData();
+                try {
+                  localStorage.setItem(name, JSON.stringify(cleanValue));
+                  console.log('[BookStore] Successfully saved after emergency cleanup');
+                } catch (retryError) {
+                  console.error('[BookStore] Still failed to save after cleanup:', retryError);
+                  // Last resort: save minimal data
+                  try {
+                    const minimalData = {
+                      state: {
+                        books: {},
+                        currentBookId: cleanValue.state?.currentBookId,
+                        settings: cleanValue.state?.settings,
+                        viewMode: cleanValue.state?.viewMode
+                      }
+                    };
+                    localStorage.setItem(name, JSON.stringify(minimalData));
+                    console.log('[BookStore] Saved minimal data after all retries failed');
+                  } catch (finalError) {
+                    console.error('[BookStore] Even minimal save failed:', finalError);
+                  }
                 }
               }
             }

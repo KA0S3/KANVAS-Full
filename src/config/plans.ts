@@ -18,6 +18,13 @@ export interface PlanConfig {
   importExportEnabled: boolean;
   maxAssetSize: number; // bytes
   features: Record<string, any>;
+  storageBehavior: {
+    localStorageEnabled: boolean;
+    cloudSyncEnabled: boolean;
+    persistentData: boolean;
+    metadataSync: boolean;
+    quotaMonitoring: boolean;
+  };
   pricing?: {
     priceCents?: number; // Price in smallest currency unit (cents for ZAR)
     currency?: string;
@@ -41,6 +48,13 @@ export const PLANS_CONFIG: Record<string, PlanConfig> = {
       cloudSync: false,
       collaboration: false,
       advancedFeatures: false
+    },
+    storageBehavior: {
+      localStorageEnabled: true,
+      cloudSyncEnabled: false,
+      persistentData: true,
+      metadataSync: false,
+      quotaMonitoring: true
     }
   },
 
@@ -57,6 +71,13 @@ export const PLANS_CONFIG: Record<string, PlanConfig> = {
       cloudSync: true,
       collaboration: false,
       advancedFeatures: false
+    },
+    storageBehavior: {
+      localStorageEnabled: true,
+      cloudSyncEnabled: true,
+      persistentData: true,
+      metadataSync: true,
+      quotaMonitoring: true
     }
   },
 
@@ -74,6 +95,13 @@ export const PLANS_CONFIG: Record<string, PlanConfig> = {
       collaboration: true,
       advancedFeatures: true,
       prioritySupport: true
+    },
+    storageBehavior: {
+      localStorageEnabled: true,
+      cloudSyncEnabled: true,
+      persistentData: true,
+      metadataSync: true,
+      quotaMonitoring: true
     },
     pricing: {
       priceCents: 10000, // R100 ZAR
@@ -100,6 +128,13 @@ export const PLANS_CONFIG: Record<string, PlanConfig> = {
       prioritySupport: true,
       lifetimeAccess: true
     },
+    storageBehavior: {
+      localStorageEnabled: true,
+      cloudSyncEnabled: true,
+      persistentData: true,
+      metadataSync: true,
+      quotaMonitoring: true
+    },
     pricing: {
       priceCents: 150000, // R1500 ZAR
       currency: 'ZAR',
@@ -124,6 +159,13 @@ export const PLANS_CONFIG: Record<string, PlanConfig> = {
       advancedFeatures: true,
       prioritySupport: true,
       unrestricted: true
+    },
+    storageBehavior: {
+      localStorageEnabled: true,
+      cloudSyncEnabled: true,
+      persistentData: true,
+      metadataSync: true,
+      quotaMonitoring: false // Unlimited storage, no monitoring needed
     }
   }
 };
@@ -207,6 +249,58 @@ export function migrateLegacyPlanId(legacyPlanId: string): string {
     console.warn(`[PLANS_CONFIG] Unknown legacy plan ID: "${legacyPlanId}"`);
   }
   return migrated || legacyPlanId;
+}
+
+// Plan enforcement helpers
+export function getStorageBehavior(planId: string): PlanConfig['storageBehavior'] {
+  const config = getPlanConfig(planId);
+  return config?.storageBehavior || {
+    localStorageEnabled: false,
+    cloudSyncEnabled: false,
+    persistentData: false,
+    metadataSync: false,
+    quotaMonitoring: false
+  };
+}
+
+export function shouldUseLocalStorage(planId: string): boolean {
+  return getStorageBehavior(planId).localStorageEnabled;
+}
+
+export function shouldSyncToCloud(planId: string): boolean {
+  return getStorageBehavior(planId).cloudSyncEnabled;
+}
+
+export function shouldPersistData(planId: string): boolean {
+  return getStorageBehavior(planId).persistentData;
+}
+
+export function shouldSyncMetadata(planId: string): boolean {
+  return getStorageBehavior(planId).metadataSync;
+}
+
+export function shouldMonitorQuota(planId: string): boolean {
+  return getStorageBehavior(planId).quotaMonitoring;
+}
+
+export function validateStorageOperation(
+  planId: string, 
+  operation: 'localStorage' | 'cloudSync' | 'metadataSync' | 'quotaMonitoring'
+): boolean {
+  const behavior = getStorageBehavior(planId);
+  
+  switch (operation) {
+    case 'localStorage':
+      return behavior.localStorageEnabled;
+    case 'cloudSync':
+      return behavior.cloudSyncEnabled;
+    case 'metadataSync':
+      return behavior.metadataSync;
+    case 'quotaMonitoring':
+      return behavior.quotaMonitoring;
+    default:
+      return false;
+  }
 }
 
 // Re-export types for use in other files

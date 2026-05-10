@@ -1,9 +1,9 @@
 import { useAssetStore } from '@/stores/assetStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useAuthStore } from '@/stores/authStore';
-import { r2UploadService } from '@/services/R2UploadService';
+import { unifiedUploadService } from '@/services/UnifiedUploadService';
 import { UpgradePromptModal } from '@/components/UpgradePromptModal';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 import { useState } from 'react';
 
 interface UpgradeModalState {
@@ -48,7 +48,7 @@ export function useAssetCreation() {
   });
 
   const createNewAsset = async (
-    assetData: Omit<Asset, 'id' | 'children'>, 
+    assetData: Omit<Asset, 'asset_id' | 'children'>, 
     parentId?: string, 
     options?: { 
       fromUserClick?: boolean;
@@ -98,33 +98,34 @@ export function useAssetCreation() {
     try {
       // Update asset status to uploading
       updateAsset(assetId, { 
-        cloudStatus: 'uploading',
-        cloudError: undefined 
+        cloud_status: 'uploading',
+        cloud_error: undefined 
       });
 
-      // Upload with variants using R2UploadService
+      // Upload with variants using UnifiedUploadService
       // Note: Quota check is handled by the getUploadUrls Edge Function
-      const result = await r2UploadService.uploadWithVariants(
+      const result = await unifiedUploadService.uploadWithVariants(
         file,
-        assetId,
-        projectId,
         {
+          assetId,
+          projectId,
+          generateVariants: true,
           generateThumbnail: true,
-          generatePreview: true
-        },
-        (stage, progress) => {
-          console.log(`[useAssetCreation] Upload ${stage}: ${progress.percentage}%`);
+          generatePreview: true,
+          onProgress: (progress) => {
+            console.log(`[useAssetCreation] Upload: ${progress.percentage}%`);
+          }
         }
       );
 
       if (result.success) {
         // Update asset with cloud metadata
         updateAsset(assetId, {
-          cloudStatus: 'synced',
-          cloudPath: result.r2Key,
-          cloudSize: file.size,
-          cloudUpdatedAt: new Date().toISOString(),
-          cloudError: undefined
+          cloud_status: 'synced',
+          cloud_path: result.r2Key,
+          cloud_size: file.size,
+          cloud_updated_at: new Date().toISOString(),
+          cloud_error: undefined
         });
         
         console.log('Asset successfully uploaded to cloud:', result.r2Key);
@@ -144,8 +145,8 @@ export function useAssetCreation() {
         // Handle upload failure but keep local asset
         const userFriendlyError = getUserFriendlyErrorMessage(result.error || 'Unknown upload error');
         updateAsset(assetId, { 
-          cloudStatus: 'failed',
-          cloudError: userFriendlyError
+          cloud_status: 'failed',
+          cloud_error: userFriendlyError
         });
         
         console.error('Cloud upload failed:', result.error);
@@ -156,8 +157,8 @@ export function useAssetCreation() {
       const userFriendlyMessage = getUserFriendlyErrorMessage(errorMessage);
       
       updateAsset(assetId, { 
-        cloudStatus: 'failed',
-        cloudError: userFriendlyMessage
+        cloud_status: 'failed',
+        cloud_error: userFriendlyMessage
       });
       
       console.error('Unexpected error during cloud upload:', error);

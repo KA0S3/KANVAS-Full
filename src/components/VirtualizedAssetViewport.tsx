@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { assetCacheService, type AssetMetadata } from '@/services/AssetCacheService';
+import { useAssetStore, type AssetMetadata } from '@/stores/assetStore';
 
 interface VirtualizedAssetViewportProps {
   bookId: string;
@@ -34,6 +34,11 @@ export function VirtualizedAssetViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollOffset = useRef({ x: 0, y: 0 });
   const lastLoadTime = useRef(0);
+  
+  // Get asset store methods
+  const enableVirtualizedMode = useAssetStore((state) => state.enableVirtualizedMode);
+  const getVisibleAssets = useAssetStore((state) => state.getVisibleAssets);
+  const getAssetById = useAssetStore((state) => state.getAssetById);
   
   // Buffer zone around viewport (in pixels) - loads assets slightly outside visible area
   const BUFFER_SIZE = 200;
@@ -73,20 +78,21 @@ export function VirtualizedAssetViewport({
     try {
       console.log('[VirtualizedViewport] Loading assets for bounds:', bounds);
       
-      // Get assets from cache service (handles pagination automatically)
-      const assets = await assetCacheService.getVisibleAssets(bookId, bounds);
+      // Get assets from integrated store
+      const assets = await getVisibleAssets(bounds);
       
       // Filter to only assets visible in current viewport
       const visibleIds = getVisibleAssetIds(assets, bounds);
       const visible = assets.filter(asset => visibleIds.includes(asset.id));
       
-      // Update cache with which assets are visible
-      assetCacheService.setVisibleAssets(visibleIds);
+      // Update visible assets in store
+      const store = useAssetStore.getState();
+      useAssetStore.setState({ visibleAssetIds: new Set(visibleIds) });
       
-      // Load full asset data for visible assets (if needed)
+      // Load full asset data for visible assets
       const fullAssets = await Promise.all(
         visible.map(async (asset) => {
-          const fullAsset = await assetCacheService.getFullAsset(asset.id);
+          const fullAsset = await getAssetById(asset.id);
           return { ...asset, fullAsset };
         })
       );
@@ -198,8 +204,13 @@ export function VirtualizedAssetViewport({
       {/* Performance stats */}
       <div className="absolute top-4 left-4 bg-black/50 text-white text-xs p-2 rounded z-50">
         <div>Visible: {visibleAssets.length}</div>
-        <div>Cache: {assetCacheService.getCacheStats().cacheSize}</div>
-        <div>Queue: {Object.values(assetCacheService.getCacheStats().queueSize).reduce((a, b) => a + b, 0)}</div>
+        <div>Cache: {useAssetStore.getState().getCacheStats().cacheSize}</div>
+        <div>Queue: {
+          (() => {
+            const queueSize = useAssetStore.getState().getCacheStats().queueSize;
+            return Object.values(queueSize).reduce((a: number, b: number) => a + b, 0);
+          })()
+        }</div>
       </div>
       
       {/* Canvas with all assets positioned absolutely */}
@@ -220,12 +231,12 @@ export function VirtualizedAssetViewport({
 
 // Hook for managing virtualized viewport state
 export function useVirtualizedViewport(bookId: string) {
-  const [stats, setStats] = useState(() => assetCacheService.getCacheStats());
+  const [stats, setStats] = useState(() => useAssetStore.getState().getCacheStats());
   
   // Update stats periodically
   useEffect(() => {
     const interval = setInterval(() => {
-      setStats(assetCacheService.getCacheStats());
+      setStats(useAssetStore.getState().getCacheStats());
     }, 1000);
     
     return () => clearInterval(interval);
@@ -233,18 +244,18 @@ export function useVirtualizedViewport(bookId: string) {
   
   // Force sync
   const forceSync = useCallback(async () => {
-    await assetCacheService.forceSync();
+    // Sync is now handled automatically by documentMutationService
+    console.log('[useVirtualizedViewport] Sync is automatic');
   }, []);
   
   // Clear cache
   const clearCache = useCallback(() => {
-    assetCacheService.clearCache();
+    useAssetStore.getState().clearCache();
   }, []);
   
   return {
     stats,
     forceSync,
-    clearCache,
-    cacheService: assetCacheService
+    clearCache
   };
 }

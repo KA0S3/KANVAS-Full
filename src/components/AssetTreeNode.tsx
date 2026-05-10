@@ -4,7 +4,7 @@ import { useAssetTree } from '@/hooks/useAssetTree';
 import { useTagStore } from '@/stores/tagStore';
 import { AssetContextMenu } from '@/components/AssetContextMenu';
 import type { AssetNode } from '@/types/asset';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 interface AssetTreeNodeProps {
   node: AssetNode;

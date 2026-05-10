@@ -3,8 +3,8 @@
  * Tests the app with hundreds of assets to verify low-IO performance
  */
 
-import { assetCacheService } from '@/services/AssetCacheService';
-import { useAssetStore } from '@/stores/assetStoreSimple';
+import { assetCacheService } from '@/stores/assetStoreCompat';
+import { useAssetStore } from '@/stores/assetStore';
 import { supabase } from '@/lib/supabase';
 
 interface TestResults {

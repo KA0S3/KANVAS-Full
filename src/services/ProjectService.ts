@@ -6,6 +6,8 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { unifiedUploadService } from './UnifiedUploadService';
+import type { Asset } from '@/types/assetInterfaces';
 
 // =====================================================
 // Type Definitions
@@ -30,23 +32,7 @@ export interface Project {
   updated_at: string;
 }
 
-export interface Asset {
-  asset_id: string;
-  parent_id: string | null;
-  name: string;
-  type: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  z_index: number;
-  is_expanded: boolean;
-  content: string | null;
-  background_config: any;
-  viewport_config: any;
-  custom_fields: any;
-  updated_at: string;
-}
+// Asset interface is now imported from '@/types/assetInterfaces'
 
 export interface PositionUpdate {
   asset_id: string;
@@ -512,11 +498,11 @@ export function extractPositionUpdates(assets: any[]): PositionUpdate[] {
 // =====================================================
 
 /**
- * Upload file to Cloudflare R2 via Supabase Edge Function and create file record
- *
- * Uses the existing getUploadUrls Edge Function which generates presigned R2 URLs server-side.
- * This keeps R2 credentials secure on the server and uses proper AWS Signature V4 authentication.
- *
+ * Upload file using UnifiedUploadService and create file record
+ * 
+ * This function uses the UnifiedUploadService to handle the upload
+ * to the appropriate backend (R2 or Supabase) and creates a file record.
+ * 
  * @param projectId - The project UUID
  * @param assetId - The asset ID to associate with the file
  * @param file - The File object to upload
@@ -527,77 +513,45 @@ export async function uploadFile(
   assetId: string,
   file: File
 ): Promise<{ fileId: string; r2Url: string }> {
-  // 1. Get presigned URL from Edge Function
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new Error('Not authenticated');
-  }
-
-  const response = await fetch(`${supabaseUrl}/functions/v1/getUploadUrls`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      project_id: projectId,
-      files: [{ asset_id: assetId, size_bytes: file.size }]
-    })
+  // Use UnifiedUploadService to handle the upload
+  const result = await unifiedUploadService.upload(file, {
+    projectId,
+    assetId,
+    backend: 'auto' // Let the service choose the best backend
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to get upload URL');
+  if (!result.success) {
+    throw new Error(result.error || 'Upload failed');
   }
 
-  const data = await response.json();
-  const uploadInfo = data.uploadUrls[0];
+  // For R2 uploads, we need to create the file record separately
+  let fileId: string;
+  let r2Url: string;
 
-  if (!uploadInfo || !uploadInfo.signedUrl) {
-    throw new Error('Invalid upload URL response');
-  }
-
-  // 2. Upload to R2 using the presigned URL
-  try {
-    const uploadResponse = await fetch(uploadInfo.signedUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': file.type,
-      },
-      body: file,
+  if (result.backend === 'r2') {
+    // Create file record for R2 uploads
+    const { data: fileData, error: createError } = await supabase.rpc('create_file', {
+      p_project_id: projectId,
+      p_asset_id: assetId,
+      p_storage_key: result.r2Key!, // Store the R2 path
+      p_mime_type: file.type,
+      p_size_bytes: file.size
     });
 
-    if (!uploadResponse.ok) {
-      throw new Error(`R2 upload failed: ${uploadResponse.statusText}`);
+    if (createError) {
+      console.error('File record creation failed:', createError);
+      throw createError;
     }
-  } catch (error) {
-    console.error('File upload to R2 failed:', error);
-    throw error;
+
+    fileId = fileData;
+    r2Url = result.publicUrl!;
+  } else {
+    // For Supabase uploads, the file record is already created
+    fileId = result.fileId!;
+    r2Url = result.publicUrl || result.signedUrl || '';
   }
 
-  // 3. Create file record in database with R2 path
-  const { data: fileData, error: createError } = await supabase.rpc('create_file', {
-    p_project_id: projectId,
-    p_asset_id: assetId,
-    p_storage_key: uploadInfo.path, // Store the R2 path from Edge Function
-    p_mime_type: file.type,
-    p_size_bytes: file.size
-  });
-
-  if (createError) {
-    console.error('File record creation failed:', createError);
-    throw createError;
-  }
-
-  // 4. Construct public URL
-  const r2PublicUrl = import.meta.env.VITE_R2_PUBLIC_URL;
-  if (!r2PublicUrl) {
-    throw new Error('Missing VITE_R2_PUBLIC_URL environment variable.');
-  }
-
-  return { fileId: fileData, r2Url: `${r2PublicUrl}/${uploadInfo.path}` };
+  return { fileId, r2Url };
 }
 
 /**

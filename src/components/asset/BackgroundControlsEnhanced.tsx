@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Save, Upload, Database, Cloud, HardDrive } from 'lucide-react';
 import { useAssetStore } from '@/stores/assetStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
-import { useBackgroundStoreEnhanced } from '@/stores/backgroundStoreEnhanced';
+import { useBackgroundStore } from '@/stores/backgroundStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { Button } from '@/components/ui/button';
@@ -10,10 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 import type { BackgroundConfig, BackgroundMode } from '@/types/background';
 import { isColorPickerVisible, getBackgroundColor, validateBackgroundConfig } from '@/utils/backgroundUtils';
-import { getAssetKeyWithBookEnhanced } from '@/stores/backgroundStoreEnhanced';
+import { getAssetKey } from '@/types/background';
 import { indexedDBStorage } from '@/utils/indexedDBStorage';
 
 interface BackgroundControlsEnhancedProps {
@@ -25,7 +25,7 @@ interface BackgroundControlsEnhancedProps {
 export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }: BackgroundControlsEnhancedProps) {
   const { getCurrentBookAssets, updateAsset, setIsEditingBackground } = useAssetStore();
   const { getCurrentBook, getWorldData, updateWorldData } = useBookStore();
-  const { getBackground, setBackground, loadBackgroundImage, getStorageInfo } = useBackgroundStoreEnhanced();
+  const { getBackground, setBackground, cloneConfig } = useBackgroundStore();
   const { user, plan, isAuthenticated } = useAuthStore();
   const { syncEnabled } = useCloudStore();
   
@@ -34,7 +34,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
   const currentBook = getCurrentBook();
   
   // Get background config using enhanced store
-  const backgroundConfig = getBackground(getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id));
+  const backgroundConfig = getBackground(getAssetKey(assetId || 'root', currentBook?.id));
   const [localConfig, setLocalConfig] = useState<BackgroundConfig>(backgroundConfig);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
@@ -43,35 +43,9 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
   const [storageInfo, setStorageInfo] = useState<any>(null);
   const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load image from IndexedDB on mount and when config changes
-  useEffect(() => {
-    const loadImage = async () => {
-      if (assetId) {
-        const imageUrl = await loadBackgroundImage(assetId);
-        if (imageUrl && imageUrl !== localConfig.imageUrl) {
-          console.log('[BackgroundControlsEnhanced] Loaded image from IndexedDB:', assetId);
-          setLocalConfig(prev => ({ ...prev, imageUrl }));
-        }
-      }
-    };
+  // Image loading will be handled by backgroundStore's async loading
 
-    loadImage();
-  }, [assetId, loadBackgroundImage]);
-
-  // Get storage info periodically
-  useEffect(() => {
-    const updateStorageInfo = async () => {
-      const info = await getStorageInfo();
-      setStorageInfo(info);
-    };
-    
-    updateStorageInfo();
-    // NOTE: Polling removed to prevent idle DB requests
-    // Storage info will update when component re-renders or on user interaction
-    // const interval = setInterval(updateStorageInfo, 5000); // Update every 5 seconds
-    
-    // return () => clearInterval(interval);
-  }, [getStorageInfo]);
+  // Storage info functionality removed for simplicity
 
   // Initialize local config when background config changes
   useEffect(() => {
@@ -95,7 +69,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
       if (!backgroundConfig.imageSize || 
           backgroundConfig.imageSize.width !== newSize.width || 
           backgroundConfig.imageSize.height !== newSize.height) {
-        const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+        const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
         const updatedConfig = { ...backgroundConfig, imageSize: newSize };
         setBackground(assetKey, updatedConfig);
       }
@@ -116,7 +90,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
           clearTimeout(previewTimeoutRef.current);
         }
         previewTimeoutRef.current = setTimeout(() => {
-          const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+          const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
           const updatedConfig = { ...localConfig, scale };
           setBackground(assetKey, updatedConfig);
           setHasUnsavedChanges(false);
@@ -139,7 +113,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
     setHasUnsavedChanges(true);
     
     // Auto-save immediately via store
-    const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+    const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
     setBackground(assetKey, updatedConfig);
   };
 
@@ -174,7 +148,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
         setUploadProgress(100);
         
         // Auto-save via enhanced store (handles IndexedDB/Cloud automatically)
-        const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+        const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
         await setBackground(assetKey, updatedConfig);
         
         setTimeout(() => {
@@ -204,7 +178,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
     setHasUnsavedChanges(true);
     
     // Auto-save via enhanced store
-    const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+    const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
     await setBackground(assetKey, updatedConfig);
     
     // Also remove from IndexedDB
@@ -219,7 +193,7 @@ export function BackgroundControlsEnhanced({ assetId, onSave, onToggleSidebar }:
     setHasUnsavedChanges(true);
     
     // Auto-save via enhanced store
-    const assetKey = getAssetKeyWithBookEnhanced(assetId || 'root', currentBook?.id);
+    const assetKey = getAssetKey(assetId || 'root', currentBook?.id);
     await setBackground(assetKey, updatedConfig);
   };
 

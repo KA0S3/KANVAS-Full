@@ -47,6 +47,11 @@ export function useDocumentSync() {
   const saveGlobalBackgrounds = documentMutationService.saveGlobalBackgrounds.bind(documentMutationService);
   const saveViewport = documentMutationService.saveViewport.bind(documentMutationService);
   const saveGlobalTags = documentMutationService.saveGlobalTags.bind(documentMutationService);
+  
+  // Enhanced metadata sync methods
+  const saveAssetBackground = documentMutationService.saveAssetBackground.bind(documentMutationService);
+  const saveGlobalCustomFields = documentMutationService.saveGlobalCustomFields.bind(documentMutationService);
+  const saveCoverMetadata = documentMutationService.saveCoverMetadata.bind(documentMutationService);
 
   return {
     syncStatus,
@@ -59,6 +64,11 @@ export function useDocumentSync() {
     saveGlobalBackgrounds,
     saveViewport,
     saveGlobalTags,
+    // Enhanced metadata sync methods
+    saveAssetBackground,
+    saveGlobalCustomFields,
+    saveCoverMetadata,
+    // Comprehensive sync status
     isAuthenticated,
     isOnline: syncStatus.onlineMode,
     lastSyncTime: syncStatus.lastSyncTime,
@@ -72,6 +82,21 @@ export function useDocumentSync() {
     documentVersion: syncStatus.documentVersion,
     pendingChanges: syncStatus.pendingChanges,
     syncInProgress: syncStatus.syncInProgress,
-    queuedItems: syncStatus.queuedItems
+    queuedItems: syncStatus.queuedItems,
+    // Enhanced sync capabilities status
+    hasMetadataSync: true,
+    hasAssetBackgroundSync: true,
+    hasCustomFieldSync: true,
+    hasCoverMetadataSync: true,
+    syncCapabilities: {
+      assets: true,
+      positions: true,
+      backgrounds: true,
+      tags: true,
+      customFields: true,
+      coverMetadata: true,
+      assetBackgrounds: true,
+      viewport: true
+    }
   };
 }

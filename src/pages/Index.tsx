@@ -23,7 +23,7 @@ import { useBackgroundStore } from "@/stores/backgroundStore";
 import type { BackgroundConfig } from "@/types/background";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
-import { useAssetStore } from '@/stores/assetStoreSimple';
+import { useAssetStore } from '@/stores/assetStore';
 import { audioEngine } from "@/services/AudioEngine";
 import { autosaveService } from '@/services/autosaveService';
 import { documentMutationService } from '@/services/DocumentMutationService';

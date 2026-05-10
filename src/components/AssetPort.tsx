@@ -1,12 +1,13 @@
  import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, ArrowLeft, Plus, PanelRight, BookOpen, User, AlertTriangle } from "lucide-react";
-import { AssetItem, type Asset } from "./AssetItem";
+import { AssetItem } from "./AssetItem";
+import type { Asset } from "@/types/assetInterfaces";
 import { AssetCreationModalImproved } from "./asset/AssetCreationModalImproved";
 import { AssetEditModalImproved } from "./asset/AssetEditModalImproved";
 import { EmptySpaceContextMenu } from "./EmptySpaceContextMenu";
 import { useAssetTree } from "@/hooks/useAssetTree";
-import { useAssetStore } from "@/stores/assetStoreSimple";
+import { useAssetStore } from '@/stores/assetStore';
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useBackgroundStore } from "@/stores/backgroundStore";
 import { useAuthStore } from "@/stores/authStore";

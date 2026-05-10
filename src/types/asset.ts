@@ -1,4 +1,4 @@
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 export interface AssetNode extends Omit<Asset, 'children'> {
   level: number; // Depth in the tree
@@ -39,7 +39,7 @@ export const createAssetOperations = (assets: Record<string, Asset>): AssetOpera
     while (current && assets[current]) {
       path.unshift(current);
       if (current === fromId) return path;
-      current = assets[current].parentId;
+      current = assets[current].parent_id;
     }
     
     return null;
@@ -47,11 +47,11 @@ export const createAssetOperations = (assets: Record<string, Asset>): AssetOpera
 
   getDepth: (assetId: string) => {
     let depth = 0;
-    let current = assets[assetId]?.parentId;
+    let current = assets[assetId]?.parent_id;
     
     while (current) {
       depth++;
-      current = assets[current]?.parentId;
+      current = assets[current]?.parent_id;
     }
     
     return depth;
@@ -59,9 +59,9 @@ export const createAssetOperations = (assets: Record<string, Asset>): AssetOpera
 
   getSiblings: (assetId: string) => {
     const asset = assets[assetId];
-    if (!asset?.parentId) return [];
+    if (!asset?.parent_id) return [];
     
-    const parent = assets[asset.parentId];
+    const parent = assets[asset.parent_id];
     if (!parent) return [];
     
     return parent.children
@@ -81,11 +81,11 @@ export const isDescendant = (
   parentId: string, 
   childId: string
 ): boolean => {
-  let current = assets[childId]?.parentId;
+  let current = assets[childId]?.parent_id;
   
   while (current) {
     if (current === parentId) return true;
-    current = assets[current]?.parentId;
+    current = assets[current]?.parent_id;
   }
   
   return false;
@@ -99,13 +99,13 @@ export const buildAssetTree = (
 ): AssetNode[] => {
   const rootAssets = rootId 
     ? [assets[rootId]].filter(Boolean)
-    : Object.values(assets).filter(asset => !asset.parentId);
+    : Object.values(assets).filter(asset => !asset.parent_id);
 
   return rootAssets.map(asset => ({
     ...asset,
     level,
     isExpanded: false, // Default state
-    children: buildAssetTreeChildren(assets, asset.id, level + 1),
+    children: buildAssetTreeChildren(assets, asset.asset_id, level + 1),
   }));
 };
 
@@ -125,7 +125,7 @@ const buildAssetTreeChildren = (
       ...childAsset,
       level,
       isExpanded: false,
-      children: buildAssetTreeChildren(assets, childAsset.id, level + 1),
+      children: buildAssetTreeChildren(assets, childAsset.asset_id, level + 1),
     }));
 };
 

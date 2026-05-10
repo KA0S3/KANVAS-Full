@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { documentMutationService } from '@/services/DocumentMutationService';
-import { r2UploadService } from '@/services/R2UploadService';
+import { unifiedUploadService } from '@/services/UnifiedUploadService';
 import { useAssetStore } from '@/stores/assetStore';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 interface FailedUpload {
   assetId: string;
@@ -58,7 +58,7 @@ export function CloudRetryStatus({ compact = false, projectId }: CloudRetryStatu
 
   // Listen for cloud retry events
   useEffect(() => {
-    const unsubscribe = r2UploadService.onCloudRetry((assetId, retryCount) => {
+    const unsubscribe = unifiedUploadService.onCloudRetry((assetId, retryCount) => {
       console.log(`[CloudRetryStatus] Retry event for ${assetId} (attempt ${retryCount})`);
       // Refresh the list after a retry is triggered
       setTimeout(loadFailedUploads, 1000);
@@ -79,7 +79,7 @@ export function CloudRetryStatus({ compact = false, projectId }: CloudRetryStatu
     setRetryingIds(prev => new Set(prev).add(assetId));
     
     try {
-      const result = await r2UploadService.retryUpload(
+      const result = await unifiedUploadService.retryUpload(
         assetId,
         asset.file,
         projectId || documentMutationService.getStatus().documentVersion.toString()

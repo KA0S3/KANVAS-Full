@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useAssetStore } from '@/stores/assetStore';
 import { DeleteAssetDialog } from '@/components/DeleteAssetDialog';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
 
 interface AssetContextMenuProps {
   asset: Asset;

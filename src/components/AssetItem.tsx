@@ -4,56 +4,7 @@ import { AssetContextMenu } from '@/components/AssetContextMenu';
 import { AssetCreationModal } from '@/components/asset/AssetCreationModal';
 import { useTagStore } from '@/stores/tagStore';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from "@/types/extendedAsset";
-
-export interface Asset {
-  id: string;
-  name: string;
-  type: "image" | "document" | "video" | "audio" | "code" | "other" | "card" | "text" | "container" | "viewport" | "tag";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  parentId?: string;
-  children: string[];
-  description?: string;
-  customFields: CustomField[];
-  customFieldValues: CustomFieldValue[];
-  thumbnail?: string;
-  background?: string;
-  tags?: string[];
-  content?: string; // CRITICAL: For text assets - unbounded content stored in TEXT column (TOAST)
-  viewportConfig?: {
-    zoom: number;
-    panX: number;
-    panY: number;
-  };
-  backgroundConfig?: {
-    isClear?: boolean;
-    color?: string;
-    image?: string;
-    position?: { x: number; y: number };
-    scale?: number;
-    gridSize?: number;
-    imageSize?: { width: number; height: number };
-    edgeOpacity?: number;
-    useParchment?: boolean;
-  };
-  viewportDisplaySettings?: ViewportDisplaySettings;
-  createdAt?: number;
-  updatedAt?: number;
-  isExpanded?: boolean;
-  isLocked?: boolean;
-  borderShape?: 'square' | 'circle';
-  showTagBorder?: boolean;
-  cloudStatus?: 'local' | 'uploading' | 'synced' | 'failed';
-  cloudId?: string;
-  cloudPath?: string;
-  cloudSize?: number;
-  cloudUpdatedAt?: string;
-  cloudError?: string;
-  deletedAt?: string; // For soft delete tracking (Phase 1 schema)
-  file?: File; // File object for cloud upload
-}
+import type { Asset } from "@/types/assetInterfaces";
 
 interface AssetItemProps {
   asset: Asset;
@@ -89,7 +40,7 @@ const colorMap = {
 
 export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDoubleClick, isSelected, onResize, onEdit, onSelectAndFocus, isEditingBackground = false, onCreateAsset }: AssetItemProps) {
   // CRITICAL FIX: Validate asset data to prevent React error #130
-  if (!asset || !asset.id) {
+  if (!asset || !asset.asset_id) {
     console.error('[AssetItem] Invalid asset data:', asset);
     return null;
   }
@@ -98,7 +49,7 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
   const colorClass = colorMap[asset.type] || 'text-muted-foreground';
   const { getAssetTags } = useTagStore();
 
-  const assetTags = getAssetTags(asset.id) || [];
+  const assetTags = getAssetTags(asset.asset_id) || [];
   const hasTags = assetTags && assetTags.length > 0;
   const firstTagColor = hasTags ? assetTags[0]?.color : null;
 
@@ -137,23 +88,23 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
     y: number;
   }>({ visible: false, x: 0, y: 0 });
 
-  const displaySettings = asset.viewportDisplaySettings || {
+  const displaySettings = asset.custom_fields?.viewportDisplaySettings || {
     name: true,
     description: false,
     thumbnail: true,
     portraitBlur: 0,
   };
 
-  const portraitImage = asset.cloudPath || asset.thumbnail || 
-    asset.customFieldValues?.find(v => {
-      const field = asset.customFields?.find(f => f.id === v.fieldId);
+  const portraitImage = asset.cloud_path || asset.custom_fields?.thumbnail || 
+    asset.custom_fields?.customFieldValues?.find(v => {
+      const field = asset.custom_fields?.customFields?.find(f => f.id === v.fieldId);
       return field?.label?.toLowerCase() === 'portrait' && field.type === 'image' && v.value;
     })?.value;
 
-  const displayedCustomFields = (asset.customFields || [])
+  const displayedCustomFields = (asset.custom_fields?.customFields || [])
     .filter(field => field.displayInViewport && field.label?.toLowerCase() !== 'portrait')
     .map(field => {
-      const value = asset.customFieldValues?.find(v => v.fieldId === field.id);
+      const value = asset.custom_fields?.customFieldValues?.find(v => v.fieldId === field.id);
       return {
         label: field.label,
         value: value?.value || '',
@@ -210,8 +161,8 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
     const deltaY = e.clientY - resizeStart.y;
     const newWidth = Math.max(25, resizeStart.width + deltaX);
     const newHeight = Math.max(25, resizeStart.height + deltaY);
-    onResize(asset.id, newWidth, newHeight);
-  }, [isResizing, resizeStart, asset.id, onResize]);
+    onResize(asset.asset_id, newWidth, newHeight);
+  }, [isResizing, resizeStart, asset.asset_id, onResize]);
 
   const handleMouseUp = React.useCallback(() => {
     setIsResizing(false);
@@ -243,7 +194,7 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
         transform: isSelected ? "scale(1.05)" : "scale(1)",
         overflow: 'visible',
         zIndex: isSelected ? dynamicZIndex + 100 : dynamicZIndex,
-        ...(hasTags && firstTagColor && asset.showTagBorder && {
+        ...(hasTags && firstTagColor && asset.show_tag_border && {
           boxShadow: `
             inset 0 0 8px ${getColorWithOpacity(firstTagColor, 0.8)},
             inset 0 0 16px ${getColorWithOpacity(firstTagColor, 0.6)},
@@ -262,11 +213,11 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
       } ${
         isEditingBackground ? "pointer-events-none opacity-50 cursor-not-allowed" : "cursor-grab active:cursor-grabbing"
       } ${
-        asset.borderShape === 'circle' ? 'rounded-full' : ''
+        asset.border_shape === 'circle' ? 'rounded-full' : ''
       } ${showExternalText ? 'z-50' : ''}`}
-      id={asset.id}
+      id={asset.asset_id}
     >
-      {asset.borderShape === 'circle' ? (
+      {asset.border_shape === 'circle' ? (
         /* Circular Asset Layout */
         <>
 
@@ -308,12 +259,12 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent pointer-events-none" />
             )}
             {/* Custom fields overlay at bottom half */}
-            {(displayedCustomFields.length > 0 || (displaySettings.description && asset.description)) && (
+            {(displayedCustomFields.length > 0 || (displaySettings.description && asset.custom_fields?.description)) && (
               <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
                 <div className="h-full overflow-y-auto p-4 relative">
                   <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 via-transparent to-black/40 z-10" />
-                  {displaySettings.description && asset.description && (
-                    <div className="text-xs text-white/90 line-clamp-2 drop-shadow-md mb-2">{asset.description}</div>
+                  {displaySettings.description && asset.custom_fields?.description && (
+                    <div className="text-xs text-white/90 line-clamp-2 drop-shadow-md mb-2">{asset.custom_fields.description}</div>
                   )}
                   {displayedCustomFields.length > 0 && displayedCustomFields.map((field, index) => (
                     <div key={index} className="text-xs relative mb-2">
@@ -388,8 +339,8 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
                     <span className="text-sm font-medium text-foreground">{asset.name}</span>
                   </div>
                 )}
-                {displaySettings.description && asset.description && (
-                  <div className="text-xs text-foreground/90">{asset.description}</div>
+                {displaySettings.description && asset.custom_fields?.description && (
+                  <div className="text-xs text-foreground/90">{asset.custom_fields.description}</div>
                 )}
                 {displayedCustomFields.length > 0 && (
                   <div className="space-y-2">
@@ -487,8 +438,8 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
                       <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
                         <div className="h-full overflow-y-auto p-3 relative">
                           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 via-transparent to-black/40 z-10" />
-                          {displaySettings.description && asset.description && (
-                            <div className="text-xs text-white/90 line-clamp-3 drop-shadow-md mb-3">{asset.description}</div>
+                          {displaySettings.description && asset.custom_fields?.description && (
+                            <div className="text-xs text-white/90 line-clamp-3 drop-shadow-md mb-3">{asset.custom_fields.description}</div>
                           )}
                           {displayedCustomFields.length > 0 && displayedCustomFields.map((field, index) => (
                             <div key={index} className="text-xs relative mb-2">
@@ -511,8 +462,8 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
                   <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
                     <div className="h-full overflow-y-auto p-3 relative">
                       <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/20 via-transparent to-black/20 z-10" />
-                      {displaySettings.description && asset.description && (
-                        <div className="text-xs text-muted-foreground line-clamp-2 mb-3">{asset.description}</div>
+                      {displaySettings.description && asset.custom_fields?.description && (
+                        <div className="text-xs text-muted-foreground line-clamp-2 mb-3">{asset.custom_fields.description}</div>
                       )}
                       {displayedCustomFields.length > 0 && displayedCustomFields.map((field, index) => (
                         <div key={index} className="text-xs relative mb-2">
@@ -546,7 +497,7 @@ export function AssetItem({ asset, onDelete, onMouseDown, onTouchStart, onDouble
       )}
       
       {/* Resize Handle for Square Assets Only */}
-      {asset.borderShape !== 'circle' && isSelected && !isEditingBackground && (
+      {asset.border_shape !== 'circle' && isSelected && !isEditingBackground && (
         <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onMouseDown={handleResizeStart}>
           <Maximize2 className="w-4 h-4 text-primary" />
         </div>

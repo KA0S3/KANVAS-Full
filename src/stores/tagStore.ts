@@ -3,9 +3,9 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { useBookStore } from './bookStoreSimple';
 import { useAssetStore } from './assetStore';
 import { documentMutationService } from '@/services/DocumentMutationService';
+import { storeCoordinator } from '@/services/StoreCoordinator';
 
-const TAG_STORAGE_KEY = 'kaos_tags';
-const ASSET_TAGS_STORAGE_KEY = 'kaos_asset_tags';
+// Storage keys removed - using DocumentMutationService only
 
 export interface Tag {
   id: string;
@@ -51,48 +51,13 @@ interface TagStore {
   setFilters: (tagIds: string[]) => void;
 }
 
-// Helper functions for localStorage persistence
-const loadTagsFromStorage = (): Record<string, Tag> => {
-  try {
-    const stored = localStorage.getItem(TAG_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch (error) {
-    console.error('[TagStore] Failed to load tags from localStorage:', error);
-    return {};
-  }
-};
-
-const loadAssetTagsFromStorage = (): Record<string, string[]> => {
-  try {
-    const stored = localStorage.getItem(ASSET_TAGS_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch (error) {
-    console.error('[TagStore] Failed to load asset tags from localStorage:', error);
-    return {};
-  }
-};
-
-const saveTagsToStorage = (tags: Record<string, Tag>) => {
-  try {
-    localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(tags));
-  } catch (error) {
-    console.error('[TagStore] Failed to save tags to localStorage:', error);
-  }
-};
-
-const saveAssetTagsToStorage = (assetTags: Record<string, string[]>) => {
-  try {
-    localStorage.setItem(ASSET_TAGS_STORAGE_KEY, JSON.stringify(assetTags));
-  } catch (error) {
-    console.error('[TagStore] Failed to save asset tags to localStorage:', error);
-  }
-};
+// Helper functions removed - using DocumentMutationService only
 
 export const useTagStore = create<TagStore>()(
   subscribeWithSelector((set, get) => ({
-  // Initial state - load from localStorage
-  tags: loadTagsFromStorage(),
-  assetTags: loadAssetTagsFromStorage(),
+  // Initial state - empty, populated by DocumentMutationService during world loading
+  tags: {},
+  assetTags: {},
   selectedTags: new Set(),
   activeFilters: [],
 
@@ -110,12 +75,13 @@ export const useTagStore = create<TagStore>()(
         [id]: newTag,
       };
 
-      // Save to localStorage immediately
-      saveTagsToStorage(updatedTags);
-
-      // Sync tags using saveGlobalTags (MASTER_PLAN.md state-based tracking)
+      // Sync tags using StoreCoordinator batching (localStorage removed)
       if (documentMutationService.getCurrentProjectId()) {
-        documentMutationService.saveGlobalTags(updatedTags);
+        storeCoordinator.queueSyncOperation({
+          type: 'global_tags',
+          data: { tags: updatedTags },
+          priority: 'medium'
+        });
       }
 
       return {
@@ -144,13 +110,13 @@ export const useTagStore = create<TagStore>()(
       // Remove from selection
       newSelectedTags.delete(tagId);
 
-      // Save to localStorage immediately
-      saveTagsToStorage(newTags);
-      saveAssetTagsToStorage(newAssetTags);
-
-      // Sync tags using saveGlobalTags (MASTER_PLAN.md state-based tracking)
+      // Sync tags using StoreCoordinator batching (localStorage removed)
       if (documentMutationService.getCurrentProjectId()) {
-        documentMutationService.saveGlobalTags(newTags);
+        storeCoordinator.queueSyncOperation({
+          type: 'global_tags',
+          data: { tags: newTags },
+          priority: 'medium'
+        });
       }
 
       return {
@@ -175,12 +141,13 @@ export const useTagStore = create<TagStore>()(
         },
       };
 
-      // Save to localStorage immediately
-      saveTagsToStorage(updatedTags);
-
-      // Sync tags using saveGlobalTags (MASTER_PLAN.md state-based tracking)
+      // Sync tags using StoreCoordinator batching (localStorage removed)
       if (documentMutationService.getCurrentProjectId()) {
-        documentMutationService.saveGlobalTags(updatedTags);
+        storeCoordinator.queueSyncOperation({
+          type: 'global_tags',
+          data: { tags: updatedTags },
+          priority: 'medium'
+        });
       }
 
       return {
@@ -202,22 +169,16 @@ export const useTagStore = create<TagStore>()(
         [assetId]: [...assetTags, tagId],
       };
 
-      // Save to localStorage immediately
-      saveAssetTagsToStorage(updatedAssetTags);
+      // Cloud sync via StoreCoordinator (localStorage removed)
 
-      // Sync asset tags using markAssetChanged (MASTER_PLAN.md state-based tracking)
-      // Tags are stored in custom_fields, so we mark the asset as changed
+      // Sync asset tags using StoreCoordinator batching instead of immediate markAssetChanged
       if (documentMutationService.getCurrentProjectId()) {
-        const assetStore = useAssetStore.getState();
-        const bookId = assetStore.getCurrentBookId();
-        if (bookId) {
-          const bookAssets = assetStore.bookAssets[bookId] || {};
-          const asset = bookAssets[assetId];
-          if (asset) {
-            const updatedAsset = { ...asset, tags: updatedAssetTags[assetId] };
-            documentMutationService.markAssetChanged(assetId, updatedAsset);
-          }
-        }
+        storeCoordinator.queueSyncOperation({
+          type: 'asset_change',
+          assetId,
+          data: { tags: updatedAssetTags[assetId] },
+          priority: 'medium'
+        });
       }
 
       return {
@@ -236,22 +197,16 @@ export const useTagStore = create<TagStore>()(
         [assetId]: assetTags.filter(id => id !== tagId),
       };
 
-      // Save to localStorage immediately
-      saveAssetTagsToStorage(updatedAssetTags);
+      // Cloud sync via StoreCoordinator (localStorage removed)
 
-      // Sync asset tags using markAssetChanged (MASTER_PLAN.md state-based tracking)
-      // Tags are stored in custom_fields, so we mark the asset as changed
+      // Sync asset tags using StoreCoordinator batching instead of immediate markAssetChanged
       if (documentMutationService.getCurrentProjectId()) {
-        const assetStore = useAssetStore.getState();
-        const bookId = assetStore.getCurrentBookId();
-        if (bookId) {
-          const bookAssets = assetStore.bookAssets[bookId] || {};
-          const asset = bookAssets[assetId];
-          if (asset) {
-            const updatedAsset = { ...asset, tags: updatedAssetTags[assetId] };
-            documentMutationService.markAssetChanged(assetId, updatedAsset);
-          }
-        }
+        storeCoordinator.queueSyncOperation({
+          type: 'asset_change',
+          assetId,
+          data: { tags: updatedAssetTags[assetId] },
+          priority: 'medium'
+        });
       }
 
       return {
@@ -375,11 +330,7 @@ export const useTagStore = create<TagStore>()(
         activeFilters: [],
       });
 
-      // If we loaded from world_document, also save to localStorage for persistence
-      if (hasTagData || hasAssetTagData) {
-        saveTagsToStorage(hasTagData ? worldData.tags : state.tags);
-        saveAssetTagsToStorage(hasAssetTagData ? worldData.assetTags : state.assetTags);
-      }
+      // Tags now sync via DocumentMutationService only
     }
   },
 
@@ -401,6 +352,6 @@ export const useTagStore = create<TagStore>()(
   },
 })));
 
-// Note: Tags are now persisted to localStorage and synced via DocumentMutationService
+// Note: Tags are now persisted via DocumentMutationService only
 // following the same pattern as backgrounds (Phase 12)
 

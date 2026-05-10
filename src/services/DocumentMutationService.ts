@@ -6,7 +6,8 @@ import { connectivityService } from '@/services/connectivityService';
 import { performanceMonitor } from '@/utils/performanceMonitor';
 import { TextStorageOptimizer } from '@/utils/textStorageOptimizer';
 import { ConflictResolver, type Conflict, type ConflictResolution, type ConflictStrategy } from './ConflictResolver';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/assetInterfaces';
+import { migrateAssetType, getMigratedAssetType } from '@/utils/typeMigration';
 import type { BackgroundConfig } from '@/types/background';
 import { compressBase64Thumbnail, isThumbnailTooLarge } from '@/utils/thumbnailCompression';
 import { logDocument, reportError } from '@/utils/logger';
@@ -99,7 +100,13 @@ class DocumentMutationService {
   // RAM caching to reduce Supabase reads
   private documentCache: Map<string, { data: any; timestamp: number; version: number }> = new Map();
   private backgroundsCache: Map<string, { data: any; timestamp: number }> = new Map();
-  private readonly CACHE_TTL_MS = 60000; // 1 minute cache TTL
+  private readonly CACHE_TTL_MS = 300000; // 5 minutes cache TTL
+  private readonly MAX_CACHE_SIZE = 50; // Maximum number of cached projects
+  private readonly MAX_CACHE_MEMORY_MB = 100; // Maximum cache memory in MB
+  
+  // Cache cleanup tracking
+  private lastCacheCleanup: number = Date.now();
+  private readonly CACHE_CLEANUP_INTERVAL_MS = 60000; // Cleanup every minute
 
   // Compatibility layer fields
   private beforeUnloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
@@ -212,7 +219,8 @@ class DocumentMutationService {
         .rpc('load_assets', {
           p_project_id: projectId,
           p_parent_id: null,
-          p_load_all: assetCount < 100 // Load all if small project
+          p_load_all: assetCount < 100, // Load all if small project
+          p_include_deleted: false // CRITICAL: Don't load soft-deleted assets by default
         });
 
       console.log(`[DocumentMutation] load_assets RPC result:`, {
@@ -231,16 +239,26 @@ class DocumentMutationService {
       // Restore compressed text fields from storage
       const restoredAssetsData = TextStorageOptimizer.restoreAssetsFromStorage(assetsData || []);
       
-      console.log(`[DocumentMutation] After text restoration:`, {
+      // CRITICAL: Filter out any soft-deleted assets that might have been returned
+      const filteredAssetsData = restoredAssetsData.filter((asset: any) => {
+        if (asset.deleted_at) {
+          console.log(`[DocumentMutation] Filtering out soft-deleted asset: ${asset.asset_id}`);
+          return false;
+        }
+        return true;
+      });
+      
+      console.log(`[DocumentMutation] After text restoration and filtering:`, {
         originalCount: assetsData?.length || 0,
         restoredCount: restoredAssetsData.length,
-        sampleRestored: restoredAssetsData.slice(0, 2)
+        filteredCount: filteredAssetsData.length,
+        sampleFiltered: filteredAssetsData.slice(0, 2)
       });
 
       // CRITICAL FIX: Convert asset array to object format expected by loadWorldData
       // load_assets RPC returns array, but loadWorldData expects object with IDs as keys
       const assetsObject: Record<string, any> = {};
-      restoredAssetsData.forEach((asset: any) => {
+      filteredAssetsData.forEach((asset: any) => {
         // Extract thumbnail from content if it contains the delimiter pattern
         let extractedThumbnail = null;
         let content = asset.content;
@@ -252,57 +270,61 @@ class DocumentMutationService {
           }
         }
 
-        // Map database fields to frontend asset structure with comprehensive defaults
+        // Direct mapping using unified Asset interface - no complex conversion needed
         assetsObject[asset.asset_id] = {
-          id: asset.asset_id || '',
+          // Core database fields (already match unified interface)
+          asset_id: asset.asset_id || '',
+          parent_id: asset.parent_id || null,
           name: asset.name || 'Unnamed Asset',
           type: asset.type || 'card',
           x: asset.x || 0,
           y: asset.y || 0,
           width: asset.width || 200,
           height: asset.height || 150,
-          zIndex: asset.z_index || 0,
-          isExpanded: asset.is_expanded || false,
-          content: content || '',
-          backgroundConfig: asset.background_config || {},
-          viewportConfig: asset.viewport_config || {},
-          customFields: asset.custom_fields?.customFields || [],
-          customFieldValues: asset.custom_fields?.customFieldValues || [],
-          tags: asset.custom_fields?.tags || [],
-          viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {},
-          // Prioritize extracted thumbnail from content, then fallback to custom_fields
-          thumbnail: extractedThumbnail || asset.custom_fields?.thumbnail || '',
-          background: asset.custom_fields?.background || '',
-          description: asset.custom_fields?.description || '',
-          updatedAt: asset.updated_at || Date.now(),
-          // Add required fields that might not be in database
+          z_index: asset.z_index || 0,
+          is_expanded: asset.is_expanded || false,
+          content: content || null,
+          background_config: asset.background_config || {},
+          viewport_config: asset.viewport_config || {},
+          custom_fields: {
+            customFields: asset.custom_fields?.customFields || [],
+            customFieldValues: asset.custom_fields?.customFieldValues || [],
+            tags: asset.custom_fields?.tags || [],
+            viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {},
+            thumbnail: extractedThumbnail || asset.custom_fields?.thumbnail || '',
+            background: asset.custom_fields?.background || '',
+            description: asset.custom_fields?.description || ''
+          },
+          updated_at: asset.updated_at || new Date().toISOString(),
+
+          // Frontend-specific fields
           children: [],
-          parentId: asset.parent_id || null,
-          createdAt: asset.updated_at || Date.now(),
-          // CRITICAL: Add missing required fields to prevent React error #130
-          isLocked: false,
-          borderShape: 'square',
-          showTagBorder: false,
-          cloudStatus: 'local',
-          cloudId: null,
-          cloudPath: null,
-          cloudSize: null,
-          cloudUpdatedAt: null,
-          cloudError: null,
-          deletedAt: null,
-          file: null,
+          created_at: asset.updated_at ? new Date(asset.updated_at).getTime() : Date.now(),
+          is_locked: false,
+          border_shape: 'square',
+          show_tag_border: false,
+          deleted_at: null,
+
+          // Cloud sync fields
+          cloud_status: 'local',
+          cloud_id: null,
+          cloud_path: null,
+          cloud_size: null,
+          cloud_updated_at: null,
+          cloud_error: null,
+          file: null
         };
       });
 
       // CRITICAL FIX: Reconstruct children hierarchy from parent_id relationships
       // This preserves the asset tree structure that would otherwise be lost
-      restoredAssetsData.forEach((asset: any) => {
+      filteredAssetsData.forEach((asset: any) => {
         if (asset.parent_id && assetsObject[asset.parent_id]) {
           assetsObject[asset.parent_id].children.push(asset.asset_id);
         }
       });
 
-      console.log(`[DocumentMutation] Converted ${restoredAssetsData.length} assets to object format:`, {
+      console.log(`[DocumentMutation] Converted ${filteredAssetsData.length} assets to object format:`, {
         assetIds: Object.keys(assetsObject),
         sampleAsset: Object.values(assetsObject)[0],
         hierarchyReconstructed: true
@@ -426,7 +448,7 @@ class DocumentMutationService {
   // Mark asset as changed (metadata)
   markAssetChanged(assetId: string, asset: Asset): void {
     // Migrate 'other' type to 'card' for database compatibility
-    const migratedAsset = asset.type === 'other' ? { ...asset, type: 'card' as const } : asset;
+    const migratedAsset = migrateAssetType(asset);
     this.changedAssets[assetId] = migratedAsset;
     
     // CRITICAL FIX: Trigger auto-save for asset changes (like position changes do)
@@ -481,8 +503,34 @@ class DocumentMutationService {
       height: 0,
       zIndex: 0,
       isExpanded: false,
-      deleted_at: new Date().toISOString()
+      deleted_at: new Date().toISOString(),
+      // CRITICAL: Include all required fields to prevent database errors
+      content: null,
+      backgroundConfig: {},
+      viewportConfig: {},
+      customFields: [],
+      customFieldValues: [],
+      tags: [],
+      viewportDisplaySettings: {},
+      thumbnail: null,
+      background: null,
+      description: null,
+      cloudStatus: 'local',
+      cloudId: null,
+      cloudPath: null,
+      cloudSize: null,
+      cloudUpdatedAt: null,
+      cloudError: null,
+      file: null,
+      isLocked: false,
+      borderShape: 'square',
+      showTagBorder: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     } as any;
+    
+    // CRITICAL: Trigger immediate sync for deletions to prevent data inconsistency
+    this.syncNow();
     this.notifySubscribers();
   }
 
@@ -725,6 +773,147 @@ class DocumentMutationService {
     }
   }
 
+  // Save per-asset background configuration
+  async saveAssetBackground(assetId: string, backgroundConfig: Record<string, any>): Promise<boolean> {
+    if (!this.currentProjectId) return false;
+
+    // Check if the current book still exists locally (might have been deleted)
+    const bookStore = useBookStore.getState();
+    if (!bookStore.books[this.currentProjectId]) {
+      logDocument('Project no longer exists locally, skipping save');
+      this.currentProjectId = null;
+      return false;
+    }
+
+    try {
+      performanceMonitor.incrementDatabaseRequests();
+      logDocument('saveAssetBackground - Sending to RPC:', {
+        p_project_id: this.currentProjectId,
+        p_asset_id: assetId,
+        p_background_config: backgroundConfig
+      });
+
+      const { error } = await supabase.rpc('save_asset_background', {
+        p_project_id: this.currentProjectId,
+        p_asset_id: assetId,
+        p_background_config: backgroundConfig
+      });
+
+      if (error) {
+        reportError(error, 'DocumentMutation.saveAssetBackground', 'Failed to save asset background');
+        this.documentCache.delete(this.currentProjectId);
+        this.backgroundsCache.delete(this.currentProjectId);
+
+        if (error.message?.includes('Unauthorized')) {
+          logDocument('Project may have been deleted, clearing currentProjectId');
+          this.currentProjectId = null;
+          return false;
+        }
+
+        if (error.message?.includes('Version conflict')) {
+          logDocument('Version conflict detected, reloading document...');
+          const loadResult = await this.loadDocument(this.currentProjectId);
+          if (loadResult.success && loadResult.data) {
+            this.currentVersion = loadResult.data.version;
+            logDocument('Reloaded version:', this.currentVersion);
+
+            const { error: retryError } = await supabase.rpc('save_asset_background', {
+              p_project_id: this.currentProjectId,
+              p_asset_id: assetId,
+              p_background_config: backgroundConfig
+            });
+            if (retryError) {
+              reportError(retryError, 'DocumentMutation.saveAssetBackground', 'Retry failed');
+              return false;
+            }
+            this.currentVersion += 1;
+            return true;
+          }
+        }
+        return false;
+      }
+
+      this.currentVersion += 1;
+      this.documentCache.delete(this.currentProjectId);
+      this.backgroundsCache.delete(this.currentProjectId);
+
+      logDocument('Asset background saved successfully');
+      return true;
+    } catch (error) {
+      reportError(error, 'DocumentMutation.saveAssetBackground', 'Error saving asset background');
+      return false;
+    }
+  }
+
+  // Save global custom field templates
+  async saveGlobalCustomFields(customFieldTemplates: any[]): Promise<boolean> {
+    if (!this.currentProjectId) return false;
+
+    // Check if the current book still exists locally (might have been deleted)
+    const bookStore = useBookStore.getState();
+    if (!bookStore.books[this.currentProjectId]) {
+      logDocument('Project no longer exists locally, skipping save');
+      this.currentProjectId = null;
+      return false;
+    }
+
+    try {
+      performanceMonitor.incrementDatabaseRequests();
+      logDocument('saveGlobalCustomFields - Sending to RPC:', {
+        p_project_id: this.currentProjectId,
+        p_custom_field_templates: customFieldTemplates
+      });
+
+      const { error } = await supabase.rpc('save_project', {
+        p_project_id: this.currentProjectId,
+        p_custom_field_templates: customFieldTemplates
+      });
+
+      if (error) {
+        reportError(error, 'DocumentMutation.saveGlobalCustomFields', 'Failed to save global custom fields');
+        this.documentCache.delete(this.currentProjectId);
+        this.backgroundsCache.delete(this.currentProjectId);
+
+        if (error.message?.includes('Unauthorized')) {
+          logDocument('Project may have been deleted, clearing currentProjectId');
+          this.currentProjectId = null;
+          return false;
+        }
+
+        if (error.message?.includes('Version conflict')) {
+          logDocument('Version conflict detected, reloading document...');
+          const loadResult = await this.loadDocument(this.currentProjectId);
+          if (loadResult.success && loadResult.data) {
+            this.currentVersion = loadResult.data.version;
+            logDocument('Reloaded version:', this.currentVersion);
+
+            const { error: retryError } = await supabase.rpc('save_project', {
+              p_project_id: this.currentProjectId,
+              p_custom_field_templates: customFieldTemplates
+            });
+            if (retryError) {
+              reportError(retryError, 'DocumentMutation.saveGlobalCustomFields', 'Retry failed');
+              return false;
+            }
+            this.currentVersion += 1;
+            return true;
+          }
+        }
+        return false;
+      }
+
+      this.currentVersion += 1;
+      this.documentCache.delete(this.currentProjectId);
+      this.backgroundsCache.delete(this.currentProjectId);
+
+      logDocument('Global custom fields saved successfully');
+      return true;
+    } catch (error) {
+      reportError(error, 'DocumentMutation.saveGlobalCustomFields', 'Error saving global custom fields');
+      return false;
+    }
+  }
+
   // Save cover metadata (cover image, color, gradient, leather mode, etc.)
   // Phase 2 Fix: Dedicated method for cover metadata with batching
   async saveCoverMetadata(coverConfig: {
@@ -820,10 +1009,255 @@ class DocumentMutationService {
     }
   }
 
-  // Clear stuck sync flag (for recovery)
-  clearSyncInProgress(): void {
-    this.syncInProgress = false;
-    logDocument('Cleared stuck sync flag');
+  /**
+   * CRITICAL: Cache cleanup to prevent memory leaks
+   * This method should be called regularly to clean up expired and oversized caches
+   */
+  private cleanupCache(): void {
+    const now = Date.now();
+    
+    // Only cleanup if enough time has passed since last cleanup
+    if (now - this.lastCacheCleanup < this.CACHE_CLEANUP_INTERVAL_MS) {
+      return;
+    }
+
+    const beforeCleanup = {
+      documentCacheSize: this.documentCache.size,
+      backgroundsCacheSize: this.backgroundsCache.size,
+      documentMemoryMB: this.estimateCacheMemoryUsage(this.documentCache),
+      backgroundsMemoryMB: this.estimateCacheMemoryUsage(this.backgroundsCache)
+    };
+
+    // Clean document cache
+    this.cleanupDocumentCache();
+    
+    // Clean backgrounds cache
+    this.cleanupBackgroundsCache();
+
+    // Enforce cache size limits
+    this.enforceCacheSizeLimits();
+
+    const afterCleanup = {
+      documentCacheSize: this.documentCache.size,
+      backgroundsCacheSize: this.backgroundsCache.size,
+      documentMemoryMB: this.estimateCacheMemoryUsage(this.documentCache),
+      backgroundsMemoryMB: this.estimateCacheMemoryUsage(this.backgroundsCache)
+    };
+
+    this.lastCacheCleanup = now;
+
+    // Log cleanup results
+    if (beforeCleanup.documentCacheSize !== afterCleanup.documentCacheSize || 
+        beforeCleanup.backgroundsCacheSize !== afterCleanup.backgroundsCacheSize) {
+      logDocument('Cache cleanup completed:', {
+        before: beforeCleanup,
+        after: afterCleanup,
+        memorySaved: {
+          documentMB: beforeCleanup.documentMemoryMB - afterCleanup.documentMemoryMB,
+          backgroundsMB: beforeCleanup.backgroundsMemoryMB - afterCleanup.backgroundsMemoryMB
+        }
+      });
+    }
+  }
+
+  /**
+   * Clean expired entries from document cache
+   */
+  private cleanupDocumentCache(): void {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    for (const [key, entry] of this.documentCache.entries()) {
+      if (now - entry.timestamp > this.CACHE_TTL_MS) {
+        expiredKeys.push(key);
+      }
+    }
+
+    expiredKeys.forEach(key => {
+      this.documentCache.delete(key);
+    });
+
+    if (expiredKeys.length > 0) {
+      logDocument(`Cleaned ${expiredKeys.length} expired entries from document cache`);
+    }
+  }
+
+  /**
+   * Clean expired entries from backgrounds cache
+   */
+  private cleanupBackgroundsCache(): void {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    for (const [key, entry] of this.backgroundsCache.entries()) {
+      if (now - entry.timestamp > this.CACHE_TTL_MS) {
+        expiredKeys.push(key);
+      }
+    }
+
+    expiredKeys.forEach(key => {
+      this.backgroundsCache.delete(key);
+    });
+
+    if (expiredKeys.length > 0) {
+      logDocument(`Cleaned ${expiredKeys.length} expired entries from backgrounds cache`);
+    }
+  }
+
+  /**
+   * Enforce cache size limits using LRU eviction
+   */
+  private enforceCacheSizeLimits(): void {
+    // Enforce document cache size limit
+    if (this.documentCache.size > this.MAX_CACHE_SIZE) {
+      const entries = Array.from(this.documentCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp); // Sort by oldest first
+      
+      const toRemove = entries.slice(0, this.documentCache.size - this.MAX_CACHE_SIZE);
+      toRemove.forEach(([key]) => {
+        this.documentCache.delete(key);
+      });
+
+      logDocument(`Evicted ${toRemove.length} oldest entries from document cache (size limit)`);
+    }
+
+    // Enforce backgrounds cache size limit
+    if (this.backgroundsCache.size > this.MAX_CACHE_SIZE) {
+      const entries = Array.from(this.backgroundsCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp); // Sort by oldest first
+      
+      const toRemove = entries.slice(0, this.backgroundsCache.size - this.MAX_CACHE_SIZE);
+      toRemove.forEach(([key]) => {
+        this.backgroundsCache.delete(key);
+      });
+
+      logDocument(`Evicted ${toRemove.length} oldest entries from backgrounds cache (size limit)`);
+    }
+
+    // Enforce memory limit
+    const totalMemoryMB = this.estimateCacheMemoryUsage(this.documentCache) + 
+                          this.estimateCacheMemoryUsage(this.backgroundsCache);
+    
+    if (totalMemoryMB > this.MAX_CACHE_MEMORY_MB) {
+      logDocument(`Cache memory usage (${totalMemoryMB}MB) exceeds limit (${this.MAX_CACHE_MEMORY_MB}MB), forcing cleanup`);
+      
+      // Force cleanup of oldest entries across both caches
+      this.forceMemoryCleanup(totalMemoryMB - this.MAX_CACHE_MEMORY_MB);
+    }
+  }
+
+  /**
+   * Force cleanup based on memory usage
+   */
+  private forceMemoryCleanup(memoryToFreeMB: number): void {
+    // Combine all cache entries and sort by oldest
+    const allEntries: Array<{cache: 'document' | 'backgrounds', key: string, timestamp: number, size: number}> = [];
+    
+    for (const [key, entry] of this.documentCache.entries()) {
+      allEntries.push({
+        cache: 'document',
+        key,
+        timestamp: entry.timestamp,
+        size: this.estimateEntrySize(entry.data)
+      });
+    }
+    
+    for (const [key, entry] of this.backgroundsCache.entries()) {
+      allEntries.push({
+        cache: 'backgrounds',
+        key,
+        timestamp: entry.timestamp,
+        size: this.estimateEntrySize(entry.data)
+      });
+    }
+
+    // Sort by oldest first
+    allEntries.sort((a, b) => a.timestamp - b.timestamp);
+
+    let freedMemory = 0;
+    const toRemove: typeof allEntries = [];
+
+    for (const entry of allEntries) {
+      if (freedMemory >= memoryToFreeMB) break;
+      
+      toRemove.push(entry);
+      freedMemory += entry.size;
+    }
+
+    // Remove entries
+    toRemove.forEach(entry => {
+      if (entry.cache === 'document') {
+        this.documentCache.delete(entry.key);
+      } else {
+        this.backgroundsCache.delete(entry.key);
+      }
+    });
+
+    logDocument(`Force cleanup freed ${freedMemory.toFixed(2)}MB by removing ${toRemove.length} cache entries`);
+  }
+
+  /**
+   * Estimate memory usage of a cache in MB
+   */
+  private estimateCacheMemoryUsage(cache: Map<string, any>): number {
+    let totalSize = 0;
+    
+    for (const [key, entry] of cache.entries()) {
+      totalSize += this.estimateEntrySize(entry.data);
+      // Add overhead for the key and metadata
+      totalSize += key.length * 2; // UTF-16 characters
+      totalSize += 100; // Estimated metadata overhead
+    }
+    
+    return totalSize / (1024 * 1024); // Convert to MB
+  }
+
+  /**
+   * Estimate size of a cache entry in MB
+   */
+  private estimateEntrySize(data: any): number {
+    try {
+      // Rough estimation based on JSON serialization
+      const jsonString = JSON.stringify(data);
+      return jsonString.length / (1024 * 1024); // Convert to MB
+    } catch (error) {
+      // If serialization fails, use a rough estimate
+      return 1; // 1MB default estimate
+    }
+  }
+
+  /**
+   * Clear all caches (called on logout, project switch, etc.)
+   */
+  clearAllCaches(): void {
+    const beforeSize = this.documentCache.size + this.backgroundsCache.size;
+    
+    this.documentCache.clear();
+    this.backgroundsCache.clear();
+    
+    logDocument(`Cleared all caches: removed ${beforeSize} entries`);
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  getCacheStats(): {
+    documentCache: { size: number; memoryMB: number };
+    backgroundsCache: { size: number; memoryMB: number };
+    totalMemoryMB: number;
+  } {
+    return {
+      documentCache: {
+        size: this.documentCache.size,
+        memoryMB: this.estimateCacheMemoryUsage(this.documentCache)
+      },
+      backgroundsCache: {
+        size: this.backgroundsCache.size,
+        memoryMB: this.estimateCacheMemoryUsage(this.backgroundsCache)
+      },
+      totalMemoryMB: this.estimateCacheMemoryUsage(this.documentCache) + 
+                    this.estimateCacheMemoryUsage(this.backgroundsCache)
+    };
   }
 
   // Immediate sync (for critical operations)
@@ -855,6 +1289,9 @@ class DocumentMutationService {
       return true;
     }
 
+    // CRITICAL: Run cache cleanup before sync
+    this.cleanupCache();
+
     logDocument(`syncNow: syncing ${totalChanges} changes`);
     return this.performSync();
   }
@@ -880,6 +1317,12 @@ class DocumentMutationService {
     }, this.syncTimeoutMs);
 
     try {
+      // CRITICAL: Check for conflicts before saving
+      const conflictDetected = await this.detectAndResolveConflicts();
+      if (conflictDetected) {
+        logDocument('Conflict detected and resolved during sync');
+      }
+
       // NOTE: Following MASTER_PLAN.md - save positions first (HOT updates), then metadata
       if (Object.keys(this.changedPositions).length > 0) {
         await this.savePositionChanges();
@@ -978,39 +1421,39 @@ class DocumentMutationService {
         let content = asset.content || null;
         let thumbnail = null;
         
-        // If asset has cloudPath (R2), use that as thumbnail reference and exclude content
+        // If asset has cloud_path (R2), use that as thumbnail reference and exclude content
         // This prevents sending 13MB base64 data to database on every sync
-        if (asset.cloudPath) {
-          thumbnail = asset.cloudPath;
+        if (asset.cloud_path) {
+          thumbnail = asset.cloud_path;
           content = null; // Don't send content to DB if stored in R2
-        } else if (asset.thumbnail) {
+        } else if (asset.custom_fields?.thumbnail) {
           // Store base64 thumbnail in content field (unbounded TEXT via TOAST)
           // This avoids the 2KB custom_fields constraint
           if (!content) {
-            content = asset.thumbnail;
+            content = asset.custom_fields.thumbnail;
           } else {
             // If content already exists, prepend thumbnail with delimiter
-            content = `__THUMBNAIL__${asset.thumbnail}__END_THUMBNAIL__${content}`;
+            content = `__THUMBNAIL__${asset.custom_fields.thumbnail}__END_THUMBNAIL__${content}`;
           }
         }
         
         // custom_fields should only contain lightweight metadata (< 2KB)
         const customFieldsObj: Record<string, any> = {
-          customFields: asset.customFields || [],
-          customFieldValues: asset.customFieldValues || [],
-          tags: asset.tags || [],
+          customFields: asset.custom_fields?.customFields || [],
+          customFieldValues: asset.custom_fields?.customFieldValues || [],
+          tags: asset.custom_fields?.tags || [],
           thumbnail, // Only R2 path reference, never base64
-          background: asset.background || null,
-          description: asset.description || null,
-          viewportDisplaySettings: asset.viewportDisplaySettings || {}
+          background: asset.custom_fields?.background || null,
+          description: asset.custom_fields?.description || null,
+          viewportDisplaySettings: asset.custom_fields?.viewportDisplaySettings || {}
         };
 
         // CRITICAL FIX: Validate custom_fields size to prevent truncation
         const customFieldsSize = JSON.stringify(customFieldsObj).length;
         if (customFieldsSize >= 2048) {
-          console.warn(`[DocumentMutation] Asset ${asset.id} custom_fields too large (${customFieldsSize} bytes), will be truncated. Consider reducing custom field data.`);
+          console.warn(`[DocumentMutation] Asset ${asset.asset_id} custom_fields too large (${customFieldsSize} bytes), will be truncated. Consider reducing custom field data.`);
           logDocument('Custom fields size warning:', {
-            assetId: asset.id,
+            assetId: asset.asset_id,
             assetName: asset.name,
             size: customFieldsSize,
             maxSize: 2048
@@ -1018,11 +1461,11 @@ class DocumentMutationService {
         }
 
         // Migrate 'other' type to 'card' for database compatibility
-        const assetType = asset.type === 'other' ? 'card' : asset.type;
+        const assetType = getMigratedAssetType(asset.type);
 
         return {
-          asset_id: asset.id,
-          parent_id: asset.parentId || null,
+          asset_id: asset.asset_id,
+          parent_id: asset.parent_id || null,
           name: asset.name,
           type: assetType,
           x: Math.round(asset.x || 0),
@@ -1037,11 +1480,13 @@ class DocumentMutationService {
             const zIndexRange = 900;
             return 1000 - Math.floor(((normalizedArea - minArea) / (maxArea - minArea)) * zIndexRange);
           })(),
-          is_expanded: asset.isExpanded || false,
+          is_expanded: asset.is_expanded || false,
           content,
-          background_config: asset.backgroundConfig || {},
-          viewport_config: asset.viewportConfig || {},
-          custom_fields: customFieldsObj
+          background_config: asset.background_config || {},
+          viewport_config: asset.viewport_config || {},
+          custom_fields: customFieldsObj,
+          // CRITICAL: Include deleted_at field for soft delete sync
+          deleted_at: asset.deleted_at || null
         };
       })
     );
@@ -1230,6 +1675,136 @@ class DocumentMutationService {
   // Utility: Sleep for delays
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Detect and resolve conflicts before sync operations
+   * CRITICAL: Prevents silent data loss from concurrent edits
+   */
+  private async detectAndResolveConflicts(): Promise<boolean> {
+    if (!this.currentProjectId) {
+      logDocument('No project loaded, skipping conflict detection');
+      return false;
+    }
+
+    // Only check for conflicts if we have pending changes
+    const totalChanges = Object.keys(this.changedAssets).length + Object.keys(this.changedPositions).length;
+    if (totalChanges === 0) {
+      return false;
+    }
+
+    try {
+      // Load current server state to compare with local changes
+      const serverDoc = await this.loadDocument(this.currentProjectId);
+      if (!serverDoc.success || !serverDoc.data) {
+        logDocument('Failed to load server document for conflict detection');
+        return false;
+      }
+
+      this.lastServerDocument = serverDoc.data;
+
+      // Convert local changes to DocumentOperation format for ConflictResolver
+      const clientOps = this.convertChangesToOperations();
+      
+      if (clientOps.length === 0) {
+        return false; // No operations to check
+      }
+
+      // Use the existing ConflictResolver to handle conflicts
+      const resolution = this.conflictResolver.resolve(
+        clientOps,
+        serverDoc.data,
+        this.lastServerDocument // Use last known server state as client doc
+      );
+
+      const totalConflicts = resolution.conflicts.length;
+      
+      if (totalConflicts > 0) {
+        logDocument(`Detected ${totalConflicts} conflicts during sync:`, {
+          conflicts: resolution.conflicts.map(c => ({ reason: c.reason, field: c.field })),
+          strategy: resolution.strategy
+        });
+
+        // Apply the resolution
+        if (resolution.resolved) {
+          await this.applyConflictResolution(resolution);
+          this.conflictHistory.push(resolution);
+          return true;
+        } else {
+          logDocument('Failed to resolve conflicts automatically');
+          return false;
+        }
+      }
+
+      return false; // No conflicts detected
+    } catch (error) {
+      reportError(error, 'DocumentMutation.detectAndResolveConflicts', 'Conflict detection failed');
+      return false;
+    }
+  }
+
+  /**
+   * Convert local changes to DocumentOperation format for ConflictResolver
+   */
+  private convertChangesToOperations(): DocumentOperation[] {
+    const operations: DocumentOperation[] = [];
+
+    // Convert asset changes to operations
+    for (const [assetId, asset] of Object.entries(this.changedAssets)) {
+      // Check if this is a deleted asset
+      if ((asset as any).deleted_at) {
+        operations.push({
+          op: 'DELETE_ASSET',
+          assetId
+        });
+      } else {
+        // This is an update operation
+        operations.push({
+          op: 'UPDATE_METADATA',
+          assetId,
+          name: asset.name
+        });
+      }
+    }
+
+    // Convert position changes to operations
+    for (const [assetId, position] of Object.entries(this.changedPositions)) {
+      operations.push({
+        op: 'UPDATE_POSITION',
+        assetId,
+        x: position.x,
+        y: position.y,
+        width: 200, // Default width - will be filled from server state
+        height: 150, // Default height - will be filled from server state
+        zIndex: position.z_index
+      });
+    }
+
+    return operations;
+  }
+
+  /**
+   * Apply conflict resolution to local state
+   */
+  private async applyConflictResolution(resolution: ConflictResolution): Promise<void> {
+    logDocument('Applying conflict resolution:', resolution.strategy);
+    
+    // For server-wins strategy (default), clear local changes
+    if (resolution.strategy === 'server-wins') {
+      this.clearChanges();
+      return;
+    }
+    
+    // For client-wins strategy, keep local changes (no action needed)
+    if (resolution.strategy === 'client-wins') {
+      logDocument('Client-wins strategy: keeping local changes');
+      return;
+    }
+    
+    // For manual resolution, we would need UI integration
+    // For now, default to server-wins
+    logDocument('Manual resolution not implemented, defaulting to server-wins');
+    this.clearChanges();
   }
 
   /**

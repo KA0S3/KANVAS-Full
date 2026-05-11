@@ -240,6 +240,17 @@ export const useAssetStore = create<AssetStore>()(
           const assets = result.data.assets;
           const globalCustomFields = result.data.globalCustomFields || [];
           
+          // CRITICAL FIX: Don't overwrite existing assets with empty data
+          const existingAssets = state.bookAssets[bookId];
+          const hasExistingAssets = existingAssets && Object.keys(existingAssets).length > 0;
+          const hasNewAssets = assets && Object.keys(assets).length > 0;
+          
+          if (hasExistingAssets && !hasNewAssets) {
+            console.log(`[AssetStore] WARNING: DocumentMutationService returned empty assets, but we have existing assets. Preserving existing data.`);
+            console.log(`[AssetStore] Existing assets count: ${Object.keys(existingAssets).length}, New assets count: ${Object.keys(assets).length}`);
+            return;
+          }
+          
           // Convert to proper Asset format and rebuild hierarchy
           const assetMap: Record<string, Asset> = {};
           Object.entries(assets).forEach(([id, asset]: [string, any]) => {

@@ -9,14 +9,8 @@ import { useBackgroundStore } from '@/stores/backgroundStore';
 const STORAGE_PREFIX = 'background:';
 const METADATA_PREFIX = 'bgmeta:';
 
-// Debug: Log all localStorage keys at module load
-const allKeys: string[] = [];
-for (let i = 0; i < localStorage.length; i++) {
-  const key = localStorage.key(i);
-  if (key) allKeys.push(key);
-}
-console.log('[BackgroundStorage] Module loaded. All localStorage keys:', allKeys);
-console.log('[BackgroundStorage] Background-related keys:', allKeys.filter(k => k.startsWith(STORAGE_PREFIX) || k.startsWith(METADATA_PREFIX)));
+// Defer background storage initialization to prevent startup logs
+// This will be initialized when first accessed
 
 /**
  * Migrate old background: format to new bgmeta: format

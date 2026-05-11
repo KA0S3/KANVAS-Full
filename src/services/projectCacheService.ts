@@ -58,7 +58,7 @@ const MAX_CACHE_AGE_MS = 30 * 60 * 1000; // 30 minutes max age
 // =====================================================
 
 class ProjectCacheService {
-  private static instance: ProjectCacheService;
+  private static instance: ProjectCacheService | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing: boolean = false;
   private lastRefreshTime: number = 0;
@@ -70,6 +70,13 @@ class ProjectCacheService {
   public static getInstance(): ProjectCacheService {
     if (!ProjectCacheService.instance) {
       ProjectCacheService.instance = new ProjectCacheService();
+    }
+    return ProjectCacheService.instance;
+  }
+
+  private static ensureInstance(): ProjectCacheService {
+    if (!ProjectCacheService.instance) {
+      throw new Error('ProjectCacheService not initialized. Call initialize() first.');
     }
     return ProjectCacheService.instance;
   }
@@ -490,8 +497,34 @@ class ProjectCacheService {
 }
 
 // =====================================================
-// Export singleton instance
+// Lazy initialization methods
 // =====================================================
 
-export const projectCacheService = ProjectCacheService.getInstance();
+/**
+ * Initialize the ProjectCacheService - should be called when user is authenticated
+ */
+export const initializeProjectCacheService = (): ProjectCacheService => {
+  const instance = ProjectCacheService.getInstance();
+  console.log('[ProjectCacheService] Lazy initialized on demand');
+  return instance;
+};
+
+/**
+ * Get the ProjectCacheService instance - will throw if not initialized
+ */
+export const getProjectCacheService = (): ProjectCacheService => {
+  return ProjectCacheService.getInstance();
+};
+
+// Legacy export for backward compatibility
+let _legacyInstance: ProjectCacheService | null = null;
+export const projectCacheService = new Proxy({} as ProjectCacheService, {
+  get(target, prop) {
+    if (!_legacyInstance) {
+      _legacyInstance = initializeProjectCacheService();
+    }
+    return _legacyInstance[prop as keyof ProjectCacheService];
+  }
+});
+
 export default projectCacheService;

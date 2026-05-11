@@ -34,7 +34,7 @@ interface StoreCoordinatorConfig {
 }
 
 class StoreCoordinator {
-  private static instance: StoreCoordinator;
+  private static instance: StoreCoordinator | null = null;
   private syncQueue: Map<string, SyncOperation> = new Map();
   private debounceTimers: Map<string, number> = new Map(); // Use string keys for batch operations
   private throttleTimers: Map<string, number> = new Map();
@@ -62,6 +62,13 @@ class StoreCoordinator {
   public static getInstance(config?: Partial<StoreCoordinatorConfig>): StoreCoordinator {
     if (!StoreCoordinator.instance) {
       StoreCoordinator.instance = new StoreCoordinator(config);
+    }
+    return StoreCoordinator.instance;
+  }
+
+  private static ensureInstance(): StoreCoordinator {
+    if (!StoreCoordinator.instance) {
+      StoreCoordinator.instance = StoreCoordinator.getInstance();
     }
     return StoreCoordinator.instance;
   }
@@ -451,8 +458,33 @@ class StoreCoordinator {
   }
 }
 
-// Export singleton instance
-export const storeCoordinator = StoreCoordinator.getInstance();
+// Lazy initialization methods
+/**
+ * Initialize the StoreCoordinator - should be called when first store mutation is needed
+ */
+export const initializeStoreCoordinator = (config?: Partial<StoreCoordinatorConfig>): StoreCoordinator => {
+  const instance = StoreCoordinator.getInstance(config);
+  console.log('[StoreCoordinator] Lazy initialized on demand');
+  return instance;
+};
+
+/**
+ * Get the StoreCoordinator instance - will initialize if needed
+ */
+export const getStoreCoordinator = (config?: Partial<StoreCoordinatorConfig>): StoreCoordinator => {
+  return StoreCoordinator.getInstance(config);
+};
+
+// Legacy export for backward compatibility
+let _storeCoordinatorInstance: StoreCoordinator | null = null;
+export const storeCoordinator = new Proxy({} as StoreCoordinator, {
+  get(target, prop) {
+    if (!_storeCoordinatorInstance) {
+      _storeCoordinatorInstance = initializeStoreCoordinator();
+    }
+    return _storeCoordinatorInstance[prop as keyof StoreCoordinator];
+  }
+});
 
 // Export types for use in stores
 export type { SyncOperation, StoreCoordinatorConfig };

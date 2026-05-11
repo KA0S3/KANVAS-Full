@@ -382,7 +382,7 @@ export const useAssetStore = create<AssetStore>()(
     const bookId = state.getBookId();
     
     if (!bookId) {
-      console.warn('[AssetStore] No book ID available for getCurrentBookAssets');
+      // Silent return to prevent startup log spam
       return {};
     }
     
@@ -396,7 +396,7 @@ export const useAssetStore = create<AssetStore>()(
     const bookId = state.getBookId();
     
     if (!bookId) {
-      console.warn('[AssetStore] No book ID available for getCurrentBookGlobalCustomFields');
+      // Silent return to prevent startup log spam
       return [];
     }
     

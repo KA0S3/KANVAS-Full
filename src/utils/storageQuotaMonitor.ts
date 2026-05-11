@@ -32,13 +32,19 @@ export class StorageQuotaMonitor {
   }
 
   private constructor() {
-    this.startMonitoring();
+    // Defer monitoring start to prevent startup logs
+    // Monitoring will start when first accessed
   }
 
   /**
    * Get current localStorage quota information
    */
   getStorageQuota(): StorageQuotaInfo {
+    // Start monitoring on first access
+    if (!this.monitoringInterval) {
+      this.startMonitoring();
+    }
+
     try {
       // Estimate localStorage usage
       let totalUsed = 0;

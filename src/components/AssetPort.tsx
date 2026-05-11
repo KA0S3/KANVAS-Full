@@ -125,7 +125,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   } = useAssetTree();
   
   const { currentActiveId, setCurrentViewportId, currentViewportId, isEditingBackground, setIsEditingBackground, updateAsset, updateAssetPositionFast } = useAssetStore();
-  const { getCurrentBook, getWorldData, updateWorldData } = useBookStore();
+  const { getCurrentBook, getWorldData, updateWorldData, currentBookId } = useBookStore();
   const { getBackground, setBackground, migrateLegacyConfig, configs: backgroundConfigs } = useBackgroundStore();
   const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
   const { quota } = useCloudStore();
@@ -1028,6 +1028,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         initialData={modalInitialData}
         parentId={enteredAssetId || undefined}
         generatorImportData={generatorImportData}
+        projectId={currentBookId || undefined}
         viewportSize={viewportSize}
       />
 

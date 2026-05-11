@@ -19,6 +19,7 @@ import {
   shouldMonitorQuota,
   validateStorageOperation 
 } from '@/config/plans';
+import { projectCacheService } from '@/services/projectCacheService';
 
 type Plan = 'guest' | 'free' | 'pro' | 'lifetime' | 'owner';
 
@@ -182,6 +183,17 @@ export const useAuthStore = create<AuthStore>()(
                   get().fetchUserLicense(session.user.id),
                   get().fetchOwnerKeys(session.user.id),
                 ]);
+                
+                // Trigger project cache population for pro/owner plans
+                const plan = get().plan;
+                if (plan === 'pro' || plan === 'lifetime' || plan === 'owner') {
+                  console.log(`[AuthStore] Triggering project cache population for ${plan} user`);
+                  try {
+                    await projectCacheService.onUserSignIn(session.user.id);
+                  } catch (error) {
+                    console.warn('[AuthStore] Failed to populate project cache:', error);
+                  }
+                }
               } else {
                 // Just update user object, don't re-fetch plan
                 set({
@@ -463,6 +475,13 @@ export const useAuthStore = create<AuthStore>()(
           }
           
           logAuth('Sign out completed successfully');
+          
+          // Clear project cache on sign out
+          try {
+            projectCacheService.onUserSignOut();
+          } catch (error) {
+            console.warn('[AuthStore] Failed to clear project cache:', error);
+          }
         } catch (error) {
           reportError(error, 'authStore.signOut', 'Unexpected sign out error');
           // Ensure state is cleared even on unexpected errors

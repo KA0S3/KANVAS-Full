@@ -12,6 +12,7 @@ import type { BackgroundConfig } from '@/types/background';
 import { compressBase64Thumbnail, isThumbnailTooLarge } from '@/utils/thumbnailCompression';
 import { logDocument, reportError } from '@/utils/logger';
 import { withApiRateLimit } from '@/services/rateLimitMiddleware';
+import { projectCacheService } from './projectCacheService';
 
 // Document operation types
 export type DocumentOperation =
@@ -422,6 +423,23 @@ class DocumentMutationService {
       logDocument('Created new project:', data);
       this.currentProjectId = projectId;
       this.currentVersion = 1;
+      
+      // Update project cache with new project
+      try {
+        const newProject = {
+          id: projectId,
+          name: projectName,
+          description: null,
+          asset_count: 0,
+          last_version: 1,
+          updated_at: new Date().toISOString(),
+          cached_at: Date.now()
+        };
+        projectCacheService.addProject(newProject);
+      } catch (error) {
+        console.warn('[DocumentMutationService] Failed to update project cache:', error);
+      }
+      
       return true;
     } catch (error) {
       reportError(error, 'DocumentMutation.createProject', 'Error creating project');
@@ -438,9 +456,32 @@ class DocumentMutationService {
 
   /**
    * Get current project ID - used to check if a project is loaded before operations
+   * Enhanced with project cache integration to eliminate race conditions
    */
   getCurrentProjectId(): string | null {
-    return this.currentProjectId;
+    // First check if we have a current project ID set
+    if (this.currentProjectId) {
+      return this.currentProjectId;
+    }
+
+    // If no current project ID, try to get from cache
+    // This eliminates race conditions when components check for project ID before it's set
+    const cache = projectCacheService.getCache();
+    if (cache && Object.keys(cache.projects).length > 0) {
+      // Get the most recently updated project as fallback
+      const projects = Object.values(cache.projects);
+      const mostRecent = projects.sort((a, b) => 
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      )[0];
+      
+      if (mostRecent) {
+        console.log(`[DocumentMutationService] Using cached project ID: ${mostRecent.id}`);
+        return mostRecent.id;
+      }
+    }
+
+    // No project ID available
+    return null;
   }
 
   // NOTE: Following MASTER_PLAN.md - state-based tracking (NO operation queue)

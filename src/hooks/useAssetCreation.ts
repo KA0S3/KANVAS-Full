@@ -62,13 +62,9 @@ export function useAssetCreation() {
       throw new Error("Asset creation blocked: not triggered by user click");
     }
     
-    // CRITICAL FIX: Validate required fields before cloud upload
+    // CRITICAL FIX: Validate required fields before asset creation
     if (!assetData.name?.trim()) {
       throw new Error('Asset name is required');
-    }
-    
-    if (!options?.projectId && !options?.skipCloud) {
-      throw new Error('Project ID is required for cloud upload');
     }
     
     console.log('Creating asset from modal');
@@ -76,10 +72,17 @@ export function useAssetCreation() {
     // Create local asset first (local-first principle)
     const assetId = createAsset(assetData, parentId);
     
-    // If file is provided and cloud sync is enabled, attempt cloud upload
-    if (options.file && syncEnabled && isAuthenticated && !options.skipCloud) {
-      await uploadAssetToCloud(assetId, options.file, options.projectId);
+    // Store file reference for later cloud sync during normal save cycle
+    if (options.file) {
+      // Store file in asset for later upload during sync cycle
+      updateAsset(assetId, { 
+        file: options.file,
+        cloud_status: 'local' // Mark as local for cloud sync
+      });
     }
+    
+    // NOTE: Cloud upload will happen during normal sync cycle (40-60s debounce)
+    // This respects low IO principles and prevents immediate API calls
     
     return assetId;
   };

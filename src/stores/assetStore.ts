@@ -10,6 +10,7 @@ import { documentMutationService } from '@/services/DocumentMutationService';
 import { undoService } from '@/services/UndoService';
 import { storeCoordinator } from '@/services/StoreCoordinator';
 import { migrateAssetTypes } from '@/utils/typeMigration';
+import { projectCacheService } from '@/services/projectCacheService';
 
 // Virtualization interfaces
 export interface AssetMetadata {
@@ -209,6 +210,20 @@ export const useAssetStore = create<AssetStore>()(
   ensureBookData: async (bookId: string) => {
     const state = get();
     
+    // Priority 0: Check project cache first to eliminate race conditions
+    const cachedProject = projectCacheService.getProject(bookId);
+    if (cachedProject) {
+      console.log(`[AssetStore] Found project ${bookId} in cache, proceeding with data loading`);
+    } else {
+      // Check if project exists in cache (but might be stale)
+      const cache = projectCacheService.getCache();
+      if (cache && !cache.projects[bookId]) {
+        console.warn(`[AssetStore] Project ${bookId} not found in cache, may not exist`);
+        // Don't attempt DocumentMutationService for non-existent project
+        return;
+      }
+    }
+    
     // Check if data already exists and is not stale
     const existingAssets = state.bookAssets[bookId];
     if (existingAssets && Object.keys(existingAssets).length > 0) {
@@ -341,10 +356,24 @@ export const useAssetStore = create<AssetStore>()(
     return state.initializingBookId || state.getCurrentBookId();
   },
 
-  // Helper to get current book ID
+  // Helper to get current book ID with project cache fallback
   getCurrentBookId: () => {
     const bookStore = useBookStore.getState();
-    return bookStore.currentBookId;
+    let bookId = bookStore.currentBookId;
+    
+    // If no book ID in store, try to get from project cache
+    if (!bookId) {
+      const cachedProjects = projectCacheService.getAllProjects();
+      if (cachedProjects.length > 0) {
+        // Use the most recently updated project as fallback
+        bookId = cachedProjects.reduce((mostRecent, project) => {
+          return project.updated_at > mostRecent.updated_at ? project : mostRecent;
+        }).id;
+        console.log(`[AssetStore] Using fallback project ID from cache: ${bookId}`);
+      }
+    }
+    
+    return bookId;
   },
 
   // Get current book's assets

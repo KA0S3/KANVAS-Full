@@ -11,6 +11,7 @@ import { connectivityService } from "@/services/connectivityService";
 import { documentMutationService } from "@/services/DocumentMutationService";
 import { useUndoKeyboard } from "@/hooks/useUndoKeyboard";
 import { useAuthStore } from "@/stores/authStore";
+import { ProjectCacheLoadingIndicator } from "@/components/ProjectCacheLoadingIndicator";
 import Index from "./pages/Index";
 import AuthConfirm from "./pages/AuthConfirm";
 import AuthCallback from "./pages/AuthCallback";
@@ -54,6 +55,10 @@ const App = () => {
       <ConflictResolutionProvider>
         <Toaster />
         <Sonner />
+        {/* Project cache loading indicator - global cache refresh status */}
+        <div className="fixed top-4 right-4 z-50">
+          <ProjectCacheLoadingIndicator />
+        </div>
         {/* Rate limit warning component - only show when user is authenticated */}
         {user && <RateLimitWarning userId={user.id} />}
         <BrowserRouter>

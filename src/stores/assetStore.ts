@@ -236,9 +236,9 @@ export const useAssetStore = create<AssetStore>()(
         console.log(`[AssetStore] Loading from DocumentMutationService for book ${bookId}`);
         const result = await documentMutationService.loadDocument(bookId);
         
-        if (result.success && result.data?.assets) {
-          const assets = result.data.assets;
-          const globalCustomFields = result.data.globalCustomFields || [];
+        if (result.success && result.data?.world_document?.assets) {
+          const assets = result.data.world_document.assets;
+          const globalCustomFields = result.data.world_document.globalCustomFields || [];
           
           // CRITICAL FIX: Don't overwrite existing assets with empty data
           const existingAssets = state.bookAssets[bookId];
@@ -1337,12 +1337,20 @@ export const useAssetStore = create<AssetStore>()(
   // World-aware methods
   loadWorldData: (worldData, bookIdOverride?: string) => {
     const bookId = bookIdOverride || get().getCurrentBookId();
+    
+    // CRITICAL FIX: Extract assets from the correct nested structure
+    // DocumentMutationService returns {world_document: {assets: {...}}}
+    // But we need to handle both structures for compatibility
+    const assets = worldData?.world_document?.assets || worldData?.assets || {};
+    
     console.log(`[AssetStore] loadWorldData called:`, {
       hasWorldData: !!worldData,
-      assetCount: worldData?.assets ? Object.keys(worldData.assets).length : 0,
+      assetCount: Object.keys(assets).length,
       bookId: bookId,
       bookIdOverride: bookIdOverride || null,
-      currentBookId: get().getCurrentBookId()
+      currentBookId: get().getCurrentBookId(),
+      hasWorldDocument: !!worldData?.world_document,
+      directAssets: !!worldData?.assets
     });
 
     if (worldData) {
@@ -1353,9 +1361,16 @@ export const useAssetStore = create<AssetStore>()(
         return;
       }
       
-      // ENFORCE CONSISTENT DATA STRUCTURE: Use worldData.assets consistently
-      // This removes fallback logic that encouraged inconsistent asset paths
-      const assets = worldData.assets || {};
+      // CRITICAL FIX: Don't overwrite existing assets with empty data
+      const existingAssets = get().bookAssets[bookId];
+      const hasExistingAssets = existingAssets && Object.keys(existingAssets).length > 0;
+      const hasNewAssets = assets && Object.keys(assets).length > 0;
+      
+      if (!hasNewAssets && hasExistingAssets) {
+        console.warn('[AssetStore] WARNING: worldData.assets is empty, but we have existing assets. Preserving existing data.');
+        console.log(`[AssetStore] Existing assets count: ${Object.keys(existingAssets).length}, New assets count: ${Object.keys(assets).length}`);
+        return;
+      }
       
       if (!assets || Object.keys(assets).length === 0) {
         console.warn('[AssetStore] WARNING: worldData.assets is empty');
@@ -1375,7 +1390,7 @@ export const useAssetStore = create<AssetStore>()(
         const newBookGlobalCustomFields = { ...state.bookGlobalCustomFields };
 
         newBookAssets[bookId] = migratedAssets;
-        newBookGlobalCustomFields[bookId] = worldData.globalCustomFields || []
+        newBookGlobalCustomFields[bookId] = worldData?.world_document?.globalCustomFields || worldData?.globalCustomFields || []
 
         console.log(`[AssetStore] Store updated. New state:`, {
           totalBooks: Object.keys(newBookAssets).length,

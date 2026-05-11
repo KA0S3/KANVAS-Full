@@ -62,9 +62,16 @@ class ProjectCacheService {
   private refreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing: boolean = false;
   private lastRefreshTime: number = 0;
+  
+  // Session-based logging flags to prevent duplicate logs
+  private static hasLoggedNoCache = false;
+  private static hasLoggedInitialized = false;
 
   private constructor() {
-    console.log('[ProjectCacheService] Initialized');
+    if (!ProjectCacheService.hasLoggedInitialized) {
+      console.log('[ProjectCacheService] Initialized');
+      ProjectCacheService.hasLoggedInitialized = true;
+    }
   }
 
   public static getInstance(): ProjectCacheService {
@@ -92,7 +99,10 @@ class ProjectCacheService {
     try {
       const cache = localCache.get<ProjectCacheData>(CACHE_KEY);
       if (!cache) {
-        console.log('[ProjectCacheService] No cache found');
+        if (!ProjectCacheService.hasLoggedNoCache) {
+          console.log('[ProjectCacheService] No cache found');
+          ProjectCacheService.hasLoggedNoCache = true;
+        }
         return null;
       }
 
@@ -116,6 +126,9 @@ class ProjectCacheService {
    */
   private setCache(data: ProjectCacheData): void {
     try {
+      // Reset no-cache log flag when cache is successfully set
+      ProjectCacheService.hasLoggedNoCache = false;
+      
       // Validate data structure
       if (!data.projects || !data.user_id) {
         throw new Error('Invalid cache data structure');
@@ -150,6 +163,8 @@ class ProjectCacheService {
   public clearCache(): void {
     try {
       localCache.remove(CACHE_KEY);
+      // Reset no-cache log flag to allow logging after intentional clearing
+      ProjectCacheService.hasLoggedNoCache = false;
       console.log('[ProjectCacheService] Cache cleared');
     } catch (error) {
       reportError(error, 'projectCache.clearCache', 'Failed to clear cache');

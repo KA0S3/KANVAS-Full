@@ -29,9 +29,7 @@ CREATE TABLE projects_v2 (
     updated_at TIMESTAMPTZ DEFAULT now(),
     deleted_at TIMESTAMPTZ,
     
-    -- Performance indexes
-    INDEX idx_projects_user (user_id) WHERE deleted_at IS NULL,
-    INDEX idx_projects_updated (updated_at) WHERE deleted_at IS NULL
+    -- Performance indexes will be created separately
 );
 
 -- Single unified assets table (NO SYNC STATE)
@@ -55,11 +53,7 @@ CREATE TABLE assets_v2 (
     updated_at TIMESTAMPTZ DEFAULT now(),
     deleted_at TIMESTAMPTZ,
     
-    -- Performance indexes (optimized for large projects)
-    INDEX idx_assets_project (project_id) WHERE deleted_at IS NULL,
-    INDEX idx_assets_parent (project_id, parent_id) WHERE deleted_at IS NULL,
-    INDEX idx_assets_updated (project_id, updated_at) WHERE deleted_at IS NULL,
-    INDEX idx_assets_spatial (project_id, layout->>'x', layout->>'y') WHERE deleted_at IS NULL
+    -- Performance indexes will be created separately
 );
 
 -- Files table (separated from assets - NEVER embedded)
@@ -75,9 +69,7 @@ CREATE TABLE files_v2 (
     
     created_at TIMESTAMPTZ DEFAULT now(),
     
-    -- Performance indexes
-    INDEX idx_files_asset (asset_id),
-    INDEX idx_files_project (project_id)
+    -- Performance indexes will be created separately
 );
 
 -- Sync queue table (runtime state ONLY - never mixed with assets)
@@ -96,9 +88,7 @@ CREATE TABLE sync_queue_v2 (
     created_at TIMESTAMPTZ DEFAULT now(),
     processed_at TIMESTAMPTZ,
     
-    -- FIFO ordering
-    INDEX idx_sync_queue_fifo (project_id, created_at) WHERE status IN ('pending', 'failed'),
-    INDEX idx_sync_queue_asset (asset_id)
+    -- FIFO ordering indexes will be created separately
 );
 
 -- Step 2: Add validation constraints
@@ -525,7 +515,22 @@ SELECT
 FROM assets_v2
 WHERE deleted_at IS NULL;
 
--- Step 8: Add comments for documentation
+-- Step 8: Create performance indexes
+CREATE INDEX idx_projects_user ON projects_v2(user_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_projects_updated ON projects_v2(updated_at) WHERE deleted_at IS NULL;
+
+CREATE INDEX idx_assets_project ON assets_v2(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_assets_parent ON assets_v2(project_id, parent_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_assets_updated ON assets_v2(project_id, updated_at) WHERE deleted_at IS NULL;
+CREATE INDEX idx_assets_spatial ON assets_v2(project_id, (layout->>'x')::numeric, (layout->>'y')::numeric) WHERE deleted_at IS NULL;
+
+CREATE INDEX idx_files_asset ON files_v2(asset_id);
+CREATE INDEX idx_files_project ON files_v2(project_id);
+
+CREATE INDEX idx_sync_queue_fifo ON sync_queue_v2(project_id, created_at) WHERE status IN ('pending', 'failed');
+CREATE INDEX idx_sync_queue_asset ON sync_queue_v2(asset_id);
+
+-- Step 9: Add comments for documentation
 
 COMMENT ON TABLE projects_v2 IS 'KANVAS V2 Projects - Simplified project metadata';
 COMMENT ON TABLE assets_v2 IS 'KANVAS V2 Assets - Single canonical asset structure with zone separation';

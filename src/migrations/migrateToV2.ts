@@ -7,7 +7,7 @@
  * 🔒 CRITICAL: This migration must preserve all existing data
  */
 
-import { Asset, createCanonicalAsset } from '@/types/Asset.ts';
+import { Asset, createCanonicalAsset } from '@/types/Asset';
 import { validateAssetStrict } from '@/types/Safeguards';
 import { db } from '@/storage/indexeddb';
 import { createRuntimeSyncState } from '@/types/SyncTypes';

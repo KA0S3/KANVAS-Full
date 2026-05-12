@@ -481,10 +481,17 @@ CREATE POLICY "Users can view their own rollback tracking" ON rollback_tracking
 CREATE POLICY "Service role can manage rollback tracking" ON rollback_tracking
     FOR ALL USING (auth.role() = 'service_role');
 
-RAISE NOTICE 'KANVAS V2 Migration Rollback Procedures Created Successfully';
-RAISE NOTICE 'Available rollback functions:';
-RAISE NOTICE '- rollback_v2_migration() - Full rollback to legacy schema';
-RAISE NOTICE '- partial_rollback_v2_data(correction_type) - Partial rollback for specific issues';
-RAISE NOTICE '- validate_v2_to_legacy_mapping() - Validate rollback feasibility';
-RAISE NOTICE '- check_rollback_feasibility() - Check if rollback is possible';
-RAISE NOTICE '- emergency_rollback_v2() - Emergency rollback (use with caution)';
+DO $$
+BEGIN
+    RAISE NOTICE 'KANVAS V2 Migration Rollback Procedures Created Successfully';
+    RAISE NOTICE 'Available rollback functions:';
+    RAISE NOTICE '- rollback_v2_migration() - Full rollback to legacy schema';
+    RAISE NOTICE '- partial_rollback_v2_data(correction_type) - Partial rollback for specific issues';
+END $$;
+
+DO $$
+BEGIN
+    RAISE NOTICE '- validate_v2_to_legacy_mapping() - Validate rollback feasibility';
+    RAISE NOTICE '- check_rollback_feasibility() - Check if rollback is possible';
+    RAISE NOTICE '- emergency_rollback_v2() - Emergency rollback (use with caution)';
+END $$;

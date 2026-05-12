@@ -1,557 +1,189 @@
+/**
+ * BOOK STORE - Simple book/project management
+ * 
+ * Simple store for managing current book/project selection
+ * This is a simplified version for compatibility
+ */
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Book, BookViewMode, BookLibrarySettings, BookCoverPreset, LeatherColorPreset, WorldData } from '@/types/book';
-import { performanceMonitor } from '@/utils/performanceMonitor';
-import { deleteProject } from '@/services/ProjectService';
-import { documentMutationService } from '@/services/DocumentMutationService';
-import { undoService } from '@/services/UndoService';
-import { softDeleteService } from '@/services/SoftDeleteService';
-import { StorageCleanup } from '@/utils/storageCleanup';
-import { storeCoordinator } from '@/services/StoreCoordinator';
-import { useAuthStore } from '@/stores/authStore';
-import { storageQuotaMonitor } from '@/utils/storageQuotaMonitor';
 
-const defaultCoverPresets: BookCoverPreset[] = [
-  { id: 'cosmic-blue', name: 'Cosmic Blue', color: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' },
-  { id: 'emerald-green', name: 'Emerald Green', color: '#10b981', gradient: 'linear-gradient(135deg, #10b981, #06b6d4)' },
-  { id: 'royal-purple', name: 'Royal Purple', color: '#8b5cf6', gradient: 'linear-gradient(135deg, #8b5cf6, #ec4899)' },
-  { id: 'sunset-orange', name: 'Sunset Orange', color: '#f97316', gradient: 'linear-gradient(135deg, #f97316, #ef4444)' },
-  { id: 'midnight-dark', name: 'Midnight Dark', color: '#1f2937', gradient: 'linear-gradient(135deg, #1f2937, #374151)' },
-  { id: 'rose-pink', name: 'Rose Pink', color: '#f43f5e', gradient: 'linear-gradient(135deg, #f43f5e, #ec4899)' },
-];
-
-const defaultLeatherPresets: LeatherColorPreset[] = [
-  { id: 'classic-brown', name: 'Classic Brown', color: '#8B4513', darkVariant: '#654321', lightVariant: '#A0522D' },
-  { id: 'rich-black', name: 'Rich Black', color: '#1a1a1a', darkVariant: '#0d0d0d', lightVariant: '#2d2d2d' },
-  { id: 'navy-blue', name: 'Navy Blue', color: '#1e3a8a', darkVariant: '#1e2f5a', lightVariant: '#2563eb' },
-  { id: 'royal-purple', name: 'Royal Purple', color: '#6b46c1', darkVariant: '#553c9a', lightVariant: '#8b5cf6' },
-  { id: 'forest-green', name: 'Forest Green', color: '#2d5016', darkVariant: '#1f3a0f', lightVariant: '#3a6b1e' },
-  { id: 'arctic-white', name: 'Arctic White', color: '#f5f5f0', darkVariant: '#e8e8e0', lightVariant: '#fafaf5' },
-];
-
-interface BookStore {
-  books: Record<string, Book>;
+interface BookStoreState {
   currentBookId: string | null;
-  viewMode: BookViewMode;
-  settings: BookLibrarySettings;
-  coverPresets: BookCoverPreset[];
-  leatherPresets: LeatherColorPreset[];
+  books: Record<string, any>;
+  leatherPresets: any[];
+  viewMode: string;
   
-  // Creation protection
-  _isCreating: boolean;
-  _lastCreationTime: number;
-  _pendingCreationTitle?: string;
-  
-  createBook: (bookData: Omit<Book, 'createdAt' | 'updatedAt'> & { id?: string }) => string;
-  updateBook: (bookId: string, updates: Partial<Book>) => void;
-  deleteBook: (bookId: string) => Promise<void>;
-  reorderBooks: (fromIndex: number, toIndex: number) => void;
+  // Actions
+  setCurrentBookId: (bookId: string | null) => void;
+  addBook: (bookId: string, bookData: any) => void;
+  removeBook: (bookId: string) => void;
+  clearBooks: () => void;
+  getAllBooks: () => any[];
   setCurrentBook: (bookId: string | null) => void;
-  getCurrentBook: () => Book | null;
-  getAllBooks: () => Book[];
-  updateWorldData: (bookId: string, worldData: Partial<WorldData>) => void;
-  getWorldData: (bookId: string) => WorldData | null;
-  setViewMode: (mode: BookViewMode) => void;
-  updateSettings: (settings: Partial<BookLibrarySettings>) => void;
-  exportBooks: () => string;
-  exportSingleBook: (bookId: string) => string;
-  importBooks: (data: string, mode?: 'replace' | 'new') => boolean;
+  deleteBook: (bookId: string) => void;
+  updateWorldData: (bookId: string, worldData: any) => void;
+  getWorldData: (bookId: string) => any;
+  getCurrentBook: () => any;
+  createBook: (bookData: any) => string;
+  updateBook: (bookId: string, bookData: any) => void;
+  setViewMode: (mode: string) => void;
 }
 
-const defaultSettings: BookLibrarySettings = {
-  defaultViewMode: 'single',
-  autoSave: true,
-  showBookDescriptions: true,
-};
-
-export const createDefaultWorldData = (): WorldData => ({
-  assets: {},
-  tags: {},
-  globalCustomFields: [],
-  viewportOffset: { x: -45, y: -20 },
-  viewportScale: 1,
-});
-
-export const useBookStore = create<BookStore>()(
+export const useBookStore = create<BookStoreState>()(
   persist(
-    (set, get) => {
-      return {
-        books: {},
-        currentBookId: null,
-        viewMode: 'single' as BookViewMode,
-        settings: defaultSettings,
-        coverPresets: defaultCoverPresets,
-        leatherPresets: defaultLeatherPresets,
+    (set, get) => ({
+      // Initial state
+      currentBookId: null,
+      books: {},
+      leatherPresets: [
+        { color: 'brown', name: 'Classic Brown' },
+        { color: 'black', name: 'Elegant Black' },
+        { color: 'blue', name: 'Royal Blue' },
+        { color: 'green', name: 'Forest Green' },
+        { color: 'red', name: 'Rich Red' },
+        { color: 'purple', name: 'Royal Purple' },
+      ],
+      viewMode: 'grid',
+
+      // Set current book ID
+      setCurrentBookId: (bookId: string | null) => {
+        set({ currentBookId: bookId });
         
-        // Creation protection defaults
-        _isCreating: false,
-        _lastCreationTime: 0,
-        _pendingCreationTitle: undefined,
-
-        createBook: (bookData) => {
-          const state = get();
-          const now = Date.now();
-          
-          // Track book creation attempts
-          performanceMonitor.incrementBookCreations();
-          
-          // Debounce check - prevent rapid successive creations
-          if (state._isCreating) {
-            console.warn('[BookStore] Book creation already in progress, ignoring duplicate request');
-            return '';
-          }
-          
-          // Check for recent creation of same title (prevent duplicates)
-          const timeSinceLastCreation = now - state._lastCreationTime;
-          const debounceTime = 200; // Reduced to 200ms for better sync performance
-          
-          if (timeSinceLastCreation < debounceTime && 
-              state._pendingCreationTitle === bookData.title &&
-              state._isCreating) {
-            console.warn('[BookStore] Duplicate book creation detected, ignoring request');
-            return '';
-          }
-          
-          // Allow multiple books with same title - user wants this flexibility
-          // No longer checking for duplicate titles
-          
-          // Set creation protection
-          set({ 
-            _isCreating: true, 
-            _lastCreationTime: now,
-            _pendingCreationTitle: bookData.title
-          });
-          
-          const id = bookData.id || crypto.randomUUID();
-          const newBook: Book = {
-            ...bookData,
-            id,
-            createdAt: now,
-            updatedAt: now,
-            worldData: bookData.worldData || createDefaultWorldData(),
-          };
-
-          set((state) => ({
-            books: {
-              ...state.books,
-              [id]: newBook,
-            },
-            _isCreating: false, // Reset creation flag
-          }));
-
-          console.log('[BookStore] Created new book:', newBook.title);
-          
-          // Record for undo
-          undoService.recordAction('create', 'book', newBook);
-          
-          return id;
-        },
-
-        updateBook: (bookId, updates) => {
-          const state = get();
-          const book = state.books[bookId];
-          if (!book) return;
-
-          // Record previous state for undo before updating
-          const previousState = { ...book };
-          
-          // Update local state immediately (local-first philosophy)
-          set((state) => ({
-            books: {
-              ...state.books,
-              [bookId]: {
-                ...book,
-                ...updates,
-                updatedAt: Date.now(),
-              },
-            },
-          }));
-          
-          // Record for undo
-          undoService.recordAction('update', 'book', { ...state.books[bookId] }, previousState);
-
-          // Use StoreCoordinator for coordinated sync (prevents race conditions)
-          const currentBookId = get().currentBookId;
-          if (bookId === currentBookId && documentMutationService.getCurrentProjectId() === bookId) {
-            // Queue global tags changes through coordinator
-            if (updates.worldData?.tags) {
-              storeCoordinator.queueSyncOperation({
-                type: 'global_tags',
-                data: { tags: updates.worldData.tags },
-                priority: 'low' // Low priority for global data (preserves low IO)
-              });
-            }
-            
-            // Queue viewport changes through coordinator
-            if (updates.worldData?.viewportOffset || updates.worldData?.viewportScale) {
-              storeCoordinator.queueSyncOperation({
-                type: 'viewport_change',
-                data: { 
-                  viewport: {
-                    offsetX: updates.worldData.viewportOffset?.x || book.worldData?.viewportOffset?.x || 0,
-                    offsetY: updates.worldData.viewportOffset?.y || book.worldData?.viewportOffset?.y || 0,
-                    scale: updates.worldData.viewportScale || book.worldData?.viewportScale || 1
-                  }
-                },
-                priority: 'medium' // Medium priority for viewport changes (responsive)
-              });
-            }
-          }
-        },
-
-        deleteBook: async (bookId) => {
-          const state = get();
-          const book = state.books[bookId];
-
-          if (!book) {
-            console.warn('[BookStore] Attempted to delete non-existent book:', bookId);
-            return;
-          }
-
-          // Record for undo before deletion
-          undoService.recordAction('delete', 'book', book, book);
-
-          // Use soft delete service for proper Supabase deletion (follows low IO philosophy)
-          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bookId)) {
-            try {
-              console.log('[BookStore] Soft deleting project from Supabase:', bookId);
-              await softDeleteService.softDeleteProject(bookId);
-              console.log('[BookStore] Successfully soft deleted project from Supabase');
-            } catch (error: any) {
-              console.error('[BookStore] Failed to soft delete project from Supabase:', error);
-              // Continue with local deletion even if remote fails
-            }
-          } else {
-            console.log('[BookStore] Book ID is not a valid UUID, skipping Supabase deletion:', bookId);
-          }
-
-          // Always delete from local storage immediately
-          set((state) => {
-            const newBooks = { ...state.books };
-            delete newBooks[bookId];
-
-            const newCurrentBookId = state.currentBookId === bookId ? null : state.currentBookId;
-
-            return {
-              books: newBooks,
-              currentBookId: newCurrentBookId,
-            };
-          });
-
-          // Clear DocumentMutationService's currentProjectId if it matches the deleted book
-          if (documentMutationService.getCurrentProjectId() === bookId) {
-            documentMutationService.setProjectId(null);
-            console.log('[BookStore] Cleared DocumentMutationService currentProjectId for deleted book:', bookId);
-          }
-
-          console.log('[BookStore] Deleted book locally:', book.title);
-        },
-
-        reorderBooks: (fromIndex, toIndex) => {
-          set((state) => {
-            const currentBooks = Object.values(state.books);
-            const reorderedBooks = [...currentBooks];
-            const [movedBook] = reorderedBooks.splice(fromIndex, 1);
-            reorderedBooks.splice(toIndex, 0, movedBook);
-
-            // Reconstruct the books object with new order
-            const newBooks: Record<string, Book> = {};
-            reorderedBooks.forEach((book, index) => {
-              newBooks[book.id] = { ...book, order: index };
-            });
-
-            return {
-              books: newBooks,
-            };
-          });
-        },
-
-        setCurrentBook: (bookId) => {
-          set({ currentBookId: bookId });
-        },
-
-        getCurrentBook: () => {
-          const state = get();
-          return state.currentBookId ? state.books[state.currentBookId] || null : null;
-        },
-
-        getAllBooks: () => {
-          const state = get();
-          return Object.values(state.books).sort((a, b) => (a.order || 0) - (b.order || 0));
-        },
-
-        updateWorldData: (bookId, worldDataUpdates) => {
-          set((state) => {
-            const book = state.books[bookId];
-            if (!book) return state;
-
-            return {
-              books: {
-                ...state.books,
-                [bookId]: {
-                  ...book,
-                  worldData: {
-                    ...book.worldData,
-                    ...worldDataUpdates,
-                  },
-                  updatedAt: Date.now(),
-                },
-              },
-            };
-          });
-        },
-
-        getWorldData: (bookId) => {
-          const state = get();
-          const book = state.books[bookId];
-          return book ? book.worldData : null;
-        },
-
-        setViewMode: (mode) => {
-          set({ viewMode: mode });
-        },
-
-        updateSettings: (settingsUpdates) => {
-          set((state) => ({
-            settings: {
-              ...state.settings,
-              ...settingsUpdates,
-            },
-          }));
-        },
-
-        exportBooks: () => {
-          const state = get();
-          return JSON.stringify({
-            books: state.books,
-            settings: state.settings,
-            exportedAt: new Date().toISOString(),
-          }, null, 2);
-        },
-
-        exportSingleBook: (bookId) => {
-          const state = get();
-          const book = state.books[bookId];
-          if (!book) {
-            throw new Error(`Book with ID ${bookId} not found`);
-          }
-          return JSON.stringify({
-            books: { [bookId]: book },
-            settings: state.settings,
-            exportedAt: new Date().toISOString(),
-          }, null, 2);
-        },
-
-        importBooks: (data, mode = 'replace') => {
-          try {
-            const parsed = JSON.parse(data);
-            
-            if (!parsed.books || typeof parsed.books !== 'object') {
-              throw new Error('Invalid data format');
-            }
-
-            if (mode === 'new') {
-              // Import as new - add to existing books
-              set((state) => {
-                const newBooks = { ...state.books };
-                Object.entries(parsed.books).forEach(([id, book]) => {
-                  // Generate new ID for imported book to avoid conflicts
-                  const newId = `imported_${Date.now()}_${id}`;
-                  newBooks[newId] = {
-                    ...book as Book,
-                    id: newId,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    order: Object.keys(state.books).length, // Add to end
-                  };
-                });
-                return {
-                  books: newBooks,
-                  settings: parsed.settings ? { ...state.settings, ...parsed.settings } : state.settings,
-                };
-              });
-            } else {
-              // Replace mode - replace all existing books
-              set((state) => ({
-                books: parsed.books,
-                settings: parsed.settings ? { ...state.settings, ...parsed.settings } : state.settings,
-              }));
-            }
-
-            return true;
-          } catch (error) {
-            console.error('Failed to import books:', error);
-            return false;
-          }
-        },
-      };
-    },
-    {
-      name: 'kanvas-world-storage',
-      // Clean up large data before storage
-      storage: {
-        getItem: (name) => {
-          const value = localStorage.getItem(name);
-          return value ? JSON.parse(value) : null;
-        },
-        setItem: (name, value) => {
-          // Remove large data before saving to localStorage
-          const cleanValue = JSON.parse(JSON.stringify(value)); // Deep clone to avoid modifying original
-          
-          try {
-            if (cleanValue.state && cleanValue.state.books) {
-              // Check if user is guest - include worldData for guest users only
-              const authStore = useAuthStore.getState();
-              const isGuest = authStore.plan === 'guest' && !authStore.isAuthenticated;
-              
-              Object.keys(cleanValue.state.books).forEach(bookId => {
-                const book = cleanValue.state.books[bookId];
-                
-                // PLAN-BASED STORAGE: Include worldData for guest users, exclude for cloud users
-                if (book.worldData) {
-                  if (isGuest) {
-                    // Guest users: Keep worldData but compress it to prevent quota issues
-                    console.log(`[BookStore] Including worldData for guest user: ${bookId}`);
-                    // For guest users, we keep the worldData but might need to compress large assets
-                    if (book.worldData.assets) {
-                      const assetCount = Object.keys(book.worldData.assets).length;
-                      if (assetCount > 100) {
-                        console.warn(`[BookStore] Guest user has ${assetCount} assets, may cause localStorage quota issues`);
-                      }
-                    }
-                  } else {
-                    // Cloud users: Exclude worldData as it will be synced to cloud
-                    console.log(`[BookStore] Excluding worldData for cloud user (${authStore.plan}): ${bookId}`);
-                    delete book.worldData;
-                  }
-                }
-                
-                if (book.coverImage && book.coverImage.startsWith('data:image/') && book.coverImage.length > 50000) {
-                  console.log(`[BookStore] Excluding large cover image from localStorage: ${bookId}`);
-                  // Don't save large images to localStorage, they'll be handled separately
-                  delete book.coverImage;
-                }
-                if (book.coverPageSettings && book.coverPageSettings.coverImageData && book.coverPageSettings.coverImageData.length > 50000) {
-                  console.log(`[BookStore] Excluding large cover page image from localStorage: ${bookId}`);
-                  delete book.coverPageSettings.coverImageData;
-                }
-              });
-            }
-            
-            localStorage.setItem(name, JSON.stringify(cleanValue));
-            
-            // Check quota after successful save for guest users
-            const authStore = useAuthStore.getState();
-            if (authStore.plan === 'guest' && storageQuotaMonitor.shouldMonitor()) {
-              const quota = storageQuotaMonitor.getStorageQuota();
-              if (quota.isNearLimit || quota.isOverLimit) {
-                console.warn('[BookStore] Storage quota issue detected after save:', {
-                  percentage: `${quota.percentage.toFixed(1)}%`,
-                  isNearLimit: quota.isNearLimit,
-                  isOverLimit: quota.isOverLimit
-                });
-                
-                // Trigger intelligent cleanup
-                storageQuotaMonitor.checkQuotaAndCleanup();
-              }
-            }
-          } catch (error) {
-            console.error('[BookStore] Error saving to localStorage:', error);
-            if (error instanceof Error && error.message.includes('quota')) {
-              // Emergency cleanup using intelligent quota monitor
-              console.log('[BookStore] Storage quota exceeded, performing intelligent cleanup...');
-              
-              // Use the quota monitor for intelligent cleanup first
-              if (storageQuotaMonitor.shouldMonitor()) {
-                storageQuotaMonitor.checkQuotaAndCleanup().then(() => {
-                  // Retry save after intelligent cleanup
-                  try {
-                    localStorage.setItem(name, JSON.stringify(cleanValue));
-                    console.log('[BookStore] Successfully saved after intelligent cleanup');
-                  } catch (retryError) {
-                    console.error('[BookStore] Still failed to save after intelligent cleanup:', retryError);
-                    // Fallback to emergency cleanup
-                    StorageCleanup.clearAllKanvasData();
-                    try {
-                      localStorage.setItem(name, JSON.stringify(cleanValue));
-                      console.log('[BookStore] Successfully saved after emergency cleanup');
-                    } catch (finalError) {
-                      console.error('[BookStore] Even minimal save failed:', finalError);
-                      // Last resort: save minimal data
-                      try {
-                        const minimalData = {
-                          state: {
-                            books: {},
-                            currentBookId: cleanValue.state?.currentBookId,
-                            settings: cleanValue.state?.settings,
-                            viewMode: cleanValue.state?.viewMode
-                          }
-                        };
-                        localStorage.setItem(name, JSON.stringify(minimalData));
-                        console.log('[BookStore] Saved minimal data after all retries failed');
-                      } catch (minimalError) {
-                        console.error('[BookStore] Even minimal save failed:', minimalError);
-                      }
-                    }
-                  }
-                });
-              } else {
-                // Fallback to original emergency cleanup if quota monitoring not available
-                StorageCleanup.clearAllKanvasData();
-                try {
-                  localStorage.setItem(name, JSON.stringify(cleanValue));
-                  console.log('[BookStore] Successfully saved after emergency cleanup');
-                } catch (retryError) {
-                  console.error('[BookStore] Still failed to save after cleanup:', retryError);
-                  // Last resort: save minimal data
-                  try {
-                    const minimalData = {
-                      state: {
-                        books: {},
-                        currentBookId: cleanValue.state?.currentBookId,
-                        settings: cleanValue.state?.settings,
-                        viewMode: cleanValue.state?.viewMode
-                      }
-                    };
-                    localStorage.setItem(name, JSON.stringify(minimalData));
-                    console.log('[BookStore] Saved minimal data after all retries failed');
-                  } catch (finalError) {
-                    console.error('[BookStore] Even minimal save failed:', finalError);
-                  }
-                }
-              }
-            }
-          }
-        },
-        removeItem: (name) => {
-          localStorage.removeItem(name);
-        },
+        // Also update the global project ID for other services
+        if (bookId) {
+          localStorage.setItem('currentProjectId', bookId);
+        } else {
+          localStorage.removeItem('currentProjectId');
+        }
       },
+
+      // Add a book to the store
+      addBook: (bookId: string, bookData: any) => {
+        set(state => ({
+          books: {
+            ...state.books,
+            [bookId]: bookData
+          }
+        }));
+      },
+
+      // Remove a book from the store
+      removeBook: (bookId: string) => {
+        set(state => {
+          const newBooks = { ...state.books };
+          delete newBooks[bookId];
+          
+          // Clear current book ID if it was the removed book
+          const newCurrentBookId = state.currentBookId === bookId ? null : state.currentBookId;
+          
+          return {
+            books: newBooks,
+            currentBookId: newCurrentBookId
+          };
+        });
+      },
+
+      // Clear all books
+      clearBooks: () => {
+        set({
+          books: {},
+          currentBookId: null
+        });
+      },
+
+      // Get all books as array
+      getAllBooks: () => {
+        const { books } = get();
+        return Object.values(books);
+      },
+
+      // Set current book (alias for setCurrentBookId)
+      setCurrentBook: (bookId: string | null) => {
+        get().setCurrentBookId(bookId);
+      },
+
+      // Delete book (alias for removeBook)
+      deleteBook: (bookId: string) => {
+        get().removeBook(bookId);
+      },
+
+      // Update world data for a book
+      updateWorldData: (bookId: string, worldData: any) => {
+        set(state => {
+          const books = { ...state.books };
+          if (books[bookId]) {
+            books[bookId] = {
+              ...books[bookId],
+              ...worldData,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return { books };
+        });
+      },
+
+      // Get world data for a book
+      getWorldData: (bookId: string) => {
+        const { books } = get();
+        return books[bookId] || null;
+      },
+
+      // Get current book
+      getCurrentBook: () => {
+        const { currentBookId, books } = get();
+        if (currentBookId && books[currentBookId]) {
+          return books[currentBookId];
+        }
+        return null;
+      },
+
+      // Create a new book
+      createBook: (bookData: any) => {
+        const id = `book_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newBook = {
+          ...bookData,
+          id,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        
+        set(state => ({
+          books: {
+            ...state.books,
+            [id]: newBook
+          }
+        }));
+        
+        return id;
+      },
+
+      // Update a book
+      updateBook: (bookId: string, bookData: any) => {
+        set(state => {
+          const books = { ...state.books };
+          if (books[bookId]) {
+            books[bookId] = {
+              ...books[bookId],
+              ...bookData,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return { books };
+        });
+      },
+
+      // Set view mode
+      setViewMode: (mode: string) => {
+        set({ viewMode: mode });
+      }
+    }),
+    {
+      name: 'book-store-simple',
       partialize: (state) => ({
-        books: state.books,
         currentBookId: state.currentBookId,
-        settings: state.settings,
-        viewMode: state.viewMode,
-        coverPresets: state.coverPresets,
-        leatherPresets: state.leatherPresets,
-        _isCreating: state._isCreating,
-        _lastCreationTime: state._lastCreationTime,
-        _pendingCreationTitle: state._pendingCreationTitle,
-        createBook: state.createBook,
-        updateBook: state.updateBook,
-        deleteBook: state.deleteBook,
-        reorderBooks: state.reorderBooks,
-        setCurrentBook: state.setCurrentBook,
-        getCurrentBook: state.getCurrentBook,
-        getAllBooks: state.getAllBooks,
-        updateWorldData: state.updateWorldData,
-        getWorldData: state.getWorldData,
-        setViewMode: state.setViewMode,
-        updateSettings: state.updateSettings,
-        exportBooks: state.exportBooks,
-        exportSingleBook: state.exportSingleBook,
-        importBooks: state.importBooks,
-      }),
-    },
-  ),
+        books: state.books
+      })
+    }
+  )
 );

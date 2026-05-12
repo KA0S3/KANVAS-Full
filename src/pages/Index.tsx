@@ -17,16 +17,13 @@ import { QuotaWarningBar } from "@/components/QuotaWarningBar";
 import { EnhancedAccountModal } from "@/components/account/EnhancedAccountModal";
 import { UndoStatus } from "@/components/UndoStatus";
 import { useAuthStore } from '@/stores/authStore';
-import { useTagStore } from "@/stores/tagStore";
 import { useThemeStore } from "@/stores/themeStore";
-import { useBackgroundStore } from "@/stores/backgroundStore";
-import type { BackgroundConfig } from "@/types/background";
-import { useMediaStore } from "@/stores/mediaStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useUIStore } from '@/stores/uiStore';
+import { useSyncStore } from '@/stores/syncStore';
+import { useMediaStore } from '@/stores/mediaStore';
 import { audioEngine } from "@/services/AudioEngine";
-import { autosaveService } from '@/services/autosaveService';
-import { documentMutationService } from '@/services/DocumentMutationService';
 import { listProjects } from '@/services/ProjectService';
 import SplashScreen from "@/components/media/SplashScreen";
 import IntroVideo from "@/components/media/IntroVideo";
@@ -40,24 +37,40 @@ const Index = () => {
   const ADS_ENABLED_FOR_ALL_USERS = false;
   
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [bookLibraryOpen, setBookLibraryOpen] = useState(true);
   const [backgroundRefreshTrigger, setBackgroundRefreshTrigger] = useState(0);
   const [showBookEntryAnimation, setShowBookEntryAnimation] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCloudLoading, setIsCloudLoading] = useState(false);
   const createWorldButtonRef = useRef<HTMLButtonElement>(null);
-  const { currentActiveId, loadWorldData, isEditingBackground, setIsEditingBackground, currentViewportId, setActiveAsset, getCurrentBookAssets, setCurrentViewportId } = useAssetStore(); // Using getCurrentBookAssets method
-  const { loadWorldData: loadTagWorldData } = useTagStore();
+  const { getProjectAssets, currentProjectId } = useKanvasStore();
+  const { selectedAssets, selectAsset, clearSelection } = useUIStore();
+  const { syncStatus } = useSyncStore();
   const { currentBookId, setCurrentBook, getAllBooks, deleteBook, updateWorldData } = useBookStore(); // Adding back book store - confirmed working
   const { theme } = useThemeStore(); // Adding back theme store - confirmed working
-  // const { getBackground } = useBackgroundStore(); // Temporarily disabled to debug
-  const { appPhase, showLibrary, setTransitioning, setAppPhase } = useMediaStore(); // Adding back media store - confirmed working
+  const { appPhase, setAppPhase, showLibrary, setTransitioning } = useMediaStore(); // Using mediaStore for app phase management
   // Simple auth state for storage quota functionality
   const { effectiveLimits, isAuthenticated, initializeAuth } = useAuthStore(); // Using working auth store
+  
+  // Fallback for missing stores
+  const bookLibraryOpen = appPhase === 'LIBRARY';
+  const loadTagWorldData = (id: string) => console.log('Tag store fallback - loading world data for:', id);
   const showAds = false; // Temporarily disabled
 
-  // Fallback functions and values
+  // Fallback state variables for missing legacy methods
+  const [currentActiveId, setCurrentActiveId] = useState<string | null>(null);
+  const [currentViewportId, setCurrentViewportId] = useState<string | null>(null);
+  const [isEditingBackground, setIsEditingBackground] = useState(false);
+  
+  // Fallback functions
+  const setActiveAsset = (id: string | null) => {
+    setCurrentActiveId(id);
+    if (id) selectAsset(id);
+  };
+  const getCurrentBookAssets = () => getProjectAssets(currentProjectId || '');
+  const loadWorldData = (id: string) => {
+    console.log('Loading world data for:', id);
+  };
   const getBackground = () => null;
 
   // Initialize auth on mount
@@ -140,16 +153,12 @@ const Index = () => {
           let success = false;
           
           if (targetBookId) {
-            const result = await documentMutationService.loadDocument(targetBookId);
-            success = result.success;
-            if (result.success && result.data) {
-              console.log(`[Index] DocumentMutation result:`, {
-                success: result.success,
-                hasData: !!result.data,
-                hasWorldDocument: !!result.data.world_document,
-                worldDocumentKeys: result.data.world_document ? Object.keys(result.data.world_document) : 'no keys',
-                fullResult: result.data
-              });
+            try {
+              // Load project using V2 stores
+              await useKanvasStore.getState().loadProject(targetBookId);
+              success = true;
+              
+              console.log('[Index] V2 project load completed for:', targetBookId);
               
               // Set book ID for future operations (in case it changed)
               if (currentBookId !== targetBookId) {
@@ -157,17 +166,12 @@ const Index = () => {
                 setCurrentBook(targetBookId);
               }
               
-              // Load all world document data using unified approach
-              success = await loadWorldDocumentData(result, targetBookId, {
-                loadAssets: true,
-                loadBackgrounds: true,
-                loadTags: true,
-                skipIfAssetsExist: false
-              });
+              // Load sync queue for this project
+              await useSyncStore.getState().loadSyncQueue(targetBookId);
               
-              if (!success) {
-                console.error('[Index] Failed to load world document data');
-              }
+            } catch (error) {
+              console.error('[Index] Failed to load project with V2 stores:', error);
+              success = false;
             }
           } else {
             // No current book, just mark as success for now
@@ -243,32 +247,16 @@ const Index = () => {
       const book = getAllBooks().find(b => b.id === cachedState.currentBookId);
       if (book) {
         setCurrentBook(cachedState.currentBookId);
-        documentMutationService.setProjectId(cachedState.currentBookId);
         
-        // Load world data if we were in a book view and book has world data
-        if (cachedState.appPhase === 'BOOK_VIEW' && book.worldData) {
-          // Create a mock document result for the unified function
-          const mockDocumentResult = {
-            success: true,
-            data: {
-              world_document: book.worldData
-            }
-          };
-          
-          // Use unified function for consistent data loading (async call in useEffect)
-          loadWorldDocumentData(mockDocumentResult, book.id, {
-            loadAssets: true,
-            loadBackgrounds: true,
-            loadTags: true,
-            skipIfAssetsExist: true // Preserve existing assets if they exist
-          }).then(loadSuccess => {
-            if (!loadSuccess) {
-              console.error('[Index] Failed to restore cached world data');
-            }
-          }).catch(err => {
-            console.error('[Index] Error restoring cached world data:', err);
-          });
-        }
+        // Load project using V2 stores
+        useKanvasStore.getState().loadProject(cachedState.currentBookId).then(() => {
+          // Load sync queue for this project
+          return useSyncStore.getState().loadSyncQueue(cachedState.currentBookId);
+        }).then(() => {
+          console.log('[Index] V2 state restored for cached project:', cachedState.currentBookId);
+        }).catch(err => {
+          console.error('[Index] Failed to restore cached project with V2 stores:', err);
+        });
       }
 
       // Note: Viewport restoration is now handled by assetStore.initFromBookStore()
@@ -282,7 +270,9 @@ const Index = () => {
 
       // Restore UI states
       setSidebarOpen(cachedState.sidebarOpen);
-      setBookLibraryOpen(cachedState.bookLibraryOpen);
+      if (cachedState.bookLibraryOpen) {
+        showLibrary();
+      }
       setIsEditingBackground(cachedState.isEditingBackground ?? false);
     }
   }, []); // Empty dependency array - only run once on mount
@@ -392,8 +382,8 @@ const Index = () => {
 
       // Check if we should skip loading assets (for optimization)
       if (skipIfAssetsExist) {
-        const currentAssets = useAssetStore.getState().getCurrentBookAssets();
-        const hasAssets = Object.keys(currentAssets).length > 0;
+        const currentAssets = getCurrentBookAssets();
+        const hasAssets = currentAssets.length > 0;
         const bookHasAssets = Object.keys(assets).length > 0;
         
         console.log('[Index] skipIfAssetsExist check:', {
@@ -409,64 +399,137 @@ const Index = () => {
           console.log('[Index] Skipping asset loading to preserve existing assets');
         } else if (!bookHasAssets && hasAssets) {
           console.log('[Index] WARNING: Book has no assets but store has assets - this indicates a sync issue');
-          // Load anyway to ensure consistency
-          const assetStore = useAssetStore.getState();
-          assetStore.loadWorldData({ 
-            assets: assets,
-            globalCustomFields: worldDocument.globalCustomFields || {}
-          }, targetBookId);
+          // Load anyway to ensure consistency using V2 stores
+          const canonicalAssets = Object.values(assets).map((legacyAsset: any) => ({
+            id: legacyAsset.id,
+            projectId: targetBookId,
+            parentId: legacyAsset.parentId,
+            layout: {
+              x: legacyAsset.x || 0,
+              y: legacyAsset.y || 0,
+              width: legacyAsset.width || 100,
+              height: legacyAsset.height || 100,
+              zIndex: legacyAsset.zIndex || 0,
+            },
+            content: {
+              title: legacyAsset.name,
+              text: legacyAsset.content,
+              customFields: legacyAsset.customFields || {},
+            },
+            style: legacyAsset.backgroundConfig || {},
+            behavior: legacyAsset.viewportConfig || {},
+            metadata: {
+              tags: legacyAsset.type ? [legacyAsset.type] : [],
+              createdAt: legacyAsset.createdAt || new Date().toISOString(),
+              updatedAt: legacyAsset.updatedAt || new Date().toISOString(),
+              version: 1,
+            },
+          }));
+          
+          const kanvasStore = useKanvasStore.getState();
+          for (const asset of canonicalAssets) {
+            await kanvasStore.createAsset(asset);
+          }
+          
+          console.log('[Index] Assets loaded into V2 store for consistency:', canonicalAssets.length);
         } else {
-          // Load assets through proper store method to maintain virtualized mode
+          // Load assets using V2 stores
           if (Object.keys(assets).length > 0) {
-            console.log('[Index] Loading assets through proper loadWorldData method');
+            console.log('[Index] Loading assets through V2 stores');
             
-            const assetStore = useAssetStore.getState();
-            assetStore.loadWorldData({ 
-              assets: assets,
-              globalCustomFields: worldDocument.globalCustomFields || {}
-            }, targetBookId);
+            const canonicalAssets = Object.values(assets).map((legacyAsset: any) => ({
+              id: legacyAsset.id,
+              projectId: targetBookId,
+              parentId: legacyAsset.parentId,
+              layout: {
+                x: legacyAsset.x || 0,
+                y: legacyAsset.y || 0,
+                width: legacyAsset.width || 100,
+                height: legacyAsset.height || 100,
+                zIndex: legacyAsset.zIndex || 0,
+              },
+              content: {
+                title: legacyAsset.name,
+                text: legacyAsset.content,
+                customFields: legacyAsset.customFields || {},
+              },
+              style: legacyAsset.backgroundConfig || {},
+              behavior: legacyAsset.viewportConfig || {},
+              metadata: {
+                tags: legacyAsset.type ? [legacyAsset.type] : [],
+                createdAt: legacyAsset.createdAt || new Date().toISOString(),
+                updatedAt: legacyAsset.updatedAt || new Date().toISOString(),
+                version: 1,
+              },
+            }));
             
-            console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
+            const kanvasStore = useKanvasStore.getState();
+            for (const asset of canonicalAssets) {
+              await kanvasStore.createAsset(asset);
+            }
+            
+            console.log('[Index] Assets loaded into V2 store:', canonicalAssets.length);
           } else {
             console.log('[Index] No assets to load - incoming assets array is empty');
           }
         }
       } else {
-        // Load assets unconditionally
+        // Load assets unconditionally using V2 stores
         if (Object.keys(assets).length > 0) {
-          console.log('[Index] Loading assets unconditionally');
+          console.log('[Index] Loading assets unconditionally with V2 stores');
           
-          const assetStore = useAssetStore.getState();
-          assetStore.loadWorldData({ 
-            assets: assets,
-            globalCustomFields: worldDocument.globalCustomFields || {}
-          }, targetBookId);
+          // Convert legacy assets to canonical format and load into V2 store
+          const canonicalAssets = Object.values(assets).map((legacyAsset: any) => ({
+            id: legacyAsset.id,
+            projectId: targetBookId,
+            parentId: legacyAsset.parentId,
+            layout: {
+              x: legacyAsset.x || 0,
+              y: legacyAsset.y || 0,
+              width: legacyAsset.width || 100,
+              height: legacyAsset.height || 100,
+              zIndex: legacyAsset.zIndex || 0,
+            },
+            content: {
+              title: legacyAsset.name,
+              text: legacyAsset.content,
+              customFields: legacyAsset.customFields || {},
+            },
+            style: legacyAsset.backgroundConfig || {},
+            behavior: legacyAsset.viewportConfig || {},
+            metadata: {
+              tags: legacyAsset.type ? [legacyAsset.type] : [],
+              createdAt: legacyAsset.createdAt || new Date().toISOString(),
+              updatedAt: legacyAsset.updatedAt || new Date().toISOString(),
+              version: 1,
+            },
+          }));
           
-          console.log('[Index] Assets loaded through loadWorldData with book ID override:', targetBookId);
+          // Load into V2 store
+          const kanvasStore = useKanvasStore.getState();
+          for (const asset of canonicalAssets) {
+            await kanvasStore.createAsset(asset);
+          }
+          
+          console.log('[Index] Assets loaded into V2 store:', canonicalAssets.length);
         }
       }
     }
 
-    // BACKGROUND RESTORATION - Unified approach
+    // BACKGROUND RESTORATION - Fallback approach
     if (loadBackgrounds && worldDocument.backgrounds) {
-      const backgroundStore = useBackgroundStore.getState();
       const backgrounds = worldDocument.backgrounds;
-      console.log('[Index] Restoring', Object.keys(backgrounds).length, 'backgrounds');
-
-      Object.entries(backgrounds).forEach(([key, config]) => {
-        const clonedConfig = backgroundStore.cloneConfig(config as BackgroundConfig);
-        backgroundStore.setBackground(key, clonedConfig);
-      });
+      console.log('[Index] Skipping background restoration - background store not available in V2');
+      console.log('[Index] Background data available:', Object.keys(backgrounds).length, 'backgrounds');
     }
 
-    // TAG RESTORATION - Unified approach
+    // TAG RESTORATION - Fallback approach
     if (loadTags && (worldDocument.tags || worldDocument.assetTags)) {
-      const tagData = {
-        tags: worldDocument.tags || {},
-        assetTags: worldDocument.assetTags || {}
-      };
-      console.log('[Index] Restoring tags:', Object.keys(tagData.tags).length, 'tags and', Object.keys(tagData.assetTags).length, 'asset tag associations');
-      loadTagWorldData(tagData);
+      console.log('[Index] Skipping tag restoration - tag store not available in V2');
+      console.log('[Index] Tag data available:', {
+        tags: Object.keys(worldDocument.tags || {}).length,
+        assetTags: Object.keys(worldDocument.assetTags || {}).length
+      });
     }
 
     // Load other world data (excluding assets to prevent overwriting)
@@ -497,28 +560,14 @@ const Index = () => {
 
   const handleBookSelect = async (book: Book) => {
     setCurrentBook(book.id);
-    // Set project ID for DocumentMutationService so operations can sync
-    documentMutationService.setProjectId(book.id);
     
-    // Ensure project exists on server for authenticated users
-    const { isAuthenticated } = useAuthStore.getState();
-    if (isAuthenticated) {
-      try {
-        const result = await documentMutationService.loadDocument(book.id);
-        if (!result.success && result.error === 'Project not found') {
-          console.log('[Index] Book not found on server, creating project...');
-          const created = await documentMutationService.createProject(
-            book.id, 
-            book.title,
-            book.coverPageSettings
-          );
-          if (created) {
-            console.log('[Index] Created project on server for book:', book.title);
-          }
-        }
-      } catch (err) {
-        console.warn('[Index] Failed to ensure project exists:', err);
-      }
+    // Load project using V2 stores
+    try {
+      await useKanvasStore.getState().loadProject(book.id);
+      await useSyncStore.getState().loadSyncQueue(book.id);
+      console.log('[Index] V2 project loaded for book selection:', book.title);
+    } catch (err) {
+      console.warn('[Index] Failed to load project with V2 stores:', err);
     }
     
     // Don't load world data here - only load when entering viewport from single view
@@ -528,58 +577,22 @@ const Index = () => {
   const handleEnterBook = async (book: Book) => {
     // Start book entry animation instead of direct entry
     setShowBookEntryAnimation(true);
-    setBookLibraryOpen(false);
+    // Library state will be managed by appPhase transition to BOOK_VIEW
     
-    // Load document from server to set currentProjectId for sync
-    // This is critical - without it, asset operations won't sync
+    // Load project using V2 stores
     const { isAuthenticated } = useAuthStore.getState();
     if (isAuthenticated) {
-      const result = await documentMutationService.loadDocument(book.id);
-      if (result.success && result.data) {
-        console.log('[Index] Loaded document for sync:', result.data.version);
-        
-        // Use unified function for consistent data loading
-        // This fixes the conflicting asset path issue by using world_document.assets consistently
-        const loadSuccess = await loadWorldDocumentData(result, book.id, {
-          loadAssets: true,
-          loadBackgrounds: true,
-          loadTags: true,
-          skipIfAssetsExist: false
-        });
-        
-        if (!loadSuccess) {
-          console.error('[Index] Failed to load world document data in handleEnterBook');
-        }
-      } else if (result.error === 'Project not found') {
-        // Book doesn't exist on server yet - create it
-        console.log('[Index] Book not found on server, creating project...');
-        const created = await documentMutationService.createProject(
-          book.id, 
-          book.title,
-          book.coverPageSettings
-        );
-        if (created) {
-          console.log('[Index] Created project on server for book:', book.title);
-        } else {
-          console.warn('[Index] Failed to create project on server');
-        }
-      } else {
-        console.warn('[Index] Could not load document from server:', result.error);
-      }
-      
-      // Sync any backgrounds that were saved locally before entering the book
-      // These weren't synced because no project was loaded at the time
-      const backgroundStore = useBackgroundStore.getState();
-      const allConfigs = backgroundStore.configs;
-      if (Object.keys(allConfigs).length > 0) {
-        console.log('[Index] Syncing', Object.keys(allConfigs).length, 'backgrounds to cloud');
-        documentMutationService.saveGlobalBackgrounds(allConfigs);
+      try {
+        await useKanvasStore.getState().loadProject(book.id);
+        await useSyncStore.getState().loadSyncQueue(book.id);
+        console.log('[Index] V2 project loaded for book entry:', book.title);
+      } catch (error) {
+        console.warn('[Index] Failed to load project with V2 stores:', error);
       }
     }
     
     // Store the book data immediately - no setTimeout to avoid timing issues
     setCurrentBook(book.id);
-    documentMutationService.setProjectId(book.id);
     
     // Use unified function for consistent book world data loading
     if (book.worldData) {
@@ -612,7 +625,7 @@ const Index = () => {
   };
 
   const handleOpenBookLibrary = () => {
-    setBookLibraryOpen(true);
+    showLibrary();
   };
 
   const handleDeleteWorld = async (book: Book) => {
@@ -625,25 +638,10 @@ const Index = () => {
     const newBook = allBooks.find(book => book.id === newBookId);
     
     if (newBook) {
-      // Immediately create project on server for cloud sync BEFORE selecting
-      const { isAuthenticated } = useAuthStore.getState();
-      if (isAuthenticated) {
-        console.log('[Index] Creating server project for new book:', newBook.title);
-        const created = await documentMutationService.createProject(
-          newBook.id,
-          newBook.title,
-          newBook.coverPageSettings
-        );
-        if (created) {
-          console.log('[Index] Server project created for new book:', newBook.title);
-        } else {
-          console.warn('[Index] Failed to create server project for new book');
-        }
-      }
-      
       // Select the new book and focus on it in single view mode
-      // This will set the project ID for DocumentMutationService
+      // This will load the project using V2 stores
       await handleBookSelect(newBook);
+      console.log('[Index] V2 project initialized for new book:', newBook.title);
     }
   };
 

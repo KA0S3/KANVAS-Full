@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, Trash2 } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore, selectAssetsByParentId } from '@/stores/kanvasStore';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Dialog,
@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import type { Asset } from '@/types/assetInterfaces';
+import type { Asset } from '@/types/Asset';
 
 interface DeleteAssetDialogProps {
   asset: Asset | null;
@@ -24,15 +24,16 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
   isOpen,
   onClose,
 }) => {
-  console.log('DeleteAssetDialog rendered with isOpen:', isOpen, 'asset:', asset?.name);
+  console.log('DeleteAssetDialog rendered with isOpen:', isOpen, 'asset:', asset?.content.title);
   const { toast } = useToast();
-  const { deleteAsset, getAssetChildren } = useAssetStore();
+  const { deleteAsset } = useKanvasStore();
 
   const confirmDelete = () => {
     if (!asset) return;
 
-    const hasChildren = getAssetChildren(asset.id).length > 0;
-    const deletedCount = hasChildren ? 1 + getAssetChildren(asset.id).length : 1;
+    const children = selectAssetsByParentId(asset.id)(useKanvasStore.getState());
+    const hasChildren = children.length > 0;
+    const deletedCount = hasChildren ? 1 + children.length : 1;
     
     try {
       deleteAsset(asset.id);
@@ -41,8 +42,8 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
       toast({
         title: "Asset deleted successfully",
         description: hasChildren 
-          ? `Deleted "${asset.name}" and ${deletedCount - 1} contained asset(s)`
-          : `Deleted "${asset.name}"`,
+          ? `Deleted "${asset.content.title}" and ${deletedCount - 1} contained asset(s)`
+          : `Deleted "${asset.content.title}"`,
         variant: "default",
       });
       
@@ -51,7 +52,7 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
       // Show error toast if deletion fails
       toast({
         title: "Delete failed",
-        description: `Failed to delete "${asset.name}". Please try again.`,
+        description: `Failed to delete "${asset.content.title}". Please try again.`,
         variant: "destructive",
       });
     }
@@ -63,7 +64,8 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
 
   if (!asset) return null;
 
-  const hasChildren = getAssetChildren(asset.id).length > 0;
+  const children = selectAssetsByParentId(asset.id)(useKanvasStore.getState());
+  const hasChildren = children.length > 0;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -77,10 +79,10 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
             {hasChildren ? (
               <div className="space-y-2">
                 <div>
-                  Are you sure you want to delete <strong>"{asset.name}"</strong>?
+                  Are you sure you want to delete <strong>"{asset.content.title}"</strong>?
                 </div>
                 <div className="text-destructive font-medium">
-                  This will also delete all {getAssetChildren(asset.id).length} contained asset(s).
+                  This will also delete all {children.length} contained asset(s).
                 </div>
                 <div className="text-sm text-muted-foreground">
                   This action cannot be undone.
@@ -89,7 +91,7 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
             ) : (
               <div className="space-y-2">
                 <div>
-                  Are you sure you want to delete <strong>"{asset.name}"</strong>?
+                  Are you sure you want to delete <strong>"{asset.content.title}"</strong>?
                 </div>
                 <div className="text-sm text-muted-foreground">
                   This action cannot be undone.

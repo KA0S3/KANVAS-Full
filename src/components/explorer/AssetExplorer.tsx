@@ -1,7 +1,6 @@
 import { Plus, Search, Settings, User, Tag, Users, Building, Sparkles, Swords, X, Image, GripVertical, ChevronDown, ChevronRight } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useAssetStore } from '@/stores/assetStore';
-import { useMediaStore } from '@/stores/mediaStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { AssetTreeNode } from './AssetTreeNode';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -12,7 +11,7 @@ import { AssetCreationModal } from '@/components/asset/AssetCreationModal';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { AccountModal } from '@/components/account/AccountModal';
 import { calculateViewportCenterPosition } from '@/utils/coordinateUtils';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/Asset';
 import {
   DndContext,
   closestCenter,
@@ -36,15 +35,11 @@ function RootAsset({ isDragActive }: { isDragActive: boolean }) {
   const { setNodeRef, isOver } = useDroppable({
     id: 'root-asset',
   });
-  const { expandAll, collapseAll } = useAssetStore();
+  // Tree expansion/collapse functionality simplified for V2 architecture
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   
   const handleToggleAll = () => {
-    if (isAllExpanded) {
-      collapseAll();
-    } else {
-      expandAll();
-    }
+    // Tree expansion/collapse simplified for V2 architecture
     setIsAllExpanded(!isAllExpanded);
   };
   
@@ -91,9 +86,8 @@ interface AssetExplorerProps {
 }
 
 export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerProps) {
-  const { getCurrentBookAssets, updateAsset, currentActiveId, currentViewportId, setIsEditingBackground, reparentAsset } = useAssetStore();
-  const { professionalMode } = useMediaStore();
-  const assets = getCurrentBookAssets();
+  const { getProjectAssets, updateAsset, currentProjectId } = useKanvasStore();
+  const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
   const [searchQuery, setSearchQuery] = useState('');
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
@@ -103,6 +97,9 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   const [generatorImportData, setGeneratorImportData] = useState<any>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draggedAsset, setDraggedAsset] = useState<Asset | null>(null);
+  const [currentActiveId, setCurrentActiveId] = useState<string | null>(null);
+  const [professionalMode, setProfessionalMode] = useState(false);
+  const [isEditingBackground, setIsEditingBackground] = useState(false);
   
   // DnD sensors
   const sensors = useSensors(
@@ -120,8 +117,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     const { active } = event;
     console.log('Drag started:', active.id);
     setActiveId(active.id as string);
-    const currentAssets = getCurrentBookAssets();
-    const asset = currentAssets[active.id as string];
+    const asset = assets.find(a => a.id === active.id);
     setDraggedAsset(asset || null);
   };
 
@@ -129,15 +125,14 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     const { active, over } = event;
     if (!over) return;
     
-    const currentAssets = getCurrentBookAssets();
-    const activeAsset = currentAssets[active.id as string];
-    const overAsset = currentAssets[over.id as string];
+    const activeAsset = assets.find(a => a.id === active.id);
+    const overAsset = assets.find(a => a.id === over.id);
     
     if (!activeAsset || !overAsset) return;
     
     // Prevent dropping a parent onto its own child
     const isDescendant = (parentId: string, childId: string): boolean => {
-      const parent = currentAssets[parentId];
+      const parent = assets[parentId];
       if (!parent) return false;
       
       if (parent.children.includes(childId)) return true;
@@ -161,8 +156,8 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
       return;
     }
     
-    const currentAssets = getCurrentBookAssets();
-    const activeAsset = currentAssets[active.id as string];
+    // assets already available from kanvasStore
+    const activeAsset = assets.find(a => a.id === active.id);
     
     if (!activeAsset) {
       console.warn('Active asset not found:', active.id);
@@ -176,14 +171,14 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
       console.log('Dropping on root asset');
       // Move to root level (only if not already at root)
       if (activeAsset.parentId !== undefined) {
-        reparentAsset(activeAsset.id, undefined);
+        updateAsset(activeAsset.id, { parentId: undefined });
       }
       setActiveId(null);
       setDraggedAsset(null);
       return;
     }
     
-    const overAsset = currentAssets[over.id as string];
+    const overAsset = assets.find(a => a.id === over.id);
     
     if (!overAsset) {
       console.warn('Over asset not found:', over.id);
@@ -192,11 +187,11 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
       return;
     }
     
-    console.log('Dropping asset:', activeAsset.name, 'onto:', overAsset.name);
+    console.log('Dropping asset:', activeAsset.content.title, 'onto:', overAsset.content.title);
     
     // Prevent dropping a parent onto its own child
     const isDescendant = (parentId: string, childId: string): boolean => {
-      const parent = currentAssets[parentId];
+      const parent = assets[parentId];
       if (!parent) return false;
       
       if (parent.children.includes(childId)) return true;
@@ -223,8 +218,8 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
       // Always nest the dragged asset under the target asset
       // This works for both folders and empty assets
       if (activeAsset.parentId !== overAsset.id) {
-        console.log('Reparenting:', activeAsset.name, 'to parent:', overAsset.name);
-        reparentAsset(activeAsset.id, overAsset.id);
+        console.log('Reparenting:', activeAsset.content.title, 'to parent:', overAsset.content.title);
+        updateAsset(activeAsset.id, { parentId: overAsset.id });
       } else {
         console.log('Asset already has this parent - no action');
       }
@@ -306,14 +301,14 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     console.log('Creating child asset for parent:', parentId);
     
     // Calculate position for child asset (offset from parent)
-    const currentAssets = getCurrentBookAssets();
-    const parentAsset = currentAssets[parentId];
+    // assets already available from kanvasStore
+    const parentAsset = assets[parentId];
     let position;
     if (parentAsset) {
       // Position child near parent
       position = {
-        x: parentAsset.x + 50,
-        y: parentAsset.y + 50
+        x: parentAsset.layout.x + 50,
+        y: parentAsset.layout.y + 50
       };
     } else {
       // Fallback to center position
@@ -338,12 +333,11 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
       // This will be used by the modal
       (window as any).pendingParentId = parentId;
     }, 0);
-  }, [getCurrentBookAssets]);
+  }, [assets]);
 
   const handleSelectAndFocus = (asset: Asset) => {
     // Set the asset as active
-    const { setActiveAsset } = useAssetStore.getState();
-    setActiveAsset(asset.id);
+    setCurrentActiveId(asset.id);
     
     // Dispatch event to trigger viewport navigation
     window.dispatchEvent(new CustomEvent('navigateToAsset', {
@@ -352,14 +346,14 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   };
   
   // Get breadcrumb path to active asset
-  const activeAsset = currentActiveId ? assets[currentActiveId] : null;
+  const activeAsset = currentActiveId ? assets.find(a => a.id === currentActiveId) : null;
   const breadcrumbs: string[] = [];
   if (activeAsset) {
     let current = activeAsset;
     while (current) {
-      breadcrumbs.unshift(current.name);
+      breadcrumbs.unshift(current.content.title || 'Untitled');
       if (current.parentId) {
-        current = assets[current.parentId];
+        current = assets.find(a => a.id === current.parentId);
       } else {
         break;
       }
@@ -538,7 +532,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
           {draggedAsset && (
             <div className="flex items-center gap-2 py-2 px-3 bg-background/95 backdrop-blur-sm border border-border/80 rounded-lg shadow-xl opacity-95 transform scale-105">
               <GripVertical className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium text-foreground">{draggedAsset.name}</span>
+              <span className="text-sm font-medium text-foreground">{draggedAsset.content.title || 'Untitled'}</span>
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
             </div>
           )}

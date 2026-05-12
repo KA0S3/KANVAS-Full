@@ -1,258 +1,274 @@
-import { useState, useCallback } from 'react';
-import { useAssetStore } from '@/stores/assetStore';
-import { 
-  buildAssetTree, 
-  flattenTree, 
-  createAssetOperations,
-  type AssetNode,
-  type AssetTreeState,
-  type AssetOperations 
-} from '@/types/asset';
-import type { Asset } from '@/types/assetInterfaces';
+/**
+ * ASSET TREE HOOK - Canonical Architecture
+ * 
+ * Rewritten to use the new canonical asset architecture with
+ * proper zone separation and simplified state management.
+ * 
+ * 🔒 CRITICAL: Must maintain functionality while using new architecture
+ */
+
+import { useState, useCallback, useMemo } from 'react';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useUIStore } from '@/stores/uiStore';
+import type { Asset } from '@/types/Asset';
+
+// Simple tree node interface for the new architecture
+export interface AssetTreeNode {
+  id: string;
+  asset: Asset;
+  children: AssetTreeNode[];
+  level: number;
+  isExpanded: boolean;
+  hasChildren: boolean;
+}
+
+// Tree state interface
+export interface AssetTreeState {
+  nodes: Map<string, AssetTreeNode>;
+  rootNodes: string[];
+  expandedNodes: Set<string>;
+  selectedNodes: Set<string>;
+}
+
+// Tree operations interface
+export interface AssetTreeOperations {
+  toggleExpand: (assetId: string) => void;
+  selectAsset: (assetId: string) => void;
+  selectMultipleAssets: (assetIds: string[]) => void;
+  deselectAsset: (assetId: string) => void;
+  clearSelection: () => void;
+  expandAll: () => void;
+  collapseAll: () => void;
+}
 
 export const useAssetTree = () => {
   const {
-    getCurrentBookAssets,
-    currentActiveId,
-    createAsset,
-    reparentAsset,
-    deleteAsset,
-    updateAssetPosition,
-    updateAssetSize,
-    setActiveAsset,
-    getActiveAsset,
-    getRootAssets,
-    getAssetChildren,
-    getAssetTree,
-    bookAssets,
-  } = useAssetStore();
+    getAsset,
+    getProjectAssets,
+    currentProjectId,
+  } = useKanvasStore();
 
-  // Subscribe to bookAssets for reactivity - ensures re-render when assets load from storage
-  const assets = getCurrentBookAssets();
-  
-  // Debug logging to track asset loading
-  console.log('🎯 useAssetTree: Assets loaded from store', {
-    assetCount: Object.keys(assets).length,
-    assetIds: Object.keys(assets),
-    currentBookId: useAssetStore.getState().getCurrentBookId(),
-    assetsData: assets,
-    bookAssets: useAssetStore.getState().bookAssets
-  });
+  const {
+    selectedAssets,
+    selectAsset,
+    selectMultipleAssets,
+    clearSelection,
+    isSelected,
+  } = useUIStore();
 
-  // Tree state for UI (expansion, selection)
-  const [treeState, setTreeState] = useState<AssetTreeState>({
-    expandedNodes: {},
-    selectedNodes: new Set(),
-  });
+  // Local tree state for UI only
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
-  // Build tree structure from flat assets
-  const treeNodes = useCallback(() => {
-    return buildAssetTree(assets);
-  }, [assets]);
+  // Get all assets for current project
+  const projectAssets = useMemo(() => {
+    if (!currentProjectId) return [];
+    return getProjectAssets(currentProjectId);
+  }, [currentProjectId, getProjectAssets]);
 
-  // Get flattened tree for rendering
-  const flattenedTree = useCallback(() => {
-    const nodes = treeNodes();
-    console.log('flattenedTree called, expandedNodes:', treeState.expandedNodes);
+  // Build tree structure from flat asset list
+  const treeState = useMemo((): AssetTreeState => {
+    const nodes = new Map<string, AssetTreeNode>();
+    const rootNodes: string[] = [];
+    const assetMap = new Map(projectAssets.map(asset => [asset.id, asset]));
+
+    // Create nodes for all assets
+    for (const asset of projectAssets) {
+      const children = projectAssets.filter(a => a.parentId === asset.id);
+      
+      nodes.set(asset.id, {
+        id: asset.id,
+        asset,
+        children: [], // Will be filled below with AssetTreeNode objects
+        level: 0, // Will be calculated below
+        isExpanded: expandedNodes.has(asset.id),
+        hasChildren: children.length > 0,
+      });
+    }
+
+    // Build hierarchy and calculate levels
+    const processed = new Set<string>();
     
-    // Recursive function to apply expansion state to all nodes
-    const applyExpansionState = (nodes: AssetNode[]): AssetNode[] => {
-      return nodes.map(node => ({
-        ...node,
-        isExpanded: treeState.expandedNodes[node.id] || false,
-        children: applyExpansionState(node.children),
-      }));
+    const processNode = (assetId: string, level: number = 0): AssetTreeNode | undefined => {
+      if (processed.has(assetId)) return;
+      processed.add(assetId);
+
+      const node = nodes.get(assetId);
+      if (!node) return;
+
+      node.level = level;
+      
+      // Find and process children
+      const children = projectAssets.filter(a => a.parentId === assetId);
+      for (const child of children) {
+        const childNode = processNode(child.id, level + 1);
+        if (childNode) {
+          node.children.push(childNode);
+        }
+      }
+
+      // If no parent, it's a root node
+      if (!assetId || !assetMap.get(assetId)?.parentId) {
+        rootNodes.push(assetId);
+      }
+
+      return node;
     };
-    
-    const nodesWithExpansion = applyExpansionState(nodes);
-    console.log('Nodes with expansion:', nodesWithExpansion.map(n => ({ id: n.id, isExpanded: n.isExpanded })));
-    return flattenTree(nodesWithExpansion);
-  }, [treeNodes, treeState.expandedNodes]);
+
+    // Process all assets
+    for (const asset of projectAssets) {
+      processNode(asset.id);
+    }
+
+    return {
+      nodes,
+      rootNodes,
+      expandedNodes,
+      selectedNodes: selectedAssets,
+    };
+  }, [projectAssets, expandedNodes, selectedAssets]);
 
   // Tree operations
-  const operations = useCallback(() => {
-    return createAssetOperations(assets);
-  }, [assets]);
-
-  // Toggle node expansion
-  const toggleExpansion = useCallback((nodeId: string) => {
-    console.log('toggleExpansion called for:', nodeId, 'current expanded state:', treeState.expandedNodes[nodeId]);
-    setTreeState(prev => {
-      const newExpanded = {
-        ...prev.expandedNodes,
-        [nodeId]: !prev.expandedNodes[nodeId],
-      };
-      console.log('New expanded state:', newExpanded);
-      return {
-        ...prev,
-        expandedNodes: newExpanded,
-      };
-    });
-  }, [treeState]);
-
-  // Toggle node selection
-  const toggleSelection = useCallback((nodeId: string, multiSelect = false) => {
-    setTreeState(prev => {
-      const newSelected = new Set(prev.selectedNodes);
-      
-      if (multiSelect) {
-        if (newSelected.has(nodeId)) {
-          newSelected.delete(nodeId);
+  const operations: AssetTreeOperations = {
+    toggleExpand: useCallback((assetId: string) => {
+      setExpandedNodes(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(assetId)) {
+          newSet.delete(assetId);
         } else {
-          newSelected.add(nodeId);
+          newSet.add(assetId);
         }
-      } else {
-        newSelected.clear();
-        newSelected.add(nodeId);
+        return newSet;
+      });
+    }, []),
+
+    selectAsset: useCallback((assetId: string) => {
+      selectAsset(assetId);
+    }, [selectAsset]),
+
+    selectMultipleAssets: useCallback((assetIds: string[]) => {
+      selectMultipleAssets(assetIds);
+    }, [selectMultipleAssets]),
+
+    deselectAsset: useCallback((assetId: string) => {
+      // This would need to be implemented in UIStore
+      // For now, just clear and reselect
+      clearSelection();
+    }, [clearSelection]),
+
+    clearSelection: useCallback(() => {
+      clearSelection();
+    }, [clearSelection]),
+
+    expandAll: useCallback(() => {
+      const allNodeIds = Array.from(treeState.nodes.keys());
+      setExpandedNodes(new Set(allNodeIds));
+    }, [treeState.nodes]),
+
+    collapseAll: useCallback(() => {
+      setExpandedNodes(new Set());
+    }, []),
+  };
+
+  // Utility functions
+  const getNodeById = useCallback((assetId: string): AssetTreeNode | undefined => {
+    return treeState.nodes.get(assetId);
+  }, [treeState.nodes]);
+
+  const getChildren = useCallback((assetId: string): AssetTreeNode[] => {
+    const node = treeState.nodes.get(assetId);
+    if (!node) return [];
+    
+    return node.children;
+  }, [treeState.nodes]);
+
+  const getParent = useCallback((assetId: string): AssetTreeNode | undefined => {
+    const asset = getAsset(assetId);
+    if (!asset?.parentId) return undefined;
+    
+    return treeState.nodes.get(asset.parentId);
+  }, [getAsset, treeState.nodes]);
+
+  const getRootNodes = useCallback((): AssetTreeNode[] => {
+    return treeState.rootNodes
+      .map(rootId => treeState.nodes.get(rootId))
+      .filter((node): node is AssetTreeNode => node !== undefined);
+  }, [treeState.rootNodes, treeState.nodes]);
+
+  const isExpanded = useCallback((assetId: string): boolean => {
+    return expandedNodes.has(assetId);
+  }, [expandedNodes]);
+
+  const isVisible = useCallback((assetId: string): boolean => {
+    // Check if node should be visible based on parent expansion
+    const asset = getAsset(assetId);
+    if (!asset) return false;
+
+    // Root nodes are always visible
+    if (!asset.parentId) return true;
+
+    // Check if all parents are expanded
+    let currentParentId = asset.parentId;
+    while (currentParentId) {
+      if (!expandedNodes.has(currentParentId)) {
+        return false;
       }
-      
-      return {
-        ...prev,
-        selectedNodes: newSelected,
-      };
-    });
-  }, []);
-
-  // Enhanced create asset with parent validation
-  const createAssetWithValidation = useCallback((
-    assetData: Parameters<typeof createAsset>[0], 
-    parentId?: string
-  ) => {
-    const ops = operations();
-    
-    // Validate parent exists
-    if (parentId && !assets[parentId]) {
-      throw new Error(`Parent asset with ID ${parentId} does not exist`);
-    }
-    
-    return createAsset(assetData, parentId);
-  }, [createAsset, assets, operations]);
-
-  // Enhanced reparent with validation
-  const reparentAssetWithValidation = useCallback((
-    assetId: string, 
-    newParentId?: string
-  ) => {
-    const ops = operations();
-    
-    // Validate asset exists
-    if (!assets[assetId]) {
-      throw new Error(`Asset with ID ${assetId} does not exist`);
-    }
-    
-    // Validate move is allowed
-    if (!ops.canMove(assetId, newParentId)) {
-      throw new Error(`Cannot move asset ${assetId} to ${newParentId || 'root'} - would create circular reference`);
-    }
-    
-    // Validate new parent exists
-    if (newParentId && !assets[newParentId]) {
-      throw new Error(`Target parent with ID ${newParentId} does not exist`);
-    }
-    
-    reparentAsset(assetId, newParentId);
-  }, [reparentAsset, assets, operations]);
-
-  // Enhanced delete with confirmation callback
-  const deleteAssetWithConfirmation = useCallback((
-    assetId: string,
-    onConfirm?: (assetIds: string[]) => void
-  ) => {
-    const asset = assets[assetId];
-    if (!asset) {
-      throw new Error(`Asset with ID ${assetId} does not exist`);
+      const parentAsset = getAsset(currentParentId);
+      if (!parentAsset) break;
+      currentParentId = parentAsset.parentId;
     }
 
-    // Collect all assets that will be deleted
-    const collectDescendants = (id: string): string[] => {
-      const currentAsset = assets[id];
-      if (!currentAsset || currentAsset.children.length === 0) return [];
-      
-      let descendants: string[] = [];
-      for (const childId of currentAsset.children) {
-        descendants.push(childId);
-        descendants = descendants.concat(collectDescendants(childId));
+    return true;
+  }, [getAsset, expandedNodes]);
+
+  // Flatten tree for rendering
+  const flattenedTree = useMemo((): AssetTreeNode[] => {
+    const result: AssetTreeNode[] = [];
+    const visited = new Set<string>();
+
+    const traverse = (nodeId: string) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+
+      const node = treeState.nodes.get(nodeId);
+      if (!node) return;
+
+      if (isVisible(nodeId)) {
+        result.push(node);
       }
-      return descendants;
+
+      // Traverse children if expanded
+      if (expandedNodes.has(nodeId)) {
+        for (const childNode of node.children) {
+          traverse(childNode.id);
+        }
+      }
     };
 
-    const idsToDelete = [assetId, ...collectDescendants(assetId)];
-    
-    // Call confirmation callback if provided
-    if (onConfirm) {
-      onConfirm(idsToDelete);
-    } else {
-      // Delete immediately if no confirmation needed
-      deleteAsset(assetId);
+    // Start from root nodes
+    for (const rootId of treeState.rootNodes) {
+      traverse(rootId);
     }
-  }, [deleteAsset, assets]);
 
-  // Get asset with its full path
-  const getAssetPath = useCallback((assetId: string): Asset[] => {
-    const path: Asset[] = [];
-    let currentId: string | undefined = assetId;
-    
-    while (currentId && assets[currentId]) {
-      path.unshift(assets[currentId]);
-      currentId = assets[currentId].parentId;
-    }
-    
-    return path;
-  }, [assets]);
-
-  // Search assets recursively
-  const searchAssets = useCallback((query: string): Asset[] => {
-    const searchTerm = query.toLowerCase();
-    const results: Asset[] = [];
-    
-    const searchRecursive = (assetId: string) => {
-      const asset = assets[assetId];
-      if (!asset) return;
-      
-      if (asset.name.toLowerCase().includes(searchTerm)) {
-        results.push(asset);
-      }
-      
-      asset.children.forEach(searchRecursive);
-    };
-    
-    // Start search from root assets
-    getRootAssets().forEach(asset => searchRecursive(asset.id));
-    
-    return results;
-  }, [assets, getRootAssets]);
+    return result;
+  }, [treeState.nodes, treeState.rootNodes, expandedNodes, isVisible]);
 
   return {
-    // Store data
-    assets,
-    currentActiveId,
-    activeAsset: getActiveAsset(),
-    
-    // Tree data
-    treeNodes,
-    flattenedTree,
+    // State
     treeState,
-    
+    flattenedTree,
+    projectAssets,
+    currentProjectId,
+
     // Operations
-    operations,
-    
-    // Store actions
-    createAsset: createAssetWithValidation,
-    reparentAsset: reparentAssetWithValidation,
-    deleteAsset: deleteAssetWithConfirmation,
-    updateAssetPosition,
-    updateAssetSize,
-    setActiveAsset,
-    
-    // Tree actions
-    toggleExpansion,
-    toggleSelection,
-    
+    ...operations,
+
     // Utilities
-    getAssetPath,
-    searchAssets,
-    getRootAssets,
-    getAssetChildren,
-    getAssetTree,
+    getNodeById,
+    getChildren,
+    getParent,
+    getRootNodes,
+    isExpanded,
+    isVisible,
+    isSelected,
   };
 };

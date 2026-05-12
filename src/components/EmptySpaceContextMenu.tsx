@@ -6,10 +6,8 @@ import {
   Image as ImageIcon,
   Minus
 } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
-import { useBackgroundStore } from '@/stores/backgroundStore';
-import { useBookStore } from '@/stores/bookStoreSimple';
-import { getAssetKeyWithBook } from '@/stores/backgroundStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useSyncStore } from '@/stores/syncStore';
 import { calculateViewportCenterPosition } from '@/utils/coordinateUtils';
 import type { BackgroundConfig } from '@/types/background';
 
@@ -33,8 +31,8 @@ export const EmptySpaceContextMenu: React.FC<EmptySpaceContextMenuProps> = ({
   viewportSize,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
-  const { setIsEditingBackground } = useAssetStore();
-  const { getCurrentBook } = useBookStore();
+  const { createAsset } = useKanvasStore();
+  const { currentProjectId } = useKanvasStore();
 
   // Calculate adjusted position to keep menu on screen
   const getAdjustedPosition = () => {
@@ -139,7 +137,8 @@ export const EmptySpaceContextMenu: React.FC<EmptySpaceContextMenuProps> = ({
   };
 
   const handleStartBackgroundEdit = () => {
-    setIsEditingBackground(true);
+    // Background editing is now handled differently in V2 architecture
+    onOpenBackgroundSettings();
     onClose();
   };
 

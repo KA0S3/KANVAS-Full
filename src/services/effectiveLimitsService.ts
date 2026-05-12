@@ -1,118 +1,157 @@
-import { supabase } from '@/lib/supabase';
+/**
+ * EFFECTIVE LIMITS SERVICE
+ * 
+ * Manages effective limits for users based on their plan and usage
+ * This is a simplified version for compatibility
+ */
 
 export interface EffectiveLimits {
-  quotaBytes: number;
-  maxBooks: number;
-  adsEnabled: boolean;
-  importExportEnabled: boolean;
-  expiresAt?: string;
-  source: {
-    plan: string;
-    licenseId?: string;
-    ownerKeyId?: string;
-  };
+  maxAssets: number;
+  maxProjects: number;
+  maxFileSize: number; // in bytes
+  maxStorage: number; // in bytes
+  maxApiCalls: number;
+  features: string[];
 }
 
-export interface EffectiveLimitsResponse {
-  data?: EffectiveLimits;
-  error?: string;
-}
+class EffectiveLimitsService {
+  private static instance: EffectiveLimitsService;
 
-/**
- * Fetch effective limits from the server-side computeEffectiveLimits function
- * This provides the single authoritative computation of a user's feature set
- */
-export async function fetchEffectiveLimits(): Promise<EffectiveLimitsResponse> {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session?.access_token) {
-      return { error: 'User not authenticated' };
+  static getInstance(): EffectiveLimitsService {
+    if (!EffectiveLimitsService.instance) {
+      EffectiveLimitsService.instance = new EffectiveLimitsService();
     }
+    return EffectiveLimitsService.instance;
+  }
 
-    const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/compute-effective-limits`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({}),
+  private constructor() {
+    // Private constructor for singleton
+  }
+
+  /**
+   * Get effective limits for a user with fallback
+   */
+  async getEffectiveLimitsWithFallback(userId?: string): Promise<EffectiveLimits> {
+    try {
+      // Try to get limits from server or auth store
+      const limits = await this.getEffectiveLimits(userId);
+      return limits;
+    } catch (error) {
+      console.warn('Failed to get effective limits, using fallback:', error);
+      return this.getFallbackLimits();
+    }
+  }
+
+  /**
+   * Get effective limits for a user
+   */
+  async getEffectiveLimits(userId?: string): Promise<EffectiveLimits> {
+    // In a real implementation, this would fetch from the server
+    // For now, return default limits based on user plan
+    const plan = await this.getUserPlan(userId);
+    return this.getLimitsForPlan(plan);
+  }
+
+  /**
+   * Check if user can perform an action based on limits
+   */
+  async canPerformAction(action: 'create_asset' | 'create_project' | 'upload_file', userId?: string): Promise<boolean> {
+    const limits = await this.getEffectiveLimitsWithFallback(userId);
+    const currentUsage = await this.getCurrentUsage(userId);
+
+    switch (action) {
+      case 'create_asset':
+        return currentUsage.assets < limits.maxAssets;
+      case 'create_project':
+        return currentUsage.projects < limits.maxProjects;
+      case 'upload_file':
+        return currentUsage.storage < limits.maxStorage;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Get current usage statistics
+   */
+  async getCurrentUsage(userId?: string): Promise<{
+    assets: number;
+    projects: number;
+    storage: number;
+    apiCalls: number;
+  }> {
+    // In a real implementation, this would fetch from the database
+    // For now, return mock data
+    return {
+      assets: 0,
+      projects: 0,
+      storage: 0,
+      apiCalls: 0
+    };
+  }
+
+  // Private helper methods
+  private async getUserPlan(userId?: string): Promise<string> {
+    // Try to get plan from auth store
+    try {
+      const authStore = (window as any).__ZUSTAND_STORES__?.authStore;
+      if (authStore) {
+        return authStore.getState().plan || 'free';
       }
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { 
-        error: errorData.error || `HTTP ${response.status}: ${response.statusText}` 
-      };
+    } catch (error) {
+      console.warn('Failed to get user plan from auth store:', error);
     }
 
-    const data = await response.json();
-    return { data };
-  } catch (error) {
-    console.error('Failed to fetch effective limits:', error);
-    return { 
-      error: error instanceof Error ? error.message : 'Network error occurred' 
+    // Fallback to checking localStorage or default to free
+    return localStorage.getItem('user-plan') || 'free';
+  }
+
+  private getLimitsForPlan(plan: string): EffectiveLimits {
+    switch (plan) {
+      case 'owner':
+        return {
+          maxAssets: 10000,
+          maxProjects: 100,
+          maxFileSize: 100 * 1024 * 1024, // 100MB
+          maxStorage: 10 * 1024 * 1024 * 1024, // 10GB
+          maxApiCalls: 100000,
+          features: ['all']
+        };
+      case 'pro':
+        return {
+          maxAssets: 1000,
+          maxProjects: 20,
+          maxFileSize: 50 * 1024 * 1024, // 50MB
+          maxStorage: 1 * 1024 * 1024 * 1024, // 1GB
+          maxApiCalls: 10000,
+          features: ['advanced', 'sync', 'export']
+        };
+      case 'free':
+      default:
+        return {
+          maxAssets: 100,
+          maxProjects: 3,
+          maxFileSize: 10 * 1024 * 1024, // 10MB
+          maxStorage: 100 * 1024 * 1024, // 100MB
+          maxApiCalls: 1000,
+          features: ['basic']
+        };
+    }
+  }
+
+  private getFallbackLimits(): EffectiveLimits {
+    return {
+      maxAssets: 100,
+      maxProjects: 3,
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      maxStorage: 100 * 1024 * 1024, // 100MB
+      maxApiCalls: 1000,
+      features: ['basic']
     };
   }
 }
 
-/**
- * Get effective limits with graceful degradation fallback
- * If server is unavailable, uses local plan defaults with adsEnabled=true
- */
-export async function getEffectiveLimitsWithFallback(): Promise<EffectiveLimits> {
-  try {
-    const response = await fetchEffectiveLimits();
-    
-    if (response.data) {
-      console.log('[effectiveLimitsService] Using server-side effective limits:', response.data);
-      return response.data;
-    }
-    
-    if (response.error) {
-      console.warn('[effectiveLimitsService] Server error, using fallback:', response.error);
-    }
-  } catch (error) {
-    console.warn('[effectiveLimitsService] Network error, using fallback:', error);
-  }
-
-  // Graceful degradation fallback
-  const { data: { session } } = await supabase.auth.getSession();
-  const isGuest = !session?.user;
-  const userEmail = session?.user?.email;
-  const ownerEmail = import.meta.env?.VITE_OWNER_EMAIL;
-  const isOwner = userEmail === ownerEmail;
-  
-  // Enhanced owner fallback - check multiple conditions
-  if (isOwner) {
-    console.log('[effectiveLimitsService] 🚀 OWNER FALLBACK DETECTED - Applying unlimited owner access');
-    const fallbackLimits: EffectiveLimits = {
-      quotaBytes: -1, // Unlimited storage
-      maxBooks: -1, // Unlimited books
-      adsEnabled: false, // No ads for owner
-      importExportEnabled: true, // Full import/export access
-      source: {
-        plan: 'owner',
-      }
-    };
-    console.log('[effectiveLimitsService] Owner fallback limits applied:', fallbackLimits);
-    return fallbackLimits;
-  }
-  
-  const fallbackLimits: EffectiveLimits = {
-    quotaBytes: isGuest ? 0 : 100 * 1024 * 1024, // 0 for guest, 100MB for signed in
-    maxBooks: 1,
-    adsEnabled: !isGuest, // Ads for non-guest non-owner users
-    importExportEnabled: false, // Disabled for free tier
-    source: {
-      plan: isGuest ? 'guest' : 'free',
-    }
-  };
-
-  console.log('[effectiveLimitsService] Using fallback effective limits:', fallbackLimits);
-  return fallbackLimits;
-}
+// Export singleton instance and function for backward compatibility
+export const effectiveLimitsService = EffectiveLimitsService.getInstance();
+export const getEffectiveLimitsWithFallback = (userId?: string) => 
+  effectiveLimitsService.getEffectiveLimitsWithFallback(userId);

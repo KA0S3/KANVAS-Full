@@ -89,8 +89,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const { videosEnabled, setVideosEnabled, audioEnabled, setAudioEnabled, videoSoundsEnabled, setVideoSoundsEnabled, audioVolume, setAudioVolume } = useMediaStore();
   
   // Get current book's assets and global custom fields
-  const assets = assetStore.getCurrentBookAssets();
-  const globalCustomFields = assetStore.getCurrentBookGlobalCustomFields();
+  const assets = assetStore.getAllAssets();
+  const globalCustomFields: any[] = []; // TODO: Implement global custom fields when needed
   
   // Get book-specific viewport settings
   const currentBook = getCurrentBook();
@@ -166,7 +166,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       const bookStore = useBookStore.getState();
       
       // Clear current book's data
-      assetStore.clearWorldData();
+      assetStore.clearAssets();
       tagStore.clearWorldData();
       
       // Clear all books

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { X, Calendar, Tag, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Book } from '@/types/book';
@@ -18,13 +18,15 @@ interface BookCoverProps {
   size?: 'small' | 'medium' | 'large';
   showBack?: boolean;
   className?: string;
+  onDoubleClick?: (e: React.MouseEvent) => void;
 }
 
 const BookCover: React.FC<BookCoverProps> = ({ 
   book, 
   size = 'medium', 
   showBack = false,
-  className = ''
+  className = '',
+  onDoubleClick
 }) => {
   // Add null check for book prop
   if (!book) {
@@ -41,10 +43,37 @@ const BookCover: React.FC<BookCoverProps> = ({
     const [isHovered, setIsHovered] = useState(false);
     const [isFlipped, setIsFlipped] = useState(false);
     const [showStats, setShowStats] = useState(false);
+    const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const handleBookClick = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setIsFlipped(!isFlipped);
+      // Clear any existing timeout
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+
+      // Set a timeout to handle single click after a delay
+      clickTimeoutRef.current = setTimeout(() => {
+        setIsFlipped(!isFlipped);
+        clickTimeoutRef.current = null;
+      }, 250);
+    };
+
+    const handleBookDoubleClick = (e: React.MouseEvent) => {
+      console.log('[BookCover] Double-click detected for book:', book.title);
+      // Clear the single click timeout
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+
+      // Call the parent's double-click handler if provided
+      if (onDoubleClick) {
+        console.log('[BookCover] Calling onDoubleClick handler');
+        onDoubleClick(e);
+      } else {
+        console.log('[BookCover] No onDoubleClick handler provided');
+      }
     };
     
     const sizeClasses = {
@@ -373,6 +402,7 @@ const BookCover: React.FC<BookCoverProps> = ({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={handleBookClick}
+        onDoubleClick={handleBookDoubleClick}
       >
         {/* Front Content */}
         <div className={`absolute inset-0 transition-opacity duration-300 ${isFlipped ? 'opacity-0' : 'opacity-100'}`}>

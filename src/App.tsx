@@ -7,8 +7,8 @@ import { ConflictResolutionProvider } from "@/components/ConflictResolutionProvi
 import { RateLimitWarning } from "@/components/ui/rate-limit-warning";
 import { useEffect, useState } from "react";
 import { emergencySaveService } from "@/services/emergencySaveService";
-import { connectivityService } from "@/services/connectivityService";
-import { documentMutationService } from "@/services/DocumentMutationService";
+import { useSyncStore } from "@/stores/syncStore";
+import { syncProcessor } from "@/sync/processor";
 import { useUndoKeyboard } from "@/hooks/useUndoKeyboard";
 import { useAuthStore } from "@/stores/authStore";
 import { ProjectCacheLoadingIndicator } from "@/components/ProjectCacheLoadingIndicator";
@@ -30,22 +30,29 @@ const App = () => {
   // Get auth state for rate limiting
   const { user } = useAuthStore();
   
+  // Get sync store for new architecture
+  const { setSyncStatus } = useSyncStore();
+  
   // Initialize services on app mount
   useEffect(() => {
     emergencySaveService.initialize();
     // NOTE: connectivityService heartbeat NOT started to prevent idle DB requests
     // It will be started on-demand when user interacts with the app
 
-    // Phase 3: Setup auth listener for token refresh and sign-out handling
-    documentMutationService.setupAuthListener();
+    // Initialize sync processor (replaces documentMutationService.setupAuthListener)
+    syncProcessor.start();
 
-    // Phase 3: Setup browser close warning for unsaved changes
-    documentMutationService.setupBeforeUnloadHandler();
+    // Setup browser close warning for unsaved changes using sync processor
+    const beforeUnloadHandler = () => {
+      syncProcessor.forceProcess();
+    };
+    window.addEventListener('beforeunload', beforeUnloadHandler);
 
     return () => {
       // connectivityService.stopHeartbeat(); // Not started, no need to stop
       // Cleanup browser close warning on unmount
-      documentMutationService.removeBeforeUnloadHandler();
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+      syncProcessor.stop();
     };
   }, []);
 
@@ -61,7 +68,7 @@ const App = () => {
         </div>
         {/* Rate limit warning component - only show when user is authenticated */}
         {user && <RateLimitWarning userId={user.id} />}
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth/confirm" element={<AuthConfirm />} />

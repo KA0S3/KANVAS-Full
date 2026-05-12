@@ -8,7 +8,7 @@ interface BookEntryAnimationProps {
 
 const BookEntryAnimation = ({ onEntryComplete }: BookEntryAnimationProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { enterBookView, videosEnabled, videoSoundsEnabled } = useMediaStore();
+  const { enterBookView, videosEnabled, videoSoundsEnabled, audioVolume } = useMediaStore();
   const [clickCount, setClickCount] = useState(0);
 
   useEffect(() => {

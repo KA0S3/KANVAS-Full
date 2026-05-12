@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen, GripVertical } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
-import { useTagStore } from '@/stores/tagStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useUIStore } from '@/stores/uiStore';
 import { AssetContextMenu } from '@/components/AssetContextMenu';
-import type { Asset } from '@/components/AssetItem';
+import type { Asset } from '@/types/Asset';
 import { cn } from '@/lib/utils';
 import {
   useSortable,
@@ -20,38 +20,68 @@ interface AssetTreeNodeProps {
   onSelectAndFocus?: (asset: Asset) => void;
   onCreateChildAsset?: (parentId: string) => void;
   isDragActive?: boolean;
+  // V2 additions
+  allAssets: Asset[];
+  expandedNodes: Set<string>;
+  onToggleExpand?: (assetId: string) => void;
 }
 
-export function AssetTreeNode({ asset, depth, searchQuery = '', level = 0, onEdit, onSelectAndFocus, onCreateChildAsset, isDragActive = false }: AssetTreeNodeProps) {
-  const { getCurrentBookAssets, setActiveAsset, currentActiveId, toggleAssetExpansion } = useAssetStore();
-  const { getAssetTags } = useTagStore();
+export function AssetTreeNode({ 
+  asset, 
+  depth, 
+  searchQuery = '', 
+  level = 0, 
+  onEdit, 
+  onSelectAndFocus, 
+  onCreateChildAsset, 
+  isDragActive = false,
+  allAssets,
+  expandedNodes,
+  onToggleExpand
+}: AssetTreeNodeProps) {
+  const { selectedAssets } = useUIStore();
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
     x: number;
     y: number;
   }>({ visible: false, x: 0, y: 0 });
   
-  const assets = getCurrentBookAssets();
-  const hasChildren = asset.children && asset.children.length > 0;
-  const childAssets = asset.children?.map(childId => assets[childId]).filter(Boolean) || [];
-  const isExpanded = asset.isExpanded || false;
+  // Use canonical asset structure
+  const hasChildren = allAssets.some(a => a.parentId === asset.id);
+  const childAssets = allAssets.filter(a => a.parentId === asset.id);
+  const isExpanded = expandedNodes.has(asset.id);
+  const title = asset.content.title || 'Untitled';
+  const isSelected = selectedAssets.has(asset.id);
   
-  // DnD sortable hook
+  // Handle expansion toggle
+  const handleToggleExpand = () => {
+    onToggleExpand?.(asset.id);
+  };
+
+  // Handle selection
+  const handleSelect = () => {
+    onSelectAndFocus?.(asset);
+  };
+
+  // DnD hooks
   const {
     attributes,
     listeners,
-    setNodeRef,
+    setNodeRef: setSortableRef,
     transform,
     transition,
     isDragging,
-    over,
   } = useSortable({ id: asset.id });
   
-  // DnD droppable hook for containers
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: asset.id,
-    // Allow dropping on all assets, not just folders
   });
+  
+  // Combine refs
+  const combinedRefs = (node: HTMLElement | null) => {
+    setSortableRef(node);
+    setDroppableRef(node);
+  };
   
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -59,31 +89,13 @@ export function AssetTreeNode({ asset, depth, searchQuery = '', level = 0, onEdi
     opacity: isDragging ? 0.5 : 1,
   };
   
-  const isActive = currentActiveId === asset.id;
   const isDropTarget = isOver && !isDragging;
-  
-  // Combine refs for drag and drop
-  const combinedRefs = (node: HTMLElement | null) => {
-    setNodeRef(node);
-    setDroppableRef(node);
-  };
-  
-  // Get tags for this asset with their colors
-  const assetTags = getAssetTags(asset.id);
   
   // Filter children based on search query
   const filteredChildren = childAssets.filter(child => 
-    child.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    child.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    child.content.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    child.content.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const handleToggleExpand = () => {
-    toggleAssetExpansion(asset.id);
-  };
-
-  const handleSelect = () => {
-    setActiveAsset(asset.id);
-  };
 
   const handleDoubleClick = () => {
     if (onSelectAndFocus) {
@@ -126,18 +138,13 @@ export function AssetTreeNode({ asset, depth, searchQuery = '', level = 0, onEdi
         style={{
           ...style,
           paddingLeft: `${Math.min(depth * 16 + 8, 48)}px`,
-          ...(isActive && {
-            marginLeft: '2px',
-            transform: `translateX(2px) ${style.transform || ''}`
-          })
         }}
         className={cn(
           "flex items-center gap-1 py-2 px-2 rounded cursor-pointer hover:bg-accent/50 transition-all duration-300",
-          isActive && "border-l-2 border-cyan-400/60 bg-cyan-500/5 text-cyan-300 font-medium",
+          isSelected && "border-l-2 border-cyan-400/60 bg-cyan-500/5 text-cyan-300 font-medium",
           isDragActive && !isDragging && "opacity-50",
           isDragging && "opacity-30",
           isDropTarget && "bg-blue-500/20 border-2 border-blue-500/60 shadow-lg shadow-blue-500/20",
-          `pl-${Math.min(depth * 4 + 2, 12)}`
         )} 
         onClick={handleSelect}
         onDoubleClick={handleDoubleClick}
@@ -147,71 +154,91 @@ export function AssetTreeNode({ asset, depth, searchQuery = '', level = 0, onEdi
         <div
           {...attributes}
           {...listeners}
-          className="p-1 hover:bg-muted rounded transition-colors cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100 min-w-[24px] flex items-center justify-center"
-          title="Drag to reorder"
+          className="cursor-grab active:cursor-grabbing"
         >
-          <GripVertical className="w-4 h-4 text-muted-foreground" />
+          <GripVertical className="w-3 h-3 text-muted-foreground hover:text-foreground transition-colors" />
         </div>
-        
+
+        {/* Expand/Collapse Icon */}
         {hasChildren && (
           <button
             onClick={(e) => {
               e.stopPropagation();
               handleToggleExpand();
             }}
-            className="p-0.5 hover:bg-muted rounded transition-colors"
+            className="p-0.5 hover:bg-accent/30 rounded transition-colors"
           >
             {isExpanded ? (
-              <ChevronDown className="w-3 h-3" />
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
             ) : (
-              <ChevronRight className="w-3 h-3" />
+              <ChevronRight className="w-3 h-3 text-muted-foreground" />
             )}
           </button>
         )}
-        
-        {!hasChildren && <div className="w-4" />}
-        
-        <div className="flex items-center gap-2 flex-1 min-w-0">
+
+        {/* Asset Icon */}
+        <div className="flex-shrink-0">
           {getIcon()}
-          <span className="text-sm truncate">{asset.name}</span>
-          {isDropTarget && (
-            <span className="text-xs text-blue-500 font-medium animate-pulse">
-              {hasChildren ? "Drop to nest" : "Drop to make parent"}
-            </span>
+        </div>
+
+        {/* Asset Title */}
+        <span 
+          className={cn(
+            "flex-1 truncate text-sm",
+            isSelected && "font-medium text-cyan-300"
+          )}
+        >
+          {title}
+        </span>
+
+        {/* Asset Actions */}
+        <div className="flex items-center gap-1 opacity-0 hover:opacity-100 transition-opacity">
+          {onCreateChildAsset && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreateChildAsset(asset.id);
+              }}
+              className="p-0.5 hover:bg-accent/30 rounded transition-colors"
+              title="Create child asset"
+            >
+              <ChevronRight className="w-3 h-3 text-muted-foreground" />
+            </button>
+          )}
+          
+          {onEdit && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(asset);
+              }}
+              className="p-0.5 hover:bg-accent/30 rounded transition-colors"
+              title="Edit asset"
+            >
+              <svg className="w-3 h-3 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
           )}
         </div>
-        
-        {assetTags.length > 0 && (
-          <div className="flex gap-1">
-            {assetTags.slice(0, 3).map((tag) => (
-              <div
-                key={tag.id}
-                className="w-2 h-2 rounded-full border border-border/30"
-                style={{ backgroundColor: tag.color }}
-                title={tag.name}
-              />
-            ))}
-            {assetTags.length > 3 && (
-              <span className="text-xs text-muted-foreground">
-                +{assetTags.length - 3}
-              </span>
-            )}
-          </div>
-        )}
       </div>
-      
-      {hasChildren && isExpanded && filteredChildren.length > 0 && (
-        <div>
+
+      {/* Render Children */}
+      {hasChildren && isExpanded && (
+        <div className="ml-2">
           {filteredChildren.map((child) => (
             <AssetTreeNode
               key={child.id}
               asset={child}
               depth={depth + 1}
               searchQuery={searchQuery}
-              level={level + 1}
               onEdit={onEdit}
               onSelectAndFocus={onSelectAndFocus}
               onCreateChildAsset={onCreateChildAsset}
+              isDragActive={isDragActive}
+              allAssets={allAssets}
+              expandedNodes={expandedNodes}
+              onToggleExpand={onToggleExpand}
             />
           ))}
         </div>
@@ -221,11 +248,9 @@ export function AssetTreeNode({ asset, depth, searchQuery = '', level = 0, onEdi
       {contextMenu.visible && (
         <AssetContextMenu
           asset={asset}
-          position={{ x: contextMenu.x, y: contextMenu.y }}
+          x={contextMenu.x}
+          y={contextMenu.y}
           onClose={closeContextMenu}
-          onEdit={onEdit}
-          onSelectAndFocus={onSelectAndFocus}
-          onCreateChildAsset={onCreateChildAsset}
         />
       )}
     </div>

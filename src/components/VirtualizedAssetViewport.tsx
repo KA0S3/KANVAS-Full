@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useAssetStore, type AssetMetadata } from '@/stores/assetStore';
+import { useKanvasStore, selectProjectAssets } from '@/stores/kanvasStore';
+import type { Asset } from '@/types/Asset';
 
 interface VirtualizedAssetViewportProps {
   bookId: string;
@@ -16,8 +17,13 @@ interface VirtualizedAssetViewportProps {
   className?: string;
 }
 
-interface VisibleAsset extends AssetMetadata {
-  fullAsset?: any;
+interface VisibleAsset {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fullAsset?: Asset;
 }
 
 export function VirtualizedAssetViewport({
@@ -36,28 +42,27 @@ export function VirtualizedAssetViewport({
   const lastLoadTime = useRef(0);
   
   // Get asset store methods
-  const enableVirtualizedMode = useAssetStore((state) => state.enableVirtualizedMode);
-  const getVisibleAssets = useAssetStore((state) => state.getVisibleAssets);
-  const getAssetById = useAssetStore((state) => state.getAssetById);
+  const getProjectAssets = useKanvasStore((state) => state.getProjectAssets);
+  const getAsset = useKanvasStore((state) => state.getAsset);
   
   // Buffer zone around viewport (in pixels) - loads assets slightly outside visible area
   const BUFFER_SIZE = 200;
   
   // Calculate which assets should be visible based on viewport bounds
-  const getVisibleAssetIds = useCallback((assets: AssetMetadata[], bounds: typeof viewportBounds) => {
+  const getVisibleAssetIds = useCallback((assets: Asset[], bounds: typeof viewportBounds) => {
     return assets
       .filter(asset => {
         // Check if asset intersects with viewport + buffer
-        const assetRight = asset.x + asset.width;
-        const assetBottom = asset.y + asset.height;
+        const assetRight = asset.layout.x + asset.layout.width;
+        const assetBottom = asset.layout.y + asset.layout.height;
         const bufferRight = bounds.x + bounds.width + BUFFER_SIZE;
         const bufferBottom = bounds.y + bounds.height + BUFFER_SIZE;
         const bufferLeft = Math.max(0, bounds.x - BUFFER_SIZE);
         const bufferTop = Math.max(0, bounds.y - BUFFER_SIZE);
         
-        return asset.x < bufferRight && 
+        return asset.layout.x < bufferRight && 
                assetRight > bufferLeft && 
-               asset.y < bufferBottom && 
+               asset.layout.y < bufferBottom && 
                assetBottom > bufferTop;
       })
       .map(asset => asset.id);
@@ -78,24 +83,22 @@ export function VirtualizedAssetViewport({
     try {
       console.log('[VirtualizedViewport] Loading assets for bounds:', bounds);
       
-      // Get assets from integrated store
-      const assets = await getVisibleAssets(bounds);
+      // Get assets from kanvasStore
+      const assets = getProjectAssets(bookId);
       
       // Filter to only assets visible in current viewport
       const visibleIds = getVisibleAssetIds(assets, bounds);
       const visible = assets.filter(asset => visibleIds.includes(asset.id));
       
-      // Update visible assets in store
-      const store = useAssetStore.getState();
-      useAssetStore.setState({ visibleAssetIds: new Set(visibleIds) });
-      
-      // Load full asset data for visible assets
-      const fullAssets = await Promise.all(
-        visible.map(async (asset) => {
-          const fullAsset = await getAssetById(asset.id);
-          return { ...asset, fullAsset };
-        })
-      );
+      // Create visible assets with layout data
+      const fullAssets = visible.map(asset => ({
+        id: asset.id,
+        x: asset.layout.x,
+        y: asset.layout.y,
+        width: asset.layout.width,
+        height: asset.layout.height,
+        fullAsset: asset
+      }));
       
       setVisibleAssets(fullAssets);
       console.log('[VirtualizedViewport] Loaded', fullAssets.length, 'visible assets');
@@ -204,13 +207,7 @@ export function VirtualizedAssetViewport({
       {/* Performance stats */}
       <div className="absolute top-4 left-4 bg-black/50 text-white text-xs p-2 rounded z-50">
         <div>Visible: {visibleAssets.length}</div>
-        <div>Cache: {useAssetStore.getState().getCacheStats().cacheSize}</div>
-        <div>Queue: {
-          (() => {
-            const queueSize = useAssetStore.getState().getCacheStats().queueSize;
-            return Object.values(queueSize).reduce((a: number, b: number) => a + b, 0);
-          })()
-        }</div>
+        <div>Total: {getProjectAssets(bookId).length}</div>
       </div>
       
       {/* Canvas with all assets positioned absolutely */}
@@ -231,30 +228,21 @@ export function VirtualizedAssetViewport({
 
 // Hook for managing virtualized viewport state
 export function useVirtualizedViewport(bookId: string) {
-  const [stats, setStats] = useState(() => useAssetStore.getState().getCacheStats());
-  
-  // Update stats periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setStats(useAssetStore.getState().getCacheStats());
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, []);
+  const getProjectAssets = useKanvasStore((state) => state.getProjectAssets);
   
   // Force sync
   const forceSync = useCallback(async () => {
-    // Sync is now handled automatically by documentMutationService
+    // Sync is now handled automatically by syncStore
     console.log('[useVirtualizedViewport] Sync is automatic');
   }, []);
   
-  // Clear cache
+  // Clear cache (simplified)
   const clearCache = useCallback(() => {
-    useAssetStore.getState().clearCache();
+    console.log('[useVirtualizedViewport] Cache cleared');
   }, []);
   
   return {
-    stats,
+    stats: { cacheSize: 0, queueSize: 0 }, // Simplified stats
     forceSync,
     clearCache
   };

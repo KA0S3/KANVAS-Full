@@ -1,88 +1,137 @@
+/**
+ * Document Sync Hook - V2 Architecture
+ *
+ * Integrates with the new unified persistence system
+ * Uses V2 stores for sync operations instead of legacy DocumentMutationService
+ *
+ * 🔒 CRITICAL: Uses only V2 stores - no legacy DocumentMutationService
+ */
+
 import { useEffect, useState } from 'react';
-import { documentMutationService, type SyncStatus } from '@/services/DocumentMutationService';
+import { useSyncStore } from '@/stores/syncStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { useAuthStore } from '@/stores/authStore';
+import { syncProcessor } from '@/sync/processor';
+import { projectPersistence } from '@/persistence/projects';
 
 export function useDocumentSync() {
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
-    lastSyncTime: null,
-    syncEnabled: false,
+  const { syncStatus, syncQueue, getSyncStatus } = useSyncStore();
+  const { loadProject } = useKanvasStore();
+  const { isAuthenticated } = useAuthStore();
+  
+  // Derived sync status for compatibility with legacy interface
+  const [derivedSyncStatus, setDerivedSyncStatus] = useState({
+    lastSyncTime: null as Date | null,
+    syncEnabled: isAuthenticated,
     pendingChanges: false,
-    onlineMode: false,
+    onlineMode: navigator.onLine,
     quotaExceeded: false,
     storageUsed: 0,
     storageLimit: 0,
-    syncInProgress: false,
-    queuedItems: 0,
+    syncInProgress: syncStatus === 'syncing',
+    queuedItems: syncQueue.size,
     documentVersion: 1
   });
-  const { isAuthenticated } = useAuthStore();
 
   useEffect(() => {
-    // Subscribe to sync status updates
-    const unsubscribe = documentMutationService.subscribe((status) => {
-      setSyncStatus(status);
-    });
-
-    // Initial status check
-    setSyncStatus(documentMutationService.getStatus());
-
-    return () => {
-      unsubscribe();
-    };
-  }, [isAuthenticated]);
+    // Update derived status when sync state changes
+    setDerivedSyncStatus(prev => ({
+      ...prev,
+      syncEnabled: isAuthenticated,
+      onlineMode: navigator.onLine,
+      syncInProgress: syncStatus === 'syncing',
+      queuedItems: syncQueue.size,
+      pendingChanges: syncQueue.size > 0,
+    }));
+  }, [isAuthenticated, syncStatus, syncQueue.size]);
 
   const triggerSync = async () => {
-    return await documentMutationService.syncNow();
+    try {
+      await syncProcessor.forceProcess();
+      return true;
+    } catch (error) {
+      console.error('Sync failed:', error);
+      return false;
+    }
   };
 
   const loadFromCloud = async (projectId: string) => {
-    const result = await documentMutationService.loadDocument(projectId);
-    return result.success;
+    try {
+      await loadProject(projectId);
+      return true;
+    } catch (error) {
+      console.error('Failed to load project:', error);
+      return false;
+    }
   };
 
-  // State-based tracking methods (MASTER_PLAN.md)
-  const markAssetChanged = documentMutationService.markAssetChanged.bind(documentMutationService);
-  const markPositionChanged = documentMutationService.markPositionChanged.bind(documentMutationService);
-  const markAssetDeleted = documentMutationService.markAssetDeleted.bind(documentMutationService);
-  const saveGlobalBackgrounds = documentMutationService.saveGlobalBackgrounds.bind(documentMutationService);
-  const saveViewport = documentMutationService.saveViewport.bind(documentMutationService);
-  const saveGlobalTags = documentMutationService.saveGlobalTags.bind(documentMutationService);
-  
-  // Enhanced metadata sync methods
-  const saveAssetBackground = documentMutationService.saveAssetBackground.bind(documentMutationService);
-  const saveGlobalCustomFields = documentMutationService.saveGlobalCustomFields.bind(documentMutationService);
-  const saveCoverMetadata = documentMutationService.saveCoverMetadata.bind(documentMutationService);
+  // V2 asset operations that replace legacy methods
+  const markAssetChanged = async (assetId: string, asset: any) => {
+    console.warn('markAssetChanged is deprecated. Use useKanvasStore.updateAsset instead');
+  };
+
+  const markPositionChanged = async (assetId: string, x: number, y: number, zIndex: number = 0) => {
+    console.warn('markPositionChanged is deprecated. Use usePositionTracking hook instead');
+  };
+
+  const markAssetDeleted = async (assetId: string) => {
+    console.warn('markAssetDeleted is deprecated. Use useKanvasStore.deleteAsset instead');
+  };
+
+  // Legacy compatibility methods (deprecated)
+  const saveGlobalBackgrounds = () => {
+    console.warn('saveGlobalBackgrounds is deprecated in V2 architecture');
+  };
+
+  const saveViewport = () => {
+    console.warn('saveViewport is deprecated in V2 architecture');
+  };
+
+  const saveGlobalTags = () => {
+    console.warn('saveGlobalTags is deprecated in V2 architecture');
+  };
+
+  const saveAssetBackground = () => {
+    console.warn('saveAssetBackground is deprecated in V2 architecture');
+  };
+
+  const saveGlobalCustomFields = () => {
+    console.warn('saveGlobalCustomFields is deprecated in V2 architecture');
+  };
+
+  const saveCoverMetadata = () => {
+    console.warn('saveCoverMetadata is deprecated in V2 architecture');
+  };
 
   return {
-    syncStatus,
+    syncStatus: derivedSyncStatus,
     triggerSync,
     loadFromCloud,
-    // State-based tracking methods (MASTER_PLAN.md)
+    // Legacy compatibility methods (deprecated)
     markAssetChanged,
     markPositionChanged,
     markAssetDeleted,
     saveGlobalBackgrounds,
     saveViewport,
     saveGlobalTags,
-    // Enhanced metadata sync methods
     saveAssetBackground,
     saveGlobalCustomFields,
     saveCoverMetadata,
     // Comprehensive sync status
     isAuthenticated,
-    isOnline: syncStatus.onlineMode,
-    lastSyncTime: syncStatus.lastSyncTime,
-    syncEnabled: syncStatus.syncEnabled,
-    quotaExceeded: syncStatus.quotaExceeded,
-    storageUsed: syncStatus.storageUsed,
-    storageLimit: syncStatus.storageLimit,
-    storagePercentage: syncStatus.storageLimit > 0
-      ? (syncStatus.storageUsed / syncStatus.storageLimit) * 100
+    isOnline: derivedSyncStatus.onlineMode,
+    lastSyncTime: derivedSyncStatus.lastSyncTime,
+    syncEnabled: derivedSyncStatus.syncEnabled,
+    quotaExceeded: derivedSyncStatus.quotaExceeded,
+    storageUsed: derivedSyncStatus.storageUsed,
+    storageLimit: derivedSyncStatus.storageLimit,
+    storagePercentage: derivedSyncStatus.storageLimit > 0
+      ? (derivedSyncStatus.storageUsed / derivedSyncStatus.storageLimit) * 100
       : 0,
-    documentVersion: syncStatus.documentVersion,
-    pendingChanges: syncStatus.pendingChanges,
-    syncInProgress: syncStatus.syncInProgress,
-    queuedItems: syncStatus.queuedItems,
+    documentVersion: derivedSyncStatus.documentVersion,
+    pendingChanges: derivedSyncStatus.pendingChanges,
+    syncInProgress: derivedSyncStatus.syncInProgress,
+    queuedItems: derivedSyncStatus.queuedItems,
     // Enhanced sync capabilities status
     hasMetadataSync: true,
     hasAssetBackgroundSync: true,

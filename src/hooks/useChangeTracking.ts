@@ -1,41 +1,47 @@
 /**
- * Change Tracking Hook - Phase 3/4 Integration
+ * Change Tracking Hook - V2 Architecture
  *
- * Integrates DocumentMutationService with the asset store
- * Provides automatic change tracking for asset mutations
+ * Integrates with the new unified persistence system
+ * Provides automatic change tracking for asset mutations using V2 stores
  *
- * CRITICAL: Unified to use DocumentMutationService to avoid duplicate tracking systems
+ * 🔒 CRITICAL: Uses only V2 stores - no legacy DocumentMutationService
  */
 
 import { useEffect } from 'react';
-import { useAssetStore } from '@/stores/assetStore';
-import { documentMutationService } from '@/services/DocumentMutationService';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useSyncStore } from '@/stores/syncStore';
+import { syncProcessor } from '@/sync/processor';
 
 /**
- * Hook to integrate change tracking with asset store
+ * Hook to integrate change tracking with V2 asset store
  * Call this when loading a project to start tracking changes
  */
 export function useChangeTracking(projectId: string | null) {
-  const { bookAssets, currentActiveId } = useAssetStore();
+  const { currentProjectId } = useKanvasStore();
+  const { syncQueue, syncStatus } = useSyncStore();
 
   useEffect(() => {
     if (!projectId) {
-      // Project unloaded - DocumentMutationService handles cleanup
+      // Project unloaded - sync processor handles cleanup
       return;
     }
 
-    // Start auto-save when project is loaded
-    documentMutationService.startAutoSave(projectId);
+    // Load sync queue for this project
+    useSyncStore.getState().loadSyncQueue(projectId);
 
     return () => {
-      // DocumentMutationService handles cleanup automatically
+      // Cleanup handled automatically by stores
     };
   }, [projectId]);
 
   return {
-    hasUnsavedChanges: () => documentMutationService.hasUnsavedChanges(),
-    manualSave: () => documentMutationService.manualSave(),
-    setCurrentProjectVersion: (version: number) => documentMutationService.setCurrentProjectVersion(version)
+    hasUnsavedChanges: () => syncQueue.size > 0,
+    manualSave: async () => {
+      await syncProcessor.forceProcess();
+    },
+    setCurrentProjectVersion: (version: number) => {
+      console.warn('Version tracking is now per-asset in metadata');
+    }
   };
 }
 
@@ -44,14 +50,24 @@ export function useChangeTracking(projectId: string | null) {
  * Use this in drag handlers
  */
 export function usePositionTracking() {
-  const { bookAssets } = useAssetStore();
+  const { getAsset, updateAsset } = useKanvasStore();
 
-  const trackPositionChange = (assetId: string, x: number, y: number, zIndex: number = 0) => {
-    documentMutationService.markPositionChanged(assetId, x, y, zIndex);
+  const trackPositionChange = async (assetId: string, x: number, y: number, zIndex: number = 0) => {
+    const asset = getAsset(assetId);
+    if (!asset) return;
+
+    await updateAsset(assetId, {
+      layout: {
+        ...asset.layout,
+        x,
+        y,
+        zIndex,
+      }
+    });
   };
 
   const flushPositionChanges = async () => {
-    await documentMutationService.syncNow();
+    await syncProcessor.forceProcess();
   };
 
   return {
@@ -65,14 +81,19 @@ export function usePositionTracking() {
  * Use this when asset name, type, or other metadata changes
  */
 export function useMetadataTracking() {
-  const { getCurrentBookAssets } = useAssetStore();
+  const { getAsset, updateAsset } = useKanvasStore();
 
-  const trackMetadataChange = (assetId: string) => {
-    const assets = getCurrentBookAssets();
-    const asset = assets[assetId];
-    if (asset) {
-      documentMutationService.markAssetChanged(assetId, asset);
-    }
+  const trackMetadataChange = async (assetId: string) => {
+    const asset = getAsset(assetId);
+    if (!asset) return;
+
+    // Update timestamp to mark as changed
+    await updateAsset(assetId, {
+      metadata: {
+        ...asset.metadata,
+        updatedAt: new Date().toISOString(),
+      }
+    });
   };
 
   return {
@@ -85,16 +106,19 @@ export function useMetadataTracking() {
  * Use this for text input fields
  */
 export function useTypingTracking() {
-  const { getCurrentBookAssets } = useAssetStore();
+  const { getAsset, updateAsset } = useKanvasStore();
 
-  const trackTypingChange = (assetId: string, newValue: string) => {
-    const assets = getCurrentBookAssets();
-    const asset = assets[assetId];
+  const trackTypingChange = async (assetId: string, newValue: string) => {
+    const asset = getAsset(assetId);
     if (!asset) return;
 
-    // Update the asset content and mark as changed
-    const updatedAsset = { ...asset, content: newValue };
-    documentMutationService.markAssetChanged(assetId, updatedAsset);
+    // Update the asset content
+    await updateAsset(assetId, {
+      content: {
+        ...asset.content,
+        text: newValue,
+      }
+    });
   };
 
   return {

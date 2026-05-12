@@ -149,6 +149,7 @@ const BookShelf: React.FC<BookShelfProps> = ({
             books={books}
             selectedBookId={currentBookId}
             onBookSelect={handleBookSelect}
+            onBookEnter={onBookEnter}
             onBookDelete={onBookDelete}
             showDeleteButton={showDeleteButton}
             enableEditing={enableEditing}

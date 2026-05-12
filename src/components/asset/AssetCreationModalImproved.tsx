@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Save, Upload, Settings, Droplets, Eye, EyeOff, Globe, Lock, Plus, Trash2, Cloud, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAssetCreation } from '@/hooks/useAssetCreation';
 import { useTagStore } from '@/stores/tagStore';
-import { useCloudStore } from '@/stores/cloudStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,9 +30,30 @@ import { CustomFieldsManager } from './CustomFieldsManager';
 import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager';
 import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import { calculateViewportCenterPosition, calculateChildAssetCenterPosition } from '@/utils/coordinateUtils';
-import type { Asset } from '@/components/AssetItem';
-import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
+import type { Asset } from '@/types/Asset';
+// Types will be defined inline for now to avoid import issues
 import { GeneratorParser, EXAMPLE_GENERATOR_DATA } from '@/services/generatorParser';
+
+// Inline type definitions
+interface CustomField {
+  id: string;
+  name: string;
+  type: 'text' | 'number' | 'boolean' | 'date' | 'select';
+  options?: string[];
+  required?: boolean;
+}
+
+interface CustomFieldValue {
+  fieldId: string;
+  value: any;
+}
+
+interface ViewportDisplaySettings {
+  showInViewport?: boolean;
+  viewportOpacity?: number;
+  viewportScale?: number;
+  viewportPosition?: { x: number; y: number };
+}
 
 interface AssetCreationModalProps {
   isOpen: boolean;
@@ -60,10 +80,9 @@ interface AssetCreationModalProps {
 export function AssetCreationModalImproved({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
   const { createNewAsset, upgradeModal, closeUpgradeModal, canUploadToCloud, isOverQuota } = useAssetCreation();
   const { tags } = useTagStore();
-  const { syncEnabled } = useCloudStore();
   const { isAuthenticated, plan } = useAuthStore();
-  const { getCurrentBookAssets } = useAssetStore();
-  const assets = getCurrentBookAssets();
+  const { getProjectAssets } = useKanvasStore();
+  const assets = projectId ? getProjectAssets(projectId) : [];
   
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState({
@@ -147,22 +166,33 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
     
     try {
       const assetId = createNewAsset({
-        name: formData.name,
-        type: formData.type as 'image' | 'document' | 'video' | 'audio' | 'code' | 'other',
-        x: formData.x,
-        y: formData.y,
-        width: formData.width,
-        height: formData.height,
-        description: formData.description,
-        tags: formData.tags,
-        thumbnail: formData.thumbnail,
-        customFields: formData.customFields,
-        customFieldValues: formData.customFieldValues,
-        viewportDisplaySettings: formData.viewportDisplaySettings,
-      }, parentId, { 
+        projectId: projectId || '',
+        parentId: parentId,
+        layout: {
+          x: formData.x,
+          y: formData.y,
+          width: formData.width,
+          height: formData.height,
+          zIndex: 0
+        },
+        content: {
+          title: formData.name,
+          description: formData.description,
+          text: '',
+          customFields: {
+            ...formData.customFields,
+            type: formData.type,
+            tags: formData.tags,
+            thumbnail: formData.thumbnail,
+            customFieldValues: formData.customFieldValues,
+            viewportDisplaySettings: formData.viewportDisplaySettings
+          }
+        },
+        style: {},
+        behavior: {}
+      }, { 
         fromUserClick: true,
         file: selectedFile || undefined,
-        projectId,
         skipCloud: uploadStatus === 'denied'
       });
 
@@ -185,7 +215,7 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
     setUploadStatus('checking');
 
     // Check if upload is possible
-    if (syncEnabled && isAuthenticated && projectId) {
+    if (isAuthenticated && projectId) {
       try {
         const canUpload = await canUploadToCloud(file);
         setUploadStatus(canUpload ? 'allowed' : 'denied');

@@ -24,12 +24,34 @@ export function TagFilterControls({
   showActiveFilters = true, 
   compact = false 
 }: TagFilterControlsProps) {
-  const { tags, activeFilters, toggleFilter, clearFilters, setFilters } = useTagStore();
-  const { getCurrentBookAssets } = useAssetStore();
-  const assets = getCurrentBookAssets();
+  const { tags, getAllTags } = useTagStore();
+  const { getAllAssets } = useAssetStore();
+  const assets = getAllAssets();
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   
   const [isOpen, setIsOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+
+  // Filter functions
+  const toggleFilter = (tagId: string) => {
+    setActiveFilters(prev => {
+      const newFilters = new Set(prev);
+      if (newFilters.has(tagId)) {
+        newFilters.delete(tagId);
+      } else {
+        newFilters.add(tagId);
+      }
+      return newFilters;
+    });
+  };
+
+  const clearFilters = () => {
+    setActiveFilters(new Set());
+  };
+
+  const setFilters = (filters: Set<string>) => {
+    setActiveFilters(new Set(filters));
+  };
   
   // Helper function to convert color to rgba format for opacity support
   const getColorWithOpacity = (color: string, opacity: number): string => {
@@ -60,7 +82,7 @@ export function TagFilterControls({
   const sortedTags = allTags
     .map(tag => ({
       ...tag,
-      usageCount: Object.values(assets).filter(asset => asset.tags?.includes(tag.id)).length
+      usageCount: Object.values(assets).filter(asset => asset.metadata?.tags?.includes(tag.id)).length
     }))
     .sort((a, b) => b.usageCount - a.usageCount);
   
@@ -68,7 +90,7 @@ export function TagFilterControls({
   
   const handleToggleFilter = (tagId: string) => {
     const tag = tags[tagId];
-    const isActive = activeFilters.includes(tagId);
+    const isActive = activeFilters.has(tagId);
     
     toggleFilter(tagId);
     
@@ -85,18 +107,19 @@ export function TagFilterControls({
   };
   
   const handleSelectAll = () => {
-    const allTagIds = allTags.map(tag => tag.id);
+    const allTagIds = new Set(allTags.map(tag => tag.id));
     setFilters(allTagIds);
-    toast.success(`Applied all ${allTagIds.length} tag filters`);
+    toast.success(`Applied all ${allTagIds.size} tag filters`);
   };
   
   const getFilterDescription = () => {
-    if (activeFilters.length === 0) return 'No filters';
-    if (activeFilters.length === 1) {
-      const tag = tags[activeFilters[0]];
+    if (activeFilters.size === 0) return 'No filters';
+    if (activeFilters.size === 1) {
+      const tagId = Array.from(activeFilters)[0];
+      const tag = tags[tagId];
       return tag ? `Filter: ${tag.name}` : '1 filter';
     }
-    return `${activeFilters.length} filters`;
+    return `${activeFilters.size} filters`;
   };
   
   return (
@@ -109,7 +132,7 @@ export function TagFilterControls({
             size={compact ? "sm" : "default"}
             className={cn(
               'justify-start gap-2 bg-glass/30 border-glass-border/40 hover:bg-glass/50',
-              activeFilters.length > 0 && 'bg-accent/20 text-accent-foreground border-accent/30',
+              activeFilters.size > 0 && 'bg-accent/20 text-accent-foreground border-accent/30',
               compact && 'h-7 px-2 text-xs'
             )}
           >
@@ -117,9 +140,9 @@ export function TagFilterControls({
             <span className="truncate">
               {compact ? getFilterDescription() : 'Filter by Tags'}
             </span>
-            {!compact && activeFilters.length > 0 && (
+            {!compact && activeFilters.size > 0 && (
               <Badge variant="secondary" className="ml-auto">
-                {activeFilters.length}
+                {activeFilters.size}
               </Badge>
             )}
             <ChevronDown className={cn('w-4 h-4', compact && 'w-3 h-3')} />
@@ -145,7 +168,7 @@ export function TagFilterControls({
                     All
                   </Button>
                 )}
-                {activeFilters.length > 0 && (
+                {activeFilters.size > 0 && (
                   <Button
                     size="sm"
                     variant="ghost"
@@ -158,9 +181,9 @@ export function TagFilterControls({
               </div>
             </div>
             
-            {activeFilters.length > 0 && (
+            {activeFilters.size > 0 && (
               <div className="flex flex-wrap gap-1">
-                {activeFilters.map(filterId => {
+                {Array.from(activeFilters).map(filterId => {
                   const tag = tags[filterId];
                   if (!tag) return null;
                   return (
@@ -197,7 +220,7 @@ export function TagFilterControls({
             ) : (
               <div className="p-2 space-y-1">
                 {displayedTags.map((tag) => {
-                  const isActive = activeFilters.includes(tag.id);
+                  const isActive = activeFilters.has(tag.id);
                   
                   return (
                     <div
@@ -238,9 +261,9 @@ export function TagFilterControls({
       </Popover>
       
       {/* Active filters display */}
-      {showActiveFilters && activeFilters.length > 0 && !compact && (
+      {showActiveFilters && activeFilters.size > 0 && !compact && (
         <div className="flex flex-wrap gap-1">
-          {activeFilters.map(filterId => {
+          {Array.from(activeFilters).map(filterId => {
             const tag = tags[filterId];
             if (!tag) return null;
             return (

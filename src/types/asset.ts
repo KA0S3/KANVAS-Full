@@ -1,145 +1,236 @@
-import type { Asset } from '@/types/assetInterfaces';
+/**
+ * CANONICAL ASSET INTERFACE - Single Source of Truth
+ * 
+ * This is the ONLY asset structure allowed in the system.
+ * All assets must conform to this exact schema - NO exceptions.
+ * 
+ * 🔒 SCHEMA GOVERNANCE: This interface is immutable and sacred
+ * - One Structure: All assets use this EXACT structure
+ * - Behavior via Configuration: Rendering derives ONLY from behavior.renderMode
+ * - Unified Persistence: Single serialization format - NO branching
+ * - State Separation: Runtime state NEVER mixes with canonical data
+ */
 
-export interface AssetNode extends Omit<Asset, 'children'> {
-  level: number; // Depth in the tree
-  isExpanded: boolean; // For UI tree expansion state
-  parent?: AssetNode; // Reference to parent node
-  children: AssetNode[]; // Resolved children nodes (overrides Asset's string[] children)
+import { z } from 'zod';
+
+// Core identity (Immutable)
+export interface AssetIdentity {
+  id: string;
+  projectId: string;
+  parentId?: string;
 }
 
-export interface AssetTreeState {
-  expandedNodes: Record<string, boolean>;
-  selectedNodes: Set<string>;
+// Layout & Position (Normalized)
+export interface AssetLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale?: number;
+  rotation?: number;
+  zIndex?: number;
 }
 
-export interface AssetOperations {
-  canMove: (assetId: string, targetParentId?: string) => boolean;
-  findPath: (fromId: string, toId: string) => string[] | null;
-  getDepth: (assetId: string) => number;
-  getSiblings: (assetId: string) => Asset[];
-  isDescendant: (parentId: string, childId: string) => boolean;
+// Content & Data (Highly Dynamic Fields Nested)
+export interface AssetContent {
+  title?: string;
+  description?: string;
+  imageUrl?: string;  // Reference ONLY, never embedded
+  text?: string;
+  customFields?: Record<string, any>;  // Catch-all for extensibility
 }
 
-// Utility functions for tree operations
-export const createAssetOperations = (assets: Record<string, Asset>): AssetOperations => ({
-  canMove: (assetId: string, targetParentId?: string) => {
-    if (!targetParentId) return true; // Can always move to root
-    
-    // Cannot move to self
-    if (assetId === targetParentId) return false;
-    
-    // Cannot move to own descendant
-    return !isDescendant(assets, assetId, targetParentId);
-  },
+// Visual Style (Normalized)
+export interface AssetStyle {
+  background?: any;
+  tagColor?: string;
+  border?: any;
+  shape?: string;
+  opacity?: number;
+}
 
-  findPath: (fromId: string, toId: string) => {
-    const path: string[] = [];
-    let current = toId;
-    
-    while (current && assets[current]) {
-      path.unshift(current);
-      if (current === fromId) return path;
-      current = assets[current].parent_id;
-    }
-    
-    return null;
-  },
+// Behavior Configuration (CONTROLLED EXTENSIBILITY)
+export interface AssetBehavior {
+  renderMode?: string;  // NEVER evolves into asset type branching
+  interactions?: Record<string, any>;  // Nested to prevent top-level bloat
+  viewport?: {
+    zoom?: number;
+    panX?: number;
+    panY?: number;
+  };
+}
 
-  getDepth: (assetId: string) => {
-    let depth = 0;
-    let current = assets[assetId]?.parent_id;
-    
-    while (current) {
-      depth++;
-      current = assets[current]?.parent_id;
-    }
-    
-    return depth;
-  },
+// System Metadata (Persistent ONLY)
+export interface AssetMetadata {
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+  version: number;  // Simple integer for last-write-wins
+}
 
-  getSiblings: (assetId: string) => {
-    const asset = assets[assetId];
-    if (!asset?.parent_id) return [];
-    
-    const parent = assets[asset.parent_id];
-    if (!parent) return [];
-    
-    return parent.children
-      .filter(id => id !== assetId)
-      .map(id => assets[id])
-      .filter(Boolean);
-  },
+/**
+ * SINGLE CANONICAL ASSET STRUCTURE
+ * This is the only asset type allowed in the system
+ */
+export interface Asset {
+  // Core Identity (Immutable)
+  id: string;
+  projectId: string;
+  parentId?: string;
 
-  isDescendant: (parentId: string, childId: string) => {
-    return isDescendant(assets, parentId, childId);
-  },
+  // Layout & Position (Normalized)
+  layout: AssetLayout;
+
+  // Content & Data (Highly Dynamic Fields Nested)
+  content: AssetContent;
+
+  // Visual Style (Normalized)
+  style: AssetStyle;
+
+  // Behavior Configuration (CONTROLLED EXTENSIBILITY)
+  behavior: AssetBehavior;
+
+  // System Metadata (Persistent ONLY)
+  metadata: AssetMetadata;
+}
+
+// Zod schema for runtime validation
+export const AssetIdentitySchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  parentId: z.string().uuid().optional(),
 });
 
-// Helper function to check if one asset is a descendant of another
-export const isDescendant = (
-  assets: Record<string, Asset>, 
-  parentId: string, 
-  childId: string
-): boolean => {
-  let current = assets[childId]?.parent_id;
-  
-  while (current) {
-    if (current === parentId) return true;
-    current = assets[current]?.parent_id;
-  }
-  
-  return false;
-};
+export const AssetLayoutSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  scale: z.number().positive().optional(),
+  rotation: z.number().optional(),
+  zIndex: z.number().int().optional(),
+});
 
-// Convert flat asset structure to tree nodes
-export const buildAssetTree = (
-  assets: Record<string, Asset>,
-  rootId?: string,
-  level = 0
-): AssetNode[] => {
-  const rootAssets = rootId 
-    ? [assets[rootId]].filter(Boolean)
-    : Object.values(assets).filter(asset => !asset.parent_id);
+export const AssetContentSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  imageUrl: z.string().url().optional(),
+  text: z.string().optional(),
+  customFields: z.record(z.any()).optional(),
+});
 
-  return rootAssets.map(asset => ({
-    ...asset,
-    level,
-    isExpanded: false, // Default state
-    children: buildAssetTreeChildren(assets, asset.asset_id, level + 1),
-  }));
-};
+export const AssetStyleSchema = z.object({
+  background: z.any().optional(),
+  tagColor: z.string().optional(),
+  border: z.any().optional(),
+  shape: z.string().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+});
 
-// Helper to build children recursively
-const buildAssetTreeChildren = (
-  assets: Record<string, Asset>,
-  parentId: string,
-  level: number
-): AssetNode[] => {
-  const parent = assets[parentId];
-  if (!parent || parent.children.length === 0) return [];
+export const AssetBehaviorSchema = z.object({
+  renderMode: z.string().optional(),
+  interactions: z.record(z.any()).optional(),
+  viewport: z.object({
+    zoom: z.number().positive().optional(),
+    panX: z.number().optional(),
+    panY: z.number().optional(),
+  }).optional(),
+});
 
-  return parent.children
-    .map(childId => assets[childId])
-    .filter(Boolean)
-    .map(childAsset => ({
-      ...childAsset,
-      level,
-      isExpanded: false,
-      children: buildAssetTreeChildren(assets, childAsset.asset_id, level + 1),
-    }));
-};
+export const AssetMetadataSchema = z.object({
+  tags: z.array(z.string()).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  version: z.number().int().min(0),
+});
 
-// Flatten tree for rendering
-export const flattenTree = (nodes: AssetNode[]): AssetNode[] => {
-  const result: AssetNode[] = [];
-  
-  const traverse = (node: AssetNode) => {
-    result.push(node);
-    if (node.isExpanded) {
-      node.children.forEach(traverse);
-    }
+export const AssetSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  parentId: z.string().uuid().optional(),
+  layout: AssetLayoutSchema,
+  content: AssetContentSchema,
+  style: AssetStyleSchema,
+  behavior: AssetBehaviorSchema,
+  metadata: AssetMetadataSchema,
+});
+
+// Type guards
+export function isValidAsset(obj: any): obj is Asset {
+  return AssetSchema.safeParse(obj).success;
+}
+
+// Helper function to create a new asset with proper defaults
+export function createCanonicalAsset(
+  projectId: string,
+  overrides: Partial<Asset> = {}
+): Asset {
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+
+  const defaultAsset: Asset = {
+    // Core Identity
+    id,
+    projectId,
+
+    // Layout & Position
+    layout: {
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 150,
+      zIndex: 0,
+    },
+
+    // Content & Data
+    content: {
+      title: '',
+      customFields: {},
+    },
+
+    // Visual Style
+    style: {},
+
+    // Behavior Configuration
+    behavior: {},
+
+    // System Metadata
+    metadata: {
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    },
   };
-  
-  nodes.forEach(traverse);
-  return result;
-};
+
+  // Deep merge overrides with defaults
+  const mergedAsset: Asset = {
+    id: overrides.id || defaultAsset.id,
+    projectId: overrides.projectId || defaultAsset.projectId,
+    parentId: overrides.parentId,
+    layout: { ...defaultAsset.layout, ...overrides.layout },
+    content: { ...defaultAsset.content, ...overrides.content },
+    style: { ...defaultAsset.style, ...overrides.style },
+    behavior: { ...defaultAsset.behavior, ...overrides.behavior },
+    metadata: { 
+      ...defaultAsset.metadata, 
+      ...overrides.metadata,
+      version: overrides.metadata?.version ?? defaultAsset.metadata.version 
+    },
+  };
+
+  // Validate the merged asset
+  const validation = AssetSchema.safeParse(mergedAsset);
+  if (!validation.success) {
+    throw new Error(`Invalid asset structure: ${validation.error.message}`);
+  }
+
+  return validation.data as Asset;
+}
+
+// Strict validation function that throws errors for invalid assets
+export function validateAssetStrict(asset: unknown): asserts asset is Asset {
+  const validation = AssetSchema.safeParse(asset);
+  if (!validation.success) {
+    throw new Error(`Invalid asset structure: ${validation.error.message}`);
+  }
+}

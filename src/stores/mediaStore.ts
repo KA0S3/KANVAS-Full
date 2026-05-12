@@ -1,86 +1,218 @@
+/**
+ * MEDIA STORE - Media file management
+ * 
+ * Simple store for managing media files and uploads
+ * This is a simplified version for compatibility
+ */
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type AppPhase = 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW';
+interface MediaFile {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'audio' | 'document';
+  url: string;
+  size: number;
+  uploadedAt: string;
+  projectId: string;
+}
 
-interface MediaState {
-  appPhase: AppPhase;
-  isAudioPlaying: boolean;
-  currentTrack: number;
-  isTransitioning: boolean;
+interface MediaStoreState {
+  mediaFiles: Record<string, MediaFile>;
+  uploadProgress: Record<string, number>;
+  
+  // Media settings (persisted)
   videosEnabled: boolean;
-  audioEnabled: boolean;
   videoSoundsEnabled: boolean;
   audioVolume: number;
-  professionalMode: boolean;
+  
+  // UI state (not persisted)
+  transitioning: boolean;
+  currentView: 'splash' | 'intro' | 'library' | 'book';
+  appPhase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW';
   
   // Actions
-  setAppPhase: (phase: AppPhase) => void;
-  setAudioPlaying: (playing: boolean) => void;
-  setCurrentTrack: (track: number) => void;
-  setTransitioning: (transitioning: boolean) => void;
+  addMediaFile: (mediaFile: MediaFile) => void;
+  removeMediaFile: (mediaId: string) => void;
+  updateMediaFile: (mediaId: string, updates: Partial<MediaFile>) => void;
+  getMediaFile: (mediaId: string) => MediaFile | undefined;
+  getProjectMedia: (projectId: string) => MediaFile[];
+  setUploadProgress: (mediaId: string, progress: number) => void;
+  clearUploadProgress: (mediaId: string) => void;
+  getAllMediaFiles: () => MediaFile[];
+  
+  // Media settings actions
   setVideosEnabled: (enabled: boolean) => void;
-  setAudioEnabled: (enabled: boolean) => void;
   setVideoSoundsEnabled: (enabled: boolean) => void;
   setAudioVolume: (volume: number) => void;
   
-  // Phase transitions
-  startIntro: (launchMode?: 'full' | 'professional') => void;
+  // Navigation actions
+  startIntro: (launchMode?: 'professional' | 'full') => void;
   showLibrary: () => void;
   enterBookView: () => void;
-  returnToLibrary: () => void;
+  setTransitioning: (transitioning: boolean) => void;
+  
+  // App phase management
+  setAppPhase: (phase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW') => void;
+  initializeFromSplash: () => void;
 }
 
-export const useMediaStore = create<MediaState>()(
+export const useMediaStore = create<MediaStoreState>()(
   persist(
     (set, get) => ({
-      appPhase: 'SPLASH',
-      isAudioPlaying: false,
-      currentTrack: 0,
-      isTransitioning: false,
+      // Initial state
+      mediaFiles: {},
+      uploadProgress: {},
       videosEnabled: true,
-      audioEnabled: true,
       videoSoundsEnabled: true,
-      audioVolume: 0.08, // Default to 8% for background music
-      professionalMode: false,
+      audioVolume: 0.1,
+      transitioning: false,
+      currentView: 'splash',
+      appPhase: 'SPLASH',
 
-      setAppPhase: (phase) => {
-        set({ appPhase: phase });
-        // Navigation state caching is now handled centrally in Index component
+      // Add a media file
+      addMediaFile: (mediaFile: MediaFile) => {
+        set(state => ({
+          mediaFiles: {
+            ...state.mediaFiles,
+            [mediaFile.id]: mediaFile
+          }
+        }));
       },
-      setAudioPlaying: (playing) => set({ isAudioPlaying: playing }),
-      setCurrentTrack: (track) => set({ currentTrack: track }),
-      setTransitioning: (transitioning) => set({ isTransitioning: transitioning }),
-      setVideosEnabled: (enabled) => set({ videosEnabled: enabled }),
-      setAudioEnabled: (enabled) => set({ audioEnabled: enabled }),
-      setVideoSoundsEnabled: (enabled) => set({ videoSoundsEnabled: enabled }),
-      setAudioVolume: (volume) => set({ audioVolume: Math.max(0, Math.min(1, volume)) }),
 
-      startIntro: (launchMode = 'full') => {
-        if (launchMode === 'professional') {
-          set({ 
-            appPhase: 'INTRO_VIDEO',
-            audioEnabled: false,
-            videosEnabled: false,
-            videoSoundsEnabled: false,
-            professionalMode: true
-          });
-        } else {
-          set({ appPhase: 'INTRO_VIDEO' });
+      // Remove a media file
+      removeMediaFile: (mediaId: string) => {
+        set(state => {
+          const newMediaFiles = { ...state.mediaFiles };
+          delete newMediaFiles[mediaId];
+          
+          const newUploadProgress = { ...state.uploadProgress };
+          delete newUploadProgress[mediaId];
+          
+          return {
+            mediaFiles: newMediaFiles,
+            uploadProgress: newUploadProgress
+          };
+        });
+      },
+
+      // Update a media file
+      updateMediaFile: (mediaId: string, updates: Partial<MediaFile>) => {
+        set(state => ({
+          mediaFiles: {
+            ...state.mediaFiles,
+            [mediaId]: state.mediaFiles[mediaId] 
+              ? { ...state.mediaFiles[mediaId], ...updates }
+              : undefined
+          }
+        }));
+      },
+
+      // Get a specific media file
+      getMediaFile: (mediaId: string) => {
+        return get().mediaFiles[mediaId];
+      },
+
+      // Get media files for a specific project
+      getProjectMedia: (projectId: string) => {
+        return Object.values(get().mediaFiles).filter(
+          media => media.projectId === projectId
+        );
+      },
+
+      // Set upload progress for a media file
+      setUploadProgress: (mediaId: string, progress: number) => {
+        set(state => ({
+          uploadProgress: {
+            ...state.uploadProgress,
+            [mediaId]: progress
+          }
+        }));
+      },
+
+      // Clear upload progress for a media file
+      clearUploadProgress: (mediaId: string) => {
+        set(state => {
+          const newUploadProgress = { ...state.uploadProgress };
+          delete newUploadProgress[mediaId];
+          return { uploadProgress: newUploadProgress };
+        });
+      },
+
+      // Get all media files
+      getAllMediaFiles: () => {
+        return Object.values(get().mediaFiles);
+      },
+
+      // Media settings actions
+      setVideosEnabled: (enabled: boolean) => {
+        set({ videosEnabled: enabled });
+      },
+
+      setVideoSoundsEnabled: (enabled: boolean) => {
+        set({ videoSoundsEnabled: enabled });
+      },
+
+      setAudioVolume: (volume: number) => {
+        set({ audioVolume: Math.max(0, Math.min(1, volume)) });
+      },
+
+      // Navigation actions
+      startIntro: (launchMode?: 'professional' | 'full') => {
+        set({ 
+          currentView: 'intro',
+          appPhase: 'INTRO_VIDEO',
+          transitioning: true 
+        });
+        // Store launch mode for later use in V2 canvas transition
+        if (launchMode) {
+          localStorage.setItem('launchMode', launchMode);
         }
       },
-      showLibrary: () => set({ appPhase: 'LIBRARY' }),
-      enterBookView: () => set({ appPhase: 'BOOK_VIEW' }),
-      returnToLibrary: () => set({ appPhase: 'LIBRARY' }),
+
+      showLibrary: () => {
+        set({ 
+          currentView: 'library',
+          appPhase: 'LIBRARY',
+          transitioning: false 
+        });
+      },
+
+      enterBookView: () => {
+        set({ 
+          currentView: 'book',
+          appPhase: 'BOOK_VIEW',
+          transitioning: false 
+        });
+      },
+
+      setTransitioning: (transitioning: boolean) => {
+        set({ transitioning });
+      },
+
+      // App phase management
+      setAppPhase: (phase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW') => {
+        set({ appPhase: phase });
+      },
+
+      initializeFromSplash: () => {
+        set({ 
+          appPhase: 'SPLASH',
+          currentView: 'splash',
+          transitioning: false 
+        });
+      }
     }),
     {
-      name: 'kanvas-media-storage',
-      partialize: (state) => ({ 
+      name: 'media-store',
+      partialize: (state) => ({
+        mediaFiles: state.mediaFiles,
         videosEnabled: state.videosEnabled,
-        audioEnabled: state.audioEnabled,
         videoSoundsEnabled: state.videoSoundsEnabled,
         audioVolume: state.audioVolume
-      }),
+        // Don't persist UI state as it's temporary
+      })
     }
   )
 );

@@ -89,8 +89,12 @@ const SingleBookFocus: React.FC<SingleBookFocusProps> = ({
   };
 
   const handleBookCardDoubleClick = (book: Book) => {
+    console.log('[SingleBookFocus] Double-click detected for book:', book.title);
     if (onBookEnter) {
+      console.log('[SingleBookFocus] Calling onBookEnter for book:', book.title);
       onBookEnter(book);
+    } else {
+      console.log('[SingleBookFocus] No onBookEnter handler provided');
     }
   };
 
@@ -176,13 +180,16 @@ const SingleBookFocus: React.FC<SingleBookFocusProps> = ({
       <div className="flex flex-col items-center justify-center flex-1">
         <div className="perspective-1000">
           <div 
-            onDoubleClick={() => handleBookCardDoubleClick(currentBook)}
             onContextMenu={(e) => handleContextMenu(currentBook, e)}
             className={`cursor-pointer group relative transform scale-110 transition-all duration-500 ease-out ${
               isAnimating ? 'scale-95 opacity-0' : 'scale-110 opacity-100'
             }`}
           >
-            <BookCover book={currentBook} size="large" />
+            <BookCover 
+              book={currentBook} 
+              size="large" 
+              onDoubleClick={() => handleBookCardDoubleClick(currentBook)}
+            />
             
             {/* Hover instruction */}
             <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${

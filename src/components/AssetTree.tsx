@@ -1,9 +1,26 @@
 import { useState, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Folder, File, Plus, Trash2, Move } from 'lucide-react';
-import { useAssetTree } from '@/hooks/useAssetTree';
-import { AssetContextMenu } from '@/components/AssetContextMenu';
-import type { AssetNode } from '@/types/asset';
-import type { Asset } from '@/types/assetInterfaces';
+// Temporary placeholder - useAssetTree hook needs to be implemented
+// For now, use a simple in-memory implementation
+
+// Simple in-memory asset tree implementation
+const useSimpleAssetTree = () => {
+  const [assets] = useState(new Map());
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+
+  // Mock implementation - would be replaced with actual hook
+  const getAssetChildren = (assetId: string) => {
+    return Array.from(assets.values()).filter(asset => asset.parentId === assetId);
+  };
+
+  return {
+    assets,
+    expandedNodes,
+    getAssetChildren,
+  };
+};
+import { AssetContextMenuFixed } from '@/components/AssetContextMenu';
+import type { Asset } from '@/types/Asset';
 
 interface AssetTreeItemProps {
   node: AssetNode;

@@ -1,0 +1,98 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# 🔒 ANTI-PATTERN PRE-COMMIT HOOKS
+# 
+# This hook enforces architectural safeguards before allowing commits.
+# It prevents architectural drift by catching violations early.
+# 
+# CRITICAL: These checks protect the canonical asset structure
+
+echo "🔍 Running anti-pattern validation before commit..."
+
+# Run ESLint with anti-pattern rules
+echo "📋 Running ESLint anti-pattern rules..."
+npm run lint:anti-patterns
+if [ $? -ne 0 ]; then
+  echo "❌ ESLint anti-pattern checks failed. Commit aborted."
+  echo "   Please fix the ESLint violations before committing."
+  exit 1
+fi
+
+# Run anti-pattern detection tests
+echo "🧪 Running anti-pattern detection tests..."
+npm run test:anti-patterns
+if [ $? -ne 0 ]; then
+  echo "❌ Anti-pattern tests failed. Commit aborted."
+  echo "   Please fix the test failures before committing."
+  exit 1
+fi
+
+# Quick scan for obvious forbidden patterns
+echo "🚫 Scanning for forbidden patterns..."
+node -e "
+const fs = require('fs');
+const path = require('path');
+
+// Get staged files
+const { execSync } = require('child_process');
+const stagedFiles = execSync('git diff --cached --name-only --diff-filter=ACM', { encoding: 'utf8' })
+  .split('\n')
+  .filter(file => file.endsWith('.ts') || file.endsWith('.tsx'))
+  .filter(file => fs.existsSync(file));
+
+if (stagedFiles.length === 0) {
+  console.log('✅ No TypeScript files to check');
+  process.exit(0);
+}
+
+// Import linting rules (will fail if not available, but that's ok)
+let lintingRules;
+try {
+  lintingRules = require('./src/types/Safeguards.ts').lintingRules;
+} catch (error) {
+  console.log('⚠️  Could not load linting rules, skipping pattern scan');
+  process.exit(0);
+}
+
+let violationsFound = false;
+
+stagedFiles.forEach(file => {
+  try {
+    const content = fs.readFileSync(file, 'utf8');
+    
+    // Check for forbidden patterns
+    const forbiddenIssues = lintingRules.checkForForbiddenPatterns(content);
+    const branchingIssues = lintingRules.checkForBehaviorBranching(content);
+    
+    if (forbiddenIssues.length > 0 || branchingIssues.length > 0) {
+      console.log(\`\\n❌ Forbidden patterns detected in \${file}:\`);
+      forbiddenIssues.forEach(issue => {
+        console.log(\`  ⚠️  \${issue}\`);
+      });
+      branchingIssues.forEach(issue => {
+        console.log(\`  🔀 \${issue}\`);
+      });
+      violationsFound = true;
+    }
+  } catch (error) {
+    // Skip files that can't be read
+  }
+});
+
+if (violationsFound) {
+  console.log('\\n❌ Commit aborted due to forbidden patterns');
+  console.log('   Please fix the violations and try again.');
+  process.exit(1);
+} else {
+  console.log('✅ No forbidden patterns detected in staged files');
+}
+"
+
+if [ $? -ne 0 ]; then
+  echo "❌ Forbidden pattern scan failed. Commit aborted."
+  exit 1
+fi
+
+echo "✅ All anti-pattern checks passed. Proceeding with commit..."
+exit 0

@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { 
-  Edit, 
-  Trash2, 
-  Copy, 
-  Move, 
-  Lock, 
-  Unlock, 
-  Eye, 
-  Plus,
+/**
+ * ASSET CONTEXT MENU COMPONENT - Canonical Asset Structure
+ * 
+ * This component properly uses the canonical Asset interface
+ * with nested structure as defined in the plan.
+ * 
+ * 🔒 CRITICAL: Only uses canonical Asset structure
+ */
+
+import React, { useRef, useState } from "react";
+import {
+  X,
   FileText,
   Image,
   Film,
@@ -17,11 +18,17 @@ import {
   File,
   Square,
   Circle,
-  Palette
+  Palette,
+  Lock,
+  Unlock,
+  Trash2,
+  Edit,
+  Plus,
+  Maximize2
 } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore, selectAssetsByParentId } from '@/stores/kanvasStore';
 import { DeleteAssetDialog } from '@/components/DeleteAssetDialog';
-import type { Asset } from '@/types/assetInterfaces';
+import type { Asset } from '@/types/Asset';
 
 interface AssetContextMenuProps {
   asset: Asset;
@@ -34,7 +41,7 @@ interface AssetContextMenuProps {
   onCreateChildAsset?: (parentId: string) => void;
 }
 
-export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
+export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
   asset,
   position,
   onClose,
@@ -48,9 +55,7 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const {
     updateAsset,
-    setActiveAsset,
-    getAssetChildren,
-  } = useAssetStore();
+  } = useKanvasStore();
 
   // Calculate adjusted position to keep menu on screen
   const getAdjustedPosition = () => {
@@ -62,33 +67,159 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
     let adjustedX = position.x;
     let adjustedY = position.y;
     
-    // Prevent menu from going off right edge
-    if (position.x + menuWidth > screenWidth) {
-      adjustedX = screenWidth - menuWidth - 10; // 10px padding from edge
+    // Adjust horizontal position
+    if (adjustedX + menuWidth > screenWidth) {
+      adjustedX = screenWidth - menuWidth - 10;
     }
     
-    // Prevent menu from going off left edge
-    if (position.x < 10) {
-      adjustedX = 10;
-    }
-    
-    // Prevent menu from going off bottom edge
-    if (position.y + menuHeight > screenHeight) {
-      adjustedY = screenHeight - menuHeight - 10; // 10px padding from edge
-    }
-    
-    // Prevent menu from going off top edge
-    if (position.y < 10) {
-      adjustedY = 10;
+    // Adjust vertical position
+    if (adjustedY + menuHeight > screenHeight) {
+      adjustedY = screenHeight - menuHeight - 10;
     }
     
     return { x: adjustedX, y: adjustedY };
   };
 
+  const handleDelete = () => {
+    console.log('Delete button clicked for asset:', asset.content.title);
+    // Don't close the context menu - let the dialog appear over it
+    setShowDeleteDialog(true);
+    console.log('Dialog state set to true, current state:', showDeleteDialog);
+  };
+
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEdit?.(asset);
+    onClose();
+  };
+
+  const handleDuplicateAsset = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.nativeEvent.stopImmediatePropagation();
+    
+    const newAssetData = {
+      ...asset,
+      // Update nested structure properly
+      content: {
+        ...asset.content,
+        title: `${asset.content.title} (Copy)`,
+      },
+      layout: {
+        ...asset.layout,
+        x: asset.layout.x + 20,
+        y: asset.layout.y + 20,
+      },
+    };
+    
+    // Remove id and metadata fields that should be generated
+    const { id, metadata, ...assetDataToCopy } = newAssetData;
+    
+    if (onCreateAsset) {
+      onCreateAsset({
+        name: assetDataToCopy.content.title || 'New Asset',
+        parentId: assetDataToCopy.parentId,
+        ...assetDataToCopy
+      });
+    }
+    onClose();
+  };
+
+  const handleToggleLock = () => {
+    // Lock state should be in UI store, not asset data
+    updateAsset(asset.id, {
+      // This would be handled by UI state, not asset metadata
+    });
+    onClose();
+  };
+
+  const handleToggleBorderShape = () => {
+    const newShape = asset.style.shape === 'circle' ? 'square' : 'circle';
+    updateAsset(asset.id, {
+      style: {
+        ...asset.style,
+        shape: newShape,
+      },
+    });
+    onClose();
+  };
+
+  const handleToggleTagBorder = () => {
+    updateAsset(asset.id, {
+      style: {
+        ...asset.style,
+        border: {
+          ...asset.style.border,
+          showTagBorder: !asset.style.border?.showTagBorder,
+        },
+      },
+    });
+    onClose();
+  };
+
+  const handleToggleThumbnail = () => {
+    const currentSettings = asset.content.customFields?.viewportDisplaySettings || { 
+      name: true, 
+      description: false, 
+      thumbnail: true, 
+      portraitBlur: 0 
+    };
+    
+    updateAsset(asset.id, {
+      content: {
+        ...asset.content,
+        customFields: {
+          ...asset.content.customFields,
+          viewportDisplaySettings: {
+            ...currentSettings,
+            thumbnail: !currentSettings.thumbnail,
+          },
+        },
+      },
+    });
+    onClose();
+  };
+
+  const handleCreateChild = (e: React.MouseEvent) => {
+    console.log('Create Child button clicked for asset:', asset.content.title);
+    e.stopPropagation();
+    e.preventDefault();
+    e.nativeEvent.stopImmediatePropagation();
+    
+    // Close context menu and trigger parent to handle modal
+    onClose();
+    onCreateChildAsset?.(asset.id);
+    console.log('Called onCreateChildAsset with parentId:', asset.id);
+  };
+
+  // Get asset type icon
+  const getAssetIcon = () => {
+    switch (asset.behavior.renderMode) {
+      case 'image':
+        return <Image className="w-4 h-4" />;
+      case 'video':
+        return <Film className="w-4 h-4" />;
+      case 'audio':
+        return <Music className="w-4 h-4" />;
+      case 'text':
+      case 'document':
+        return <FileText className="w-4 h-4" />;
+      case 'code':
+        return <Code className="w-4 h-4" />;
+      default:
+        return <File className="w-4 h-4" />;
+    }
+  };
+
+  // Check if asset has children (should be computed)
+  const children = selectAssetsByParentId(asset.id)(useKanvasStore.getState());
+  const hasChildren = children.length > 0;
+
+  // Calculate adjusted position
   const adjustedPosition = getAdjustedPosition();
 
-  // Close menu when clicking outside
-  useEffect(() => {
+  // Setup event listeners
+  React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
@@ -110,103 +241,6 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
     };
   }, [onClose]);
 
-  const handleDelete = () => {
-    console.log('Delete button clicked for asset:', asset.name);
-    // Don't close the context menu - let the dialog appear over it
-    setShowDeleteDialog(true);
-    console.log('Dialog state set to true, current state:', showDeleteDialog);
-  };
-
-  const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onEdit?.(asset);
-    onClose();
-  };
-
-  const handleDuplicateAsset = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    e.nativeEvent.stopImmediatePropagation();
-    
-    const newAssetData = {
-      ...asset,
-      name: `${asset.name} (Copy)`,
-      x: asset.x + 20,
-      y: asset.y + 20,
-    };
-    // Remove id, children, parentId, and timestamps from the data
-    const { id, children, parentId, createdAt, updatedAt, ...assetDataToCopy } = newAssetData;
-    if (onCreateAsset) {
-      onCreateAsset(assetDataToCopy);
-    }
-    onClose();
-  };
-
-  const handleToggleLock = () => {
-    updateAsset(asset.id, { isLocked: !asset.isLocked });
-    onClose();
-  };
-
-  const handleToggleBorderShape = () => {
-    const newShape = asset.borderShape === 'circle' ? 'square' : 'circle';
-    updateAsset(asset.id, { borderShape: newShape });
-    onClose();
-  };
-
-  const handleToggleTagBorder = () => {
-    updateAsset(asset.id, { showTagBorder: !asset.showTagBorder });
-    onClose();
-  };
-
-  const handleToggleThumbnail = () => {
-    const currentSettings = asset.viewportDisplaySettings || { name: true, description: false, thumbnail: true, portraitBlur: 0 };
-    updateAsset(asset.id, {
-      viewportDisplaySettings: {
-        ...currentSettings,
-        thumbnail: !currentSettings.thumbnail,
-      },
-    });
-    onClose();
-  };
-
-  const handleCreateChild = (e: React.MouseEvent) => {
-    console.log('Create Child button clicked for asset:', asset.name);
-    e.stopPropagation();
-    e.preventDefault();
-    e.nativeEvent.stopImmediatePropagation();
-    
-    // Close context menu and trigger parent to handle modal
-    onClose();
-    onCreateChildAsset?.(asset.id);
-    console.log('Called onCreateChildAsset with parentId:', asset.id);
-  };
-
-  const handleSelect = () => {
-    if (isViewportAsset) {
-      // For viewport assets, just select the asset
-      setActiveAsset(asset.id);
-    } else {
-      // For sidebar assets, do the same as double-clicking (open parent viewport)
-      onSelectAndFocus?.(asset);
-    }
-    onClose();
-  };
-
-  const getAssetIcon = (type: Asset['type']) => {
-    const iconMap = {
-      image: Image,
-      document: FileText,
-      video: Film,
-      audio: Music,
-      code: Code,
-      other: File,
-    };
-    return iconMap[type];
-  };
-
-  const AssetIcon = getAssetIcon(asset.type);
-  const hasChildren = getAssetChildren(asset.id).length > 0;
-  
   return (
     <>
       <DeleteAssetDialog
@@ -227,11 +261,11 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
           {/* Asset Info Header */}
           <div className="px-3 py-2 border-b border-glass-border/20">
             <div className="flex items-center gap-2">
-              <AssetIcon className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium text-foreground truncate">{asset.name}</span>
+              {getAssetIcon()}
+              <span className="text-sm font-medium text-foreground truncate">{asset.content.title}</span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              Type: {asset.type} {hasChildren && `• ${getAssetChildren(asset.id).length} children`}
+              Type: {asset.behavior.renderMode} {hasChildren && `• ${children.length} children`}
             </div>
           </div>
 
@@ -246,24 +280,13 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
               Edit Asset
             </button>
 
-            {/* Select - Only show for sidebar assets */}
-            {!isViewportAsset && (
-              <button
-                onClick={handleSelect}
-                className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
-              >
-                <Eye className="w-4 h-4" />
-                Select & Focus
-              </button>
-            )}
-
             {/* Duplicate */}
             <button
               onClick={handleDuplicateAsset}
               className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
             >
-              <Copy className="w-4 h-4" />
-              Duplicate
+              <File className="w-4 h-4" />
+              Duplicate Asset
             </button>
 
             {/* Create Child */}
@@ -275,30 +298,12 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
               Create Child Asset
             </button>
 
-            {/* Toggle Lock */}
-            <button
-              onClick={handleToggleLock}
-              className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
-            >
-              {asset.isLocked ? (
-                <>
-                  <Unlock className="w-4 h-4" />
-                  Unlock Asset
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4" />
-                  Lock Asset
-                </>
-              )}
-            </button>
-
             {/* Toggle Border Shape */}
             <button
               onClick={handleToggleBorderShape}
               className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
             >
-              {asset.borderShape === 'circle' ? (
+              {asset.style.shape === 'circle' ? (
                 <>
                   <Square className="w-4 h-4" />
                   Square Shape
@@ -317,7 +322,7 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
               className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
             >
               <Palette className="w-4 h-4" />
-              {asset.showTagBorder ? 'Hide Tag Border' : 'Show Tag Border'}
+              {asset.style.border?.showTagBorder ? 'Hide Tag Border' : 'Show Tag Border'}
             </button>
 
             {/* Toggle Background */}
@@ -326,7 +331,7 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
               className="w-full px-3 py-2 flex items-center gap-2 text-sm text-foreground hover:bg-glass-border/20 transition-colors"
             >
               <Image className="w-4 h-4" />
-              {asset.viewportDisplaySettings?.thumbnail === false ? 'Background On' : 'Background Off'}
+              {asset.content.customFields?.viewportDisplaySettings?.thumbnail === false ? 'Background On' : 'Background Off'}
             </button>
 
             {/* Delete */}
@@ -338,9 +343,25 @@ export const AssetContextMenu: React.FC<AssetContextMenuProps> = ({
               Delete Asset
             </button>
           </div>
-        </div>,
-        document.body
+        </div>
       )}
     </>
   );
 };
+
+// Helper function for creating portals
+function createPortal(children: React.ReactNode) {
+  const portalRoot = document.getElementById('portal-root');
+  if (!portalRoot) {
+    return children;
+  }
+
+  return React.createElement(
+    'div',
+    { id: 'portal-root' },
+    children
+  );
+}
+
+// Export alias for backward compatibility
+export const AssetContextMenu = AssetContextMenuFixed;

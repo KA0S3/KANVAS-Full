@@ -1,7 +1,7 @@
 import type { BackgroundConfig, BackgroundMode } from '@/types/background';
 
-export function isColorPickerVisible(config: BackgroundConfig): boolean {
-  return config.mode === "color";
+export function isColorPickerVisible(config: BackgroundConfig | null): boolean {
+  return config?.mode === "color";
 }
 
 export function getModeFromToggles(isClear: boolean, useParchment: boolean): BackgroundMode {
@@ -25,7 +25,8 @@ export function getTogglesFromMode(mode: BackgroundMode): { isClear: boolean; us
   }
 }
 
-export function getBackgroundColor(config: BackgroundConfig): string {
+export function getBackgroundColor(config: BackgroundConfig | null): string {
+  if (!config) return "transparent";
   switch (config.mode) {
     case "glass":
       return "transparent";
@@ -33,15 +34,17 @@ export function getBackgroundColor(config: BackgroundConfig): string {
       return config.color || "#eed4aa";
     case "color":
       return config.color || "#000000";
+    default:
+      return "transparent";
   }
 }
 
-export function shouldShowParchmentOverlay(config: BackgroundConfig): boolean {
-  return config.mode === "parchment";
+export function shouldShowParchmentOverlay(config: BackgroundConfig | null): boolean {
+  return config?.mode === "parchment";
 }
 
-export function shouldShowGlassEffect(config: BackgroundConfig): boolean {
-  return config.mode === "glass";
+export function shouldShowGlassEffect(config: BackgroundConfig | null): boolean {
+  return config?.mode === "glass";
 }
 
 export function validateBackgroundConfig(config: Partial<BackgroundConfig>): BackgroundConfig {

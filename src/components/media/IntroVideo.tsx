@@ -4,7 +4,7 @@ import { useMediaStore } from '@/stores/mediaStore';
 
 const IntroVideo = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { showLibrary, setTransitioning, videosEnabled, videoSoundsEnabled } = useMediaStore();
+  const { showLibrary, setTransitioning, videosEnabled, videoSoundsEnabled, audioVolume } = useMediaStore();
   const [isFadingIn, setIsFadingIn] = useState(false);
   const [clickCount, setClickCount] = useState(0);
 
@@ -41,7 +41,7 @@ const IntroVideo = () => {
   video.addEventListener('ended', handleEnded);
 
   // Auto-play video with sound
-  video.volume = 0.1; // Fixed at 10% volume
+  video.volume = audioVolume; // Use volume from mediaStore
   video.play().catch(error => {
     console.error('Video autoplay failed:', error);
   });
@@ -57,9 +57,9 @@ useEffect(() => {
   const video = videoRef.current;
   if (video) {
     video.muted = !videoSoundsEnabled;
-    video.volume = 0.1; // Fixed at 10% volume
+    video.volume = audioVolume; // Use volume from mediaStore
   }
-}, [videoSoundsEnabled]);
+}, [videoSoundsEnabled, audioVolume]);
 
   const handleVideoClick = () => {
     setClickCount(prev => prev + 1);

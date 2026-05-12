@@ -3,7 +3,7 @@
  * Handles migration of asset types for database compatibility
  */
 
-import type { Asset } from '@/types/assetInterfaces';
+import type { Asset } from '@/types/Asset';
 
 /**
  * Migrates a single asset's type from 'other' to 'card' for database compatibility

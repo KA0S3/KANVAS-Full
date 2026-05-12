@@ -110,7 +110,7 @@ class EmergencySaveService {
       const bookStore = useBookStore.getState();
       
       const emergencyData: EmergencyBackup = {
-        assets: assetStore.getCurrentBookAssets(),
+        assets: assetStore.getAllAssets(),
         backgrounds: backgroundStore.configs || {},
         projectId: bookStore.currentBookId || null,
         timestamp: Date.now()

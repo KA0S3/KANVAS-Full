@@ -2,20 +2,19 @@
 import { useNavigate } from "react-router-dom";
 import { Sparkles, ArrowLeft, Plus, PanelRight, BookOpen, User, AlertTriangle } from "lucide-react";
 import { AssetItem } from "./AssetItem";
-import type { Asset } from "@/types/assetInterfaces";
+import type { Asset } from '@/types/Asset';
 import { AssetCreationModalImproved } from "./asset/AssetCreationModalImproved";
 import { AssetEditModalImproved } from "./asset/AssetEditModalImproved";
 import { EmptySpaceContextMenu } from "./EmptySpaceContextMenu";
-import { useAssetTree } from "@/hooks/useAssetTree";
-import { useAssetStore } from '@/stores/assetStore';
-import { useBookStore } from "@/stores/bookStoreSimple";
-import { useBackgroundStore } from "@/stores/backgroundStore";
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from "@/stores/authStore";
+import { useSyncStore } from "@/stores/syncStore";
 import { useCloudStore } from "@/stores/cloudStore";
+import { useBookStore } from "@/stores/bookStoreSimple";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { BackgroundControls } from "@/components/asset/BackgroundControls";
 import { BackgroundMigrationDialog } from "@/components/BackgroundMigrationDialog";
-import { BackgroundMigration } from "@/utils/backgroundMigration";
 import { EnhancedAccountModal } from "@/components/account/EnhancedAccountModal";
 import { LocalStorageWarning } from "@/components/LocalStorageWarning";
 import { Button } from "@/components/ui/button";
@@ -33,6 +32,7 @@ import {
 import { getBackgroundColor, shouldShowParchmentOverlay, shouldShowGlassEffect } from "@/utils/backgroundUtils";
 import { getAssetKeyWithBook } from "@/stores/backgroundStore";
 import type { BackgroundConfig } from "@/types/background";
+import { getBackgroundAsync, setBackgroundAsync } from "@/utils/backgroundStorage";
 
 const initialAssets: Omit<Asset, 'id' | 'children'>[] = [];
 
@@ -43,12 +43,20 @@ interface AssetPortProps {
 }
 
 export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibrary }: AssetPortProps) {
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [isTouchDragging, setIsTouchDragging] = useState(false);
-  const [touchStartDistance, setTouchStartDistance] = useState(0);
-  const [lastTouchDistance, setLastTouchDistance] = useState(0);
+  // UI state from UI store - proper state separation
+  const { 
+    selectedAssets, 
+    selectAsset, 
+    hoveredAsset, 
+    setHoveredAsset,
+    dragState,
+    startDrag,
+    updateDrag,
+    endDrag,
+    viewport
+  } = useUIStore();
+  
+  // Local component state (ephemeral)
   const [enteredAssetId, setEnteredAssetId] = useState<string | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
@@ -61,6 +69,22 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialData, setModalInitialData] = useState<any>(null);
   const [generatorImportData, setGeneratorImportData] = useState<any>(null);
+  const [backgroundConfig, setBackgroundConfig] = useState<BackgroundConfig | null>(() => {
+    // Initialize with default config to prevent null reference errors
+    return {
+      mode: "glass",
+      color: null,
+      imageUrl: null,
+      position: { x: 0, y: 0 },
+      scale: 1,
+      edgeOpacity: 1,
+      innerRadius: 0.3,
+      outerRadius: 0.8,
+      gridSize: 40,
+    };
+  });
+  const [isEditingBackground, setIsEditingBackground] = useState(false);
+  const [isDraggingBackground, setIsDraggingBackground] = useState(false);
 
   // Handle generator import messages
   useEffect(() => {
@@ -84,10 +108,36 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const hasInitialized = useRef(false);
   
   // Background editing state - use refs to prevent resets
-  const [isDraggingBackground, setIsDraggingBackground] = useState(false);
   const backgroundDragStartRef = useRef({ x: 0, y: 0 });
   const backgroundStartPositionRef = useRef({ x: 0, y: 0 });
-  const backgroundConfigRef = useRef<BackgroundConfig | null>(null);
+  const backgroundConfigRef = useRef<BackgroundConfig | null>({
+    mode: "glass",
+    color: null,
+    imageUrl: null,
+    position: { x: 0, y: 0 },
+    scale: 1,
+    edgeOpacity: 1,
+    innerRadius: 0.3,
+    outerRadius: 0.8,
+    gridSize: 40,
+  });
+  
+  // Load background config for current asset/book
+  useEffect(() => {
+    const loadBackgroundConfig = async () => {
+      const currentBook = getCurrentBook();
+      const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
+      try {
+        const config = await getBackgroundAsync(assetKey);
+        setBackgroundConfig(config);
+        backgroundConfigRef.current = config;
+      } catch (error) {
+        console.error('Failed to load background config:', error);
+      }
+    };
+    
+    loadBackgroundConfig();
+  }, [enteredAssetId, backgroundRefreshKey]);
 
   // Initialize sample data
   useSampleData();
@@ -113,33 +163,34 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   }, []);
 
   const {
-    assets,
-    activeAsset,
+    getProjectAssets, 
+    updateAsset, 
+    currentProjectId,
     deleteAsset,
-    updateAssetPosition,
-    updateAssetSize,
-    setActiveAsset,
-    getRootAssets,
-    searchAssets,
-    getAssetPath,
-  } = useAssetTree();
+  } = useKanvasStore();
   
-  const { currentActiveId, setCurrentViewportId, currentViewportId, isEditingBackground, setIsEditingBackground, updateAsset, updateAssetPositionFast } = useAssetStore();
-  const { getCurrentBook, getWorldData, updateWorldData, currentBookId } = useBookStore();
-  const { getBackground, setBackground, migrateLegacyConfig, configs: backgroundConfigs } = useBackgroundStore();
+  const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
   const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
-  const { quota } = useCloudStore();
+  const { quotaUsed, quotaLimit } = useCloudStore();
+  const {
+    getCurrentBook,
+    getWorldData,
+    updateWorldData,
+    currentBookId
+  } = useBookStore();
   const navigate = useNavigate();
   
   // Calculate effective viewport size based on current context
   const getEffectiveViewportSize = useCallback(() => {
-    if (enteredAssetId && assets && assets[enteredAssetId]) {
+    if (enteredAssetId) {
       // When inside a nested asset, use the parent asset's dimensions as the viewport
-      const parentAsset = assets[enteredAssetId];
-      return {
-        width: parentAsset.width || 800,
-        height: parentAsset.height || 600
-      };
+      const parentAsset = assets.find(a => a.id === enteredAssetId);
+      if (parentAsset) {
+        return {
+          width: parentAsset.layout.width,
+          height: parentAsset.layout.height
+        };
+      }
     }
     // When at root level, use the actual container dimensions
     return viewportSize;
@@ -172,8 +223,17 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   }, []);
 
   const handleResize = useCallback((assetId: string, width: number, height: number) => {
-    updateAssetSize(assetId, width, height);
-  }, [updateAssetSize]);
+    const asset = assets.find(a => a.id === assetId);
+    if (asset) {
+      updateAsset(assetId, { 
+        layout: { 
+          ...asset.layout,
+          width, 
+          height 
+        } 
+      });
+    }
+  }, [updateAsset, assets]);
 
   // Update viewport size when component mounts or window resizes
   useEffect(() => {
@@ -196,15 +256,12 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     }
   }, []);
 
-  // Sync enteredAssetId from store's currentViewportId on mount/restore
-  // This ensures that when the page is refreshed, we restore the correct viewport
+  // Note: currentViewportId doesn't exist in V2 architecture
+  // This viewport restoration needs to be migrated to use new store patterns
   useEffect(() => {
-    // Only sync if we have a valid currentViewportId in the store and assets are loaded
-    if (currentViewportId && assets && assets[currentViewportId]) {
-      console.log(`[AssetPort] Restoring viewport from store: ${currentViewportId}`);
-      setEnteredAssetId(currentViewportId);
-    }
-  }, [currentViewportId, assets]);
+    // Viewport restoration disabled for V2 migration
+    // TODO: Implement proper viewport restoration using V2 store patterns
+  }, []);
 
   const openCreateAssetModal = useCallback(() => {
     console.log('🎯 Opening create modal');
@@ -233,11 +290,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   }, [viewportSize]);
 
   const handleCreateAssetClick = (e: React.MouseEvent) => {
-    console.log('🔵 AssetPort handleCreateAssetClick called');
-    e.stopPropagation();
-    e.preventDefault();
-    e.nativeEvent.stopImmediatePropagation(); // Prevent other listeners
-    console.log('🔵 AssetPort: All event propagation stopped, calling openCreateAssetModal');
     openCreateAssetModal();
   };
 
@@ -269,33 +321,24 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     if (!asset?.id) {
       return;
     }
-    setActiveAsset(asset.id);
     setEnteredAssetId(asset.id);
-    setCurrentViewportId(asset.id);
-  }, [setActiveAsset, setCurrentViewportId, setEnteredAssetId]);
+  }, []);
 
   // Listen for navigation events from sidebar
   useEffect(() => {
     const handleNavigateToAsset = (event: CustomEvent) => {
       const { assetId } = event.detail;
-      const asset = assets[assetId];
+      const asset = assets.find(a => a.id === assetId);
       
       if (asset) {
         // Navigate to parent viewport without moving the viewport
         if (asset.parentId) {
           // Exit current asset and go to parent
           setEnteredAssetId(asset.parentId);
-          setCurrentViewportId(asset.parentId);
-          setActiveAsset(asset.parentId);
         } else {
           // Asset is at root level, exit to root
           setEnteredAssetId(null);
-          setCurrentViewportId(null);
-          setActiveAsset(null);
         }
-        
-        // Set the target asset as active for highlighting
-        setActiveAsset(assetId);
       }
     };
 
@@ -303,22 +346,20 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     return () => {
       window.removeEventListener('navigateToAsset', handleNavigateToAsset as EventListener);
     };
-  }, [assets, setActiveAsset]);
+  }, [assets]);
 
   const handleExitAsset = useCallback(() => {
-    if (enteredAssetId && assets[enteredAssetId]?.parentId) {
-      // Go up one level to parent
-      const parentId = assets[enteredAssetId].parentId;
-      setEnteredAssetId(parentId);
-      setCurrentViewportId(parentId);
-      setActiveAsset(parentId);
-    } else {
-      // At root level, exit to root
-      setEnteredAssetId(null);
-      setActiveAsset(null);
-      setCurrentViewportId(null);
+    if (enteredAssetId) {
+      const currentAsset = assets.find(a => a.id === enteredAssetId);
+      if (currentAsset?.parentId) {
+        // Go up one level to parent
+        setEnteredAssetId(currentAsset.parentId);
+      } else {
+        // At root level, exit to root
+        setEnteredAssetId(null);
+      }
     }
-  }, [enteredAssetId, assets, setActiveAsset, setCurrentViewportId]);
+  }, [enteredAssetId, assets]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent, asset: Asset) => {
     e.preventDefault();
@@ -328,85 +369,127 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       setIsEditingBackground(false);
     }
     
-    setSelectedAsset(asset.id);
-    setActiveAsset(asset.id);
-    setIsDragging(true);
+    // Handle asset selection using UI store
+    selectAsset(asset.id);
     
+    // Start drag operation
     const rect = (e.target as HTMLElement).closest('.asset-item')?.getBoundingClientRect();
     if (rect) {
-      setDragOffset({
+      const startPos = {
         x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
+        y: e.clientY - rect.top
+      };
+      startDrag([asset.id], startPos);
     }
-  }, [setActiveAsset, isEditingBackground, setIsEditingBackground, setSelectedAsset, setIsDragging, setDragOffset]);
+  }, [isEditingBackground, selectAsset, startDrag]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent, asset: Asset) => {
     e.preventDefault();
     const touch = e.touches[0];
-    setSelectedAsset(asset.id);
-    setActiveAsset(asset.id);
-    setIsTouchDragging(true);
     
+    // Handle asset selection using UI store
+    selectAsset(asset.id);
+    
+    // Start touch drag
     const rect = (e.target as HTMLElement).closest('.asset-item')?.getBoundingClientRect();
     if (rect && touch) {
-      setDragOffset({
+      const startPos = {
         x: touch.clientX - rect.left,
-        y: touch.clientY - rect.top,
-      });
+        y: touch.clientY - rect.top
+      };
+      startDrag([asset.id], startPos);
     }
-  }, [setActiveAsset]);
+  }, [selectAsset, startDrag]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!isTouchDragging || !selectedAsset || !containerRef.current) return;
+    if (!dragState.isDragging || !containerRef.current) return;
     
     const touch = e.touches[0];
     if (!touch) return;
     
     const containerRect = containerRef.current.getBoundingClientRect();
-    const screenX = touch.clientX - containerRect.left - dragOffset.x;
-    const screenY = touch.clientY - containerRef.current.getBoundingClientRect().top - dragOffset.y;
+    const currentPos = {
+      x: touch.clientX - containerRect.left,
+      y: touch.clientY - containerRect.top
+    };
     
-    // Keep within bounds of container
-    const boundedX = Math.max(0, Math.min(screenX, containerRect.width - 200));
-    const boundedY = Math.max(0, Math.min(screenY, containerRect.height - 50));
+    // Update drag state in UI store
+    updateDrag(currentPos);
     
-    // Update asset position using fast method (no mutation queueing during drag)
-    updateAssetPositionFast(selectedAsset, boundedX, boundedY);
-  }, [isTouchDragging, selectedAsset, dragOffset, updateAssetPositionFast]);
+    // Update asset positions for dragged assets (similar to mouse move)
+    const delta = {
+      x: currentPos.x - dragState.dragStartPos.x,
+      y: currentPos.y - dragState.dragStartPos.y
+    };
+    
+    dragState.draggedAssetIds.forEach(assetId => {
+      const asset = assets.find(a => a.id === assetId);
+      if (asset) {
+        const newX = asset.layout.x + delta.x;
+        const newY = asset.layout.y + delta.y;
+        
+        const boundedX = Math.max(0, Math.min(newX, containerRect.width - asset.layout.width));
+        const boundedY = Math.max(0, Math.min(newY, containerRect.height - asset.layout.height));
+        
+        updateAsset(assetId, {
+          layout: {
+            ...asset.layout,
+            x: boundedX,
+            y: boundedY
+          }
+        });
+      }
+    });
+  }, [dragState, containerRef, assets, updateAsset, updateDrag]);
 
   const handleTouchEnd = useCallback(() => {
-    setIsTouchDragging(false);
-    // Save final position via mutation service when drag ends
-    if (selectedAsset && assets[selectedAsset]) {
-      const asset = assets[selectedAsset];
-      updateAssetPosition(selectedAsset, asset.x, asset.y);
-    }
-   }, [selectedAsset, assets, updateAssetPosition]);
+    endDrag();
+  }, [endDrag]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging || !selectedAsset || !containerRef.current) return;
+    if (!dragState.isDragging || !containerRef.current) return;
     
     const containerRect = containerRef.current.getBoundingClientRect();
-    const screenX = e.clientX - containerRect.left - dragOffset.x;
-    const screenY = e.clientY - containerRef.current.getBoundingClientRect().top - dragOffset.y;
+    const currentPos = {
+      x: e.clientX - containerRect.left,
+      y: e.clientY - containerRect.top
+    };
     
-    // Keep within bounds of container
-    const boundedX = Math.max(0, Math.min(screenX, containerRect.width - 200));
-    const boundedY = Math.max(0, Math.min(screenY, containerRect.height - 50));
+    // Update drag state in UI store
+    updateDrag(currentPos);
     
-    // Update asset position using fast method (no mutation queueing during drag)
-    updateAssetPositionFast(selectedAsset, boundedX, boundedY);
-  }, [isDragging, selectedAsset, dragOffset, updateAssetPositionFast]);
+    // Update asset positions for dragged assets
+    const delta = {
+      x: currentPos.x - dragState.dragStartPos.x,
+      y: currentPos.y - dragState.dragStartPos.y
+    };
+    
+    // Apply position updates to all dragged assets
+    dragState.draggedAssetIds.forEach(assetId => {
+      const asset = assets.find(a => a.id === assetId);
+      if (asset) {
+        const newX = asset.layout.x + delta.x;
+        const newY = asset.layout.y + delta.y;
+        
+        // Keep within bounds
+        const boundedX = Math.max(0, Math.min(newX, containerRect.width - asset.layout.width));
+        const boundedY = Math.max(0, Math.min(newY, containerRect.height - asset.layout.height));
+        
+        // Update asset position immediately for smooth dragging
+        updateAsset(assetId, {
+          layout: {
+            ...asset.layout,
+            x: boundedX,
+            y: boundedY
+          }
+        });
+      }
+    });
+  }, [dragState, containerRef, assets, updateAsset, updateDrag]);
 
   const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-    // Save final position via mutation service when drag ends
-    if (selectedAsset && assets[selectedAsset]) {
-      const asset = assets[selectedAsset];
-      updateAssetPosition(selectedAsset, asset.x, asset.y);
-    }
-   }, [selectedAsset, assets, updateAssetPosition]);
+    endDrag();
+  }, [endDrag]);
 
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -415,13 +498,10 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     const isAssetClick = target.classList.contains('asset-item') || target.closest('.asset-item');
     
     if (!isAssetClick) {
-      // Only deselect if an asset is selected, don't exit the current asset viewport
-      if (selectedAsset) {
-        setSelectedAsset(null);
-        setActiveAsset(null);
-      }
+      // Clear selection if clicking on empty space
+      useUIStore.getState().clearSelection();
     }
-  }, [selectedAsset, setActiveAsset]);
+  }, []);
 
   const handleContainerDoubleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -469,8 +549,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     }
   }, []);
 
+  // Mouse move and touch move event listeners
   useEffect(() => {
-    if (isDragging) {
+    if (dragState.isDragging) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
       return () => {
@@ -478,10 +559,10 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         window.removeEventListener("mouseup", handleMouseUp);
       };
     }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+  }, [dragState.isDragging, handleMouseMove, handleMouseUp]);
 
   useEffect(() => {
-    if (isTouchDragging) {
+    if (dragState.isDragging) {
       window.addEventListener("touchmove", handleTouchMove, { passive: false });
       window.addEventListener("touchend", handleTouchEnd);
       return () => {
@@ -489,57 +570,43 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         window.removeEventListener("touchend", handleTouchEnd);
       };
     }
-  }, [isTouchDragging, handleTouchMove, handleTouchEnd]);
+  }, [dragState.isDragging, handleTouchMove, handleTouchEnd]);
 
   // Get assets to display based on current context
   const displayAssets = useMemo(() => {
-    console.log('🎯 AssetPort: Calculating displayAssets', {
-      enteredAssetId,
-      hasAssets: !!assets,
-      assetsKeys: assets ? Object.keys(assets) : 'no assets',
-      getRootAssetsCount: getRootAssets().length
-    });
-
-    if (enteredAssetId && assets && assets[enteredAssetId]) {
-      const children = assets[enteredAssetId].children.map(childId => assets[childId]).filter(Boolean) || [];
-      console.log('🎯 AssetPort: Showing child assets for parent', enteredAssetId, ':', children.map(c => ({ id: c.id, name: c.name })));
-      return children;
+    if (enteredAssetId) {
+      // Show children of the entered asset
+      return assets.filter(asset => asset.parentId === enteredAssetId);
     } else {
-      const rootAssets = getRootAssets();
-      console.log('🎯 AssetPort: Showing root assets:', rootAssets.map(c => ({ id: c.id, name: c.name })));
-      return rootAssets;
+      // Show root-level assets (no parentId)
+      return assets.filter(asset => !asset.parentId);
     }
-  }, [enteredAssetId, assets, getRootAssets]);
+  }, [enteredAssetId, assets]);
 
   // Build breadcrumb path with asset IDs
-  const getBreadcrumbPath = () => {
+  const getBreadcrumbPath = useCallback(() => {
+    const currentBook = getCurrentBook();
     const path: { name: string; assetId: string | null }[] = [{ name: currentBook?.title || 'Root', assetId: null }];
     
-    if (enteredAssetId && assets && assets[enteredAssetId]) {
+    if (enteredAssetId) {
       const buildPath = (assetId: string): { name: string; assetId: string | null }[] => {
-        const asset = assets[assetId];
+        const asset = assets.find(a => a.id === assetId);
         if (!asset) return [];
         
         if (asset.parentId) {
           const parentPath = buildPath(asset.parentId);
-          return [...parentPath, { name: asset.name, assetId: asset.id }];
+          return [...parentPath, { name: asset.content.title || 'Untitled', assetId: asset.id }];
         }
-        return [{ name: asset.name, assetId: asset.id }];
+        return [{ name: asset.content.title || 'Untitled', assetId: asset.id }];
       };
       
       const fullPath = buildPath(enteredAssetId);
       return [...path, ...fullPath];
     }
     return path;
-  };
+  }, [enteredAssetId, assets, getCurrentBook]);
 
   const breadcrumbPath = getBreadcrumbPath();
-
-  // Get current background config from new store - subscribe to configs for reactivity
-  const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
-  const backgroundConfig = backgroundConfigs[assetKey] || getBackground(assetKey);
-  
-  // State for tracking image natural size
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   
   // Handle image loading for natural size detection
@@ -555,15 +622,16 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       setImageNaturalSize(newSize);
       
       // Only update config with image size if it's not already set
-      // Don't overwrite if already saved - this preserves user's scale settings on refresh
       if (!backgroundConfig.imageSize) {
+        const currentBook = getCurrentBook();
         const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
         const updatedConfig = { ...backgroundConfig, imageSize: newSize };
-        setBackground(assetKey, updatedConfig);
+        setBackgroundConfig(updatedConfig);
+        setBackgroundAsync(assetKey, updatedConfig);
       }
     };
     img.src = backgroundConfig.imageUrl;
-  }, [backgroundConfig?.imageUrl, backgroundConfig?.imageSize, enteredAssetId, currentBook?.id]);
+  }, [backgroundConfig?.imageUrl, backgroundConfig?.imageSize, enteredAssetId]);
 
   // Background editing handlers
   const handleBackgroundMouseDown = useCallback((e: React.MouseEvent) => {
@@ -600,16 +668,24 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   }, []);
 
   const updateBackgroundPosition = useCallback((x: number, y: number) => {
+    if (!backgroundConfig) return;
+    
+    const currentBook = getCurrentBook();
     const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
     const updatedConfig = { ...backgroundConfig, position: { x, y } };
-    setBackground(assetKey, updatedConfig);
-  }, [enteredAssetId, currentBook, backgroundConfig]);
+    setBackgroundConfig(updatedConfig);
+    setBackgroundAsync(assetKey, updatedConfig);
+  }, [enteredAssetId, backgroundConfig]);
 
   const updateBackgroundScale = useCallback((scale: number) => {
+    if (!backgroundConfig) return;
+    
+    const currentBook = getCurrentBook();
     const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
     const updatedConfig = { ...backgroundConfig, scale };
-    setBackground(assetKey, updatedConfig);
-  }, [enteredAssetId, currentBook, backgroundConfig]);
+    setBackgroundConfig(updatedConfig);
+    setBackgroundAsync(assetKey, updatedConfig);
+  }, [enteredAssetId, backgroundConfig]);
 
   const handleBackgroundWheel = useCallback((e: WheelEvent) => {
     if (!isEditingBackground || !backgroundConfig?.imageUrl) return;
@@ -739,7 +815,10 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
                       if (isRoot) {
                         handleExitAsset();
                       } else if (segment.assetId) {
-                        handleAssetDoubleClick(assets[segment.assetId]);
+                        const asset = assets.find(a => a.id === segment.assetId);
+                        if (asset) {
+                          handleAssetDoubleClick(asset);
+                        }
                       }
                     }}
                     className={`hover:text-foreground transition-colors truncate max-w-[60px] md:max-w-none ${
@@ -778,13 +857,13 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
           {/* Account Button */}
           <Button
             id="account-sync-button"
-            variant={effectiveLimits && quota && quota.used >= effectiveLimits.quotaBytes ? "destructive" : "outline"}
+            variant={effectiveLimits && quotaUsed >= effectiveLimits.maxStorage ? "destructive" : "outline"}
             size="sm"
             onClick={() => setShowAccountModal(true)}
             className="gap-1 md:gap-2 self-center text-xs md:text-sm relative"
             title={isAuthenticated ? "Account" : "Sign In"}
           >
-            {effectiveLimits && quota && quota.used >= effectiveLimits.quotaBytes && (
+            {effectiveLimits && quotaUsed >= effectiveLimits.maxStorage && (
               <AlertTriangle className="w-3 h-3 md:w-4 md:h-4 absolute -top-1 -right-1 animate-pulse" />
             )}
             <User className="w-3 h-3 md:w-4 md:h-4" />
@@ -924,58 +1003,48 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
 
         {/* Simple container without transforms */}
         <div className="viewport-container" style={{ width: '100%', height: '100%', position: 'relative' }}>
-         {(() => {
-    console.log('🎯 AssetPort: About to render assets', {
-      displayAssetsCount: displayAssets.length,
-      displayAssets: displayAssets.map(a => ({ id: a.id, name: a.name, type: a.type })),
-      enteredAssetId,
-      currentBook: currentBook?.id,
-      rawDisplayAssets: displayAssets,
-      assetsFromStore: assets,
-      getRootAssetsResult: getRootAssets()
-    });
-    
-    if (displayAssets.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center text-muted-foreground" style={{ height: '100%' }}>
-           <Sparkles className="w-8 h-8 mb-2 opacity-50" />
-           <p className="text-sm">
-             {enteredAssetId ? 'No child assets' : 'No assets yet'}
-           </p>
-           <p className="text-xs opacity-70">
-             {enteredAssetId 
-               ? 'Double-click parent assets to add children' 
-               : 'Add your first asset to get started'}
-           </p>
-         </div>
-      );
-    }
-    
-    return displayAssets.map((asset) => {
-      // CRITICAL FIX: Validate asset before rendering to prevent React error #130
-      if (!asset || !asset.id) {
-        console.error('[AssetPort] Invalid asset in displayAssets:', asset);
-        return null;
-      }
-      
-      // When inside a parent asset, position relative to parent's bounds
-      let displayAsset = { ...asset };
-      
-      if (enteredAssetId && assets && assets[enteredAssetId]) {
-        const parentAsset = assets[enteredAssetId];
-        // For nested assets, just use the stored coordinates as-is since we're not using transforms
-        displayAsset = asset;
-      }
-      
-      return (
-        <AssetItem
-          key={asset.id}
-          asset={displayAsset}
-          onDelete={handleDeleteAsset}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
+          {(() => {
+            if (displayAssets.length === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center text-muted-foreground" style={{ height: '100%' }}>
+                   <Sparkles className="w-8 h-8 mb-2 opacity-50" />
+                   <p className="text-sm">
+                     {enteredAssetId ? 'No child assets' : 'No assets yet'}
+                   </p>
+                   <p className="text-xs opacity-70">
+                     {enteredAssetId 
+                       ? 'Double-click parent assets to add children' 
+                       : 'Add your first asset to get started'}
+                   </p>
+                 </div>
+              );
+            }
+            
+            return displayAssets.map((asset) => {
+              // CRITICAL FIX: Validate asset before rendering to prevent React error #130
+              if (!asset || !asset.id) {
+                console.error('[AssetPort] Invalid asset in displayAssets:', asset);
+                return null;
+              }
+              
+              // When inside a parent asset, position relative to parent's bounds
+              let displayAsset = { ...asset };
+              
+              if (enteredAssetId && assets && assets[enteredAssetId]) {
+                const parentAsset = assets[enteredAssetId];
+                // For nested assets, just use the stored coordinates as-is since we're not using transforms
+                displayAsset = asset;
+              }
+              
+              return (
+                <AssetItem
+                  key={asset.id}
+                  asset={displayAsset}
+                  onDelete={handleDeleteAsset}
+                  onMouseDown={handleMouseDown}
+                  onTouchStart={handleTouchStart}
           onDoubleClick={handleAssetDoubleClick}
-          isSelected={selectedAsset === asset.id}
+          isSelected={selectedAssets.has(asset.id)}
           onResize={handleResize}
           onEdit={handleEditAsset}
           onSelectAndFocus={handleAssetDoubleClick}
@@ -1028,7 +1097,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         initialData={modalInitialData}
         parentId={enteredAssetId || undefined}
         generatorImportData={generatorImportData}
-        projectId={currentBookId || undefined}
+        projectId={currentBookId || currentProjectId || undefined}
         viewportSize={viewportSize}
       />
 

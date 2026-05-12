@@ -7,7 +7,8 @@
 
 import { supabase } from '@/lib/supabase';
 import { unifiedUploadService } from './UnifiedUploadService';
-import type { Asset } from '@/types/assetInterfaces';
+import type { Asset } from '@/types/Asset';
+import { v4 as uuidv4 } from 'uuid';
 
 // =====================================================
 // Type Definitions
@@ -394,67 +395,89 @@ export async function createFile(
 // =====================================================
 
 /**
- * Convert frontend Asset to AssetInput for RPC
- * Maps frontend Asset interface to database schema
+ * Convert canonical Asset to AssetInput for RPC
+ * Maps frontend canonical Asset interface to database schema
  */
 export function assetToAssetInput(asset: any): AssetInput {
   return {
     asset_id: asset.id,
     parent_id: asset.parentId || null,
-    name: asset.name,
-    type: asset.type,
-    x: asset.x,
-    y: asset.y,
-    width: asset.width,
-    height: asset.height,
-    z_index: asset.zIndex || 0,
-    is_expanded: asset.isExpanded || false,
-    content: asset.content || null,
-    background_config: asset.backgroundConfig || {},
-    viewport_config: asset.viewportConfig || {},
+    name: asset.content?.title || '',
+    type: asset.behavior?.renderMode || 'card',
+    x: asset.layout?.x || 0,
+    y: asset.layout?.y || 0,
+    width: asset.layout?.width || 200,
+    height: asset.layout?.height || 150,
+    z_index: asset.layout?.zIndex || 0,
+    is_expanded: false, // Derived from UI state, not asset data
+    content: asset.content?.text || null,
+    background_config: asset.style || {},
+    viewport_config: asset.behavior?.viewport || {},
     custom_fields: {
-      customFields: asset.customFields || [],
-      customFieldValues: asset.customFieldValues || [],
-      thumbnail: asset.thumbnail || null,
-      background: asset.background || null,
-      tags: asset.tags || [],
-      viewportDisplaySettings: asset.viewportDisplaySettings || {},
-      description: asset.description || null
+      customFields: asset.content?.customFields || {},
+      customFieldValues: [], // Converted from customFields structure
+      thumbnail: asset.content?.imageUrl || null,
+      background: asset.style?.background || null,
+      tags: asset.metadata?.tags || [],
+      viewportDisplaySettings: asset.behavior?.viewport || {},
+      description: asset.content?.description || null
     }
   };
 }
 
 /**
- * Convert database Asset to frontend Asset
+ * Convert database Asset to canonical frontend Asset
  * Maps database schema to frontend Asset interface
  */
-export function assetFromDb(dbAsset: Asset): any {
+export function assetFromDb(dbAsset: any): Asset {
   const customFields = dbAsset.custom_fields || {};
   
   return {
     id: dbAsset.asset_id,
-    parentId: dbAsset.parent_id,
-    name: dbAsset.name,
-    type: dbAsset.type,
-    x: dbAsset.x,
-    y: dbAsset.y,
-    width: dbAsset.width,
-    height: dbAsset.height,
-    zIndex: dbAsset.z_index,
-    isExpanded: dbAsset.is_expanded,
-    content: dbAsset.content,
-    backgroundConfig: dbAsset.background_config,
-    viewportConfig: dbAsset.viewport_config,
-    customFields: customFields.customFields || [],
-    customFieldValues: customFields.customFieldValues || [],
-    thumbnail: customFields.thumbnail,
-    background: customFields.background,
-    tags: customFields.tags,
-    viewportDisplaySettings: customFields.viewportDisplaySettings,
-    description: customFields.description,
-    children: [], // Will be reconstructed client-side from parent_id
-    createdAt: new Date(dbAsset.updated_at).getTime(),
-    updatedAt: new Date(dbAsset.updated_at).getTime()
+    projectId: dbAsset.project_id,
+    parentId: dbAsset.parent_id || undefined,
+    
+    // Layout structure
+    layout: {
+      x: dbAsset.x || 0,
+      y: dbAsset.y || 0,
+      width: dbAsset.width || 200,
+      height: dbAsset.height || 150,
+      zIndex: dbAsset.z_index || 0,
+    },
+    
+    // Content structure
+    content: {
+      title: dbAsset.name || '',
+      description: customFields.description || '',
+      text: dbAsset.content || '',
+      imageUrl: customFields.thumbnail || '',
+      customFields: customFields.customFields || {},
+    },
+    
+    // Style structure
+    style: {
+      background: customFields.background || {},
+      tagColor: '', // Will be derived from tags
+      border: {},
+      shape: dbAsset.type || 'card',
+      opacity: 1,
+    },
+    
+    // Behavior structure
+    behavior: {
+      renderMode: dbAsset.type || 'card',
+      interactions: {},
+      viewport: dbAsset.viewport_config || {},
+    },
+    
+    // Metadata structure
+    metadata: {
+      tags: customFields.tags || [],
+      createdAt: dbAsset.created_at || new Date().toISOString(),
+      updatedAt: dbAsset.updated_at || new Date().toISOString(),
+      version: 1, // Will be incremented on updates
+    },
   };
 }
 
@@ -514,41 +537,37 @@ export async function uploadFile(
   file: File
 ): Promise<{ fileId: string; r2Url: string }> {
   // Use UnifiedUploadService to handle the upload
-  const result = await unifiedUploadService.upload(file, {
-    projectId,
-    assetId,
-    backend: 'auto' // Let the service choose the best backend
+  const result = await unifiedUploadService.uploadFile(file, {
+    metadata: {
+      projectId,
+      assetId
+    }
   });
 
   if (!result.success) {
     throw new Error(result.error || 'Upload failed');
   }
 
-  // For R2 uploads, we need to create the file record separately
-  let fileId: string;
-  let r2Url: string;
+  // For successful uploads, use the result properties
+  const fileId = uuidv4(); // Generate file record ID
+  const r2Url = result.url || '';
 
-  if (result.backend === 'r2') {
-    // Create file record for R2 uploads
-    const { data: fileData, error: createError } = await supabase.rpc('create_file', {
-      p_project_id: projectId,
-      p_asset_id: assetId,
-      p_storage_key: result.r2Key!, // Store the R2 path
-      p_mime_type: file.type,
-      p_size_bytes: file.size
+  // Create file record in database
+  const { error: createError } = await supabase
+    .from('files')
+    .insert({
+      id: fileId,
+      project_id: projectId,
+      asset_id: assetId,
+      storage_key: result.key || '',
+      mime_type: file.type,
+      size_bytes: result.size || 0,
+      created_at: new Date().toISOString()
     });
 
-    if (createError) {
-      console.error('File record creation failed:', createError);
-      throw createError;
-    }
-
-    fileId = fileData;
-    r2Url = result.publicUrl!;
-  } else {
-    // For Supabase uploads, the file record is already created
-    fileId = result.fileId!;
-    r2Url = result.publicUrl || result.signedUrl || '';
+  if (createError) {
+    console.error('File record creation failed:', createError);
+    throw createError;
   }
 
   return { fileId, r2Url };

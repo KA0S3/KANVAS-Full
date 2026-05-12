@@ -1,11 +1,9 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Search, Filter, X } from 'lucide-react';
 import { AssetTreeNode } from './AssetTreeNode';
-import { useAssetTree } from '@/hooks/useAssetTree';
-import { useTagStore } from '@/stores/tagStore';
-import { useAssetStore } from '@/stores/assetStore';
-import { useTagInitializer } from '@/hooks/useTagInitializer';
-import type { Asset } from '@/types/assetInterfaces';
+import { useKanvasStore, selectAssetsByParentId } from '@/stores/kanvasStore';
+import { useUIStore } from '@/stores/uiStore';
+import type { Asset } from '@/types/Asset';
 
 interface AssetTreeContainerProps {
   onAssetSelect?: (assetId: string) => void;
@@ -20,45 +18,57 @@ export const AssetTreeContainer: React.FC<AssetTreeContainerProps> = ({
   onEdit,
   className = '',
 }) => {
-  const { treeNodes, flattenedTree, reparentAsset, setActiveAsset } = useAssetTree();
-  const { getSelectedTags, clearTagSelection } = useTagStore();
-  const { getCurrentBookAssets } = useAssetStore();
-  const assets = getCurrentBookAssets();
-  
-  // Initialize sample tags
-  useTagInitializer();
+  const { getProjectAssets, updateAsset } = useKanvasStore();
+  const { currentProjectId } = useKanvasStore();
+  const { selectedAssets, selectAsset, clearSelection } = useUIStore();
+  const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
   
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
-  // Get selected tags for filtering
-  const selectedTags = getSelectedTags();
+  // Get selected tags for filtering (placeholder - would need tag store integration)
+  const selectedTags: any[] = [];
   const hasActiveFilters = selectedTags.length > 0 || searchTerm !== '';
 
   // Handle asset selection
   const handleAssetSelect = useCallback((assetId: string) => {
-    setActiveAsset(assetId);
+    selectAsset(assetId);
     onAssetSelect?.(assetId);
-  }, [setActiveAsset, onAssetSelect]);
+  }, [selectAsset, onAssetSelect]);
 
   // Handle asset move/reparent
   const handleAssetMove = useCallback((assetId: string, newParentId?: string) => {
-    reparentAsset(assetId, newParentId);
-  }, [reparentAsset]);
+    updateAsset(assetId, { parentId: newParentId });
+  }, [updateAsset]);
 
   // Clear all filters
   const clearAllFilters = useCallback(() => {
     setSearchTerm('');
-    clearTagSelection();
-  }, [clearTagSelection]);
+    // clearTagSelection(); // Would need tag store integration
+  }, []);
+
+  // Build tree structure for rendering
+  const buildTreeNodes = useCallback((parentId?: string, level: number = 0): any[] => {
+    const children = assets.filter(asset => asset.parentId === parentId);
+    
+    return children.map(asset => ({
+      id: asset.id,
+      asset,
+      level,
+      isExpanded: expandedNodes.has(asset.id),
+      hasChildren: assets.some(child => child.parentId === asset.id),
+      children: buildTreeNodes(asset.id, level + 1)
+    }));
+  }, [assets, expandedNodes]);
 
   // Get root nodes for rendering
   const rootNodes = useMemo(() => {
-    return flattenedTree();
-  }, [flattenedTree]);
+    return buildTreeNodes(undefined, 0);
+  }, [buildTreeNodes]);
 
   // Check if tree is empty
-  const isEmpty = Object.keys(assets).length === 0;
+  const isEmpty = assets.length === 0;
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
@@ -138,47 +148,59 @@ export const AssetTreeContainer: React.FC<AssetTreeContainerProps> = ({
         )}
       </div>
 
-      {/* Tree content */}
-      <div className="overflow-y-auto" style={{ minHeight: '200px' }}>
-        {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
-            <div className="text-4xl mb-4">📂</div>
-            <p className="text-sm font-medium mb-1">No assets yet</p>
-            <p className="text-xs text-center opacity-70">
-              Create your first asset to see it in the tree
-            </p>
-          </div>
-        ) : rootNodes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
-            <div className="text-4xl mb-4">🔍</div>
-            <p className="text-sm font-medium mb-1">No results found</p>
-            <p className="text-xs text-center opacity-70">
-              Try adjusting your search or filters
-            </p>
-          </div>
-        ) : (
-          <div className="p-2 space-y-0.5">
-            {rootNodes.map((node) => (
-              <AssetTreeNode
-                key={node.id}
-                node={node}
-                level={0}
-                selectedAssetId={selectedAssetId}
-                onAssetSelect={handleAssetSelect}
-                onAssetMove={handleAssetMove}
-                onEdit={onEdit}
-                searchTerm={searchTerm}
-                showOnlyFiltered={selectedTags.length > 0}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+        {/* Tree content */}
+        <div className="overflow-y-auto" style={{ minHeight: '200px' }}>
+          {isEmpty ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
+              <div className="text-4xl mb-4">📂</div>
+              <p className="text-sm font-medium mb-1">No assets yet</p>
+              <p className="text-xs text-center opacity-70">
+                Create your first asset to see it in the tree
+              </p>
+            </div>
+          ) : rootNodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
+              <div className="text-4xl mb-4">🔍</div>
+              <p className="text-sm font-medium mb-1">No results found</p>
+              <p className="text-xs text-center opacity-70">
+                Try adjusting your search or filters
+              </p>
+            </div>
+          ) : (
+            <div className="p-2 space-y-0.5">
+              {rootNodes.map((node) => (
+                <AssetTreeNode
+                  key={node.id}
+                  asset={node.asset}
+                  depth={node.level}
+                  searchQuery={searchTerm}
+                  onEdit={onEdit}
+                  onSelectAndFocus={(asset: Asset) => handleAssetSelect(asset.id)}
+                  onCreateChildAsset={() => {}}
+                  isDragActive={false}
+                  allAssets={assets}
+                  expandedNodes={expandedNodes}
+                  onToggleExpand={(assetId: string) => {
+                    setExpandedNodes(prev => {
+                      const newSet = new Set(prev);
+                      if (newSet.has(assetId)) {
+                        newSet.delete(assetId);
+                      } else {
+                        newSet.add(assetId);
+                      }
+                      return newSet;
+                    });
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
       {/* Footer with info */}
       <div className="p-3 border-t border-glass-border/20">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{Object.keys(assets).length} assets</span>
+          <span>{assets.length} assets</span>
           <span>Drag to reorder • Click to select</span>
         </div>
       </div>

@@ -97,8 +97,8 @@ export interface Asset {
 // Zod schema for runtime validation
 export const AssetIdentitySchema = z.object({
   id: z.string().uuid(),
-  projectId: z.string().uuid(),
-  parentId: z.string().uuid().optional(),
+  projectId: z.string().min(1, "Project ID is required"),
+  parentId: z.string().optional(),
 });
 
 export const AssetLayoutSchema = z.object({

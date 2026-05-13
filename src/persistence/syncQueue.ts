@@ -9,6 +9,7 @@
 
 import { db } from '@/storage/indexeddb';
 import { RuntimeSyncState, createRuntimeSyncState, SyncQueueEntry } from '@/types/SyncTypes';
+import { createId } from '@/utils/id';
 
 /**
  * Sync queue persistence operations
@@ -20,7 +21,7 @@ export class SyncQueuePersistence {
   static async add(entry: Omit<SyncQueueEntry, 'id'>): Promise<string> {
     const syncEntry: SyncQueueEntry = {
       ...entry,
-      id: crypto.randomUUID(),
+      id: createId(),
     };
 
     await db.addToSyncQueue(syncEntry);

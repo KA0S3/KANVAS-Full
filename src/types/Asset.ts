@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod';
+import { createId } from '@/utils/id';
 
 // Core identity (Immutable)
 export interface AssetIdentity {
@@ -146,8 +147,8 @@ export const AssetMetadataSchema = z.object({
 
 export const AssetSchema = z.object({
   id: z.string().uuid(),
-  projectId: z.string().uuid(),
-  parentId: z.string().uuid().optional(),
+  projectId: z.string().min(1, "Project ID is required"),
+  parentId: z.string().optional(),
   layout: AssetLayoutSchema,
   content: AssetContentSchema,
   style: AssetStyleSchema,
@@ -166,7 +167,7 @@ export function createCanonicalAsset(
   overrides: Partial<Asset> = {}
 ): Asset {
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
+  const id = createId();
 
   const defaultAsset: Asset = {
     // Core Identity

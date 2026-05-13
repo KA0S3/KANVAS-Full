@@ -12,6 +12,7 @@ import { Project } from '@/storage/indexeddb';
 import { supabaseStorage } from './supabase';
 import { blobStorage, ProcessedFile } from './blobStorage';
 import { db } from '@/storage/indexeddb';
+import { createId } from '@/utils/id';
 
 export interface UnifiedStorageConfig {
   enableBatching: boolean;
@@ -167,7 +168,7 @@ export class UnifiedStorage {
       
       // Get file ID from storage
       const localFile = await blobStorage.getFile(processedFile.objectUrl);
-      const fileId = localFile?.id || crypto.randomUUID();
+      const fileId = localFile?.id || createId();
       
       return {
         processedFile,

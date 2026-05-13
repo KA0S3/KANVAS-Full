@@ -24,6 +24,38 @@ export class SupabaseStorage {
   }
 
   /**
+   * Upsert asset in cloud storage. This is the v2 sync primitive for both
+   * local creates and local updates because queued updates can outlive reloads.
+   */
+  async upsertAsset(asset: Asset): Promise<void> {
+    try {
+      const { error } = await this.client
+        .from('assets_v2')
+        .upsert({
+          id: asset.id,
+          project_id: asset.projectId,
+          parent_id: asset.parentId || null,
+          layout: asset.layout,
+          content: asset.content,
+          style: asset.style,
+          behavior: asset.behavior,
+          metadata: asset.metadata,
+          updated_at: new Date().toISOString(),
+          deleted_at: null,
+        }, {
+          onConflict: 'id',
+        });
+
+      if (error) {
+        throw new Error(`Failed to upsert asset: ${error.message}`);
+      }
+    } catch (error) {
+      console.error('Asset upsert failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create asset in cloud storage
    */
   async createAsset(asset: Asset): Promise<void> {

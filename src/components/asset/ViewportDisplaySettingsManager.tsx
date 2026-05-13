@@ -3,7 +3,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { ViewportDisplaySettings } from '@/types/extendedAsset';
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { Eye, EyeOff, Settings, Droplets } from 'lucide-react';
 
 interface ViewportDisplaySettingsManagerProps {
@@ -15,10 +15,25 @@ export function ViewportDisplaySettingsManager({
   assetId, 
   settings 
 }: ViewportDisplaySettingsManagerProps) {
-  const { updateViewportDisplaySettings } = useAssetStore();
+  const { getAsset, updateAsset } = useKanvasStore();
 
   const handleSettingChange = (key: keyof ViewportDisplaySettings, value: boolean | number) => {
-    updateViewportDisplaySettings(assetId, { [key]: value });
+    const asset = getAsset(assetId);
+    if (!asset) return;
+
+    const currentSettings = asset.content.customFields?.viewportDisplaySettings || settings;
+    updateAsset(assetId, {
+      content: {
+        ...asset.content,
+        customFields: {
+          ...asset.content.customFields,
+          viewportDisplaySettings: {
+            ...currentSettings,
+            [key]: value,
+          },
+        },
+      },
+    });
   };
 
   return (

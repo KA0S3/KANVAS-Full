@@ -14,6 +14,7 @@ import { SyncQueueEntry } from '@/types/SyncTypes';
 import { db } from '@/storage/indexeddb';
 import { useSyncStore } from '@/stores/syncStore';
 import { timedAssetSaver } from '@/services/TimedAssetSaver';
+import { createId } from '@/utils/id';
 
 // Store interface for canonical asset data
 export interface KanvasStore {
@@ -25,7 +26,7 @@ export interface KanvasStore {
   getAsset: (id: string) => Asset | undefined;
   getProjectAssets: (projectId: string) => Asset[];
   
-  createAsset: (assetData: Omit<Asset, 'id' | 'metadata'>) => Promise<string>;
+  createAsset: (assetData: Omit<Asset, 'id' | 'metadata'> & { id?: string; metadata?: Partial<Asset['metadata']> }) => Promise<string>;
   updateAsset: (id: string, updates: Partial<Asset>) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   
@@ -50,8 +51,8 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
   },
 
   // Asset creation with immediate UI update and timed persistence
-  createAsset: async (assetData: Omit<Asset, 'id'>) => {
-    const id = crypto.randomUUID();
+  createAsset: async (assetData) => {
+    const id = assetData.id || createId();
     const now = new Date().toISOString();
     
     const asset: Asset = createCanonicalAsset(assetData.projectId, {
@@ -76,7 +77,7 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     });
 
     // Queue for timed persistence (non-blocking)
-    timedAssetSaver.queueAssetUpdate(asset);
+    timedAssetSaver.queueAssetUpdate(asset, 'create');
 
     return id;
   },
@@ -91,8 +92,25 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     const updatedAsset: Asset = {
       ...currentAsset,
       ...updates,
+      layout: {
+        ...currentAsset.layout,
+        ...updates.layout,
+      },
+      content: {
+        ...currentAsset.content,
+        ...updates.content,
+      },
+      style: {
+        ...currentAsset.style,
+        ...updates.style,
+      },
+      behavior: {
+        ...currentAsset.behavior,
+        ...updates.behavior,
+      },
       metadata: {
         ...currentAsset.metadata,
+        ...updates.metadata,
         updatedAt: new Date().toISOString(),
         version: (currentAsset.metadata.version || 0) + 1,
       },
@@ -109,7 +127,7 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     });
 
     // Queue for timed persistence (non-blocking)
-    timedAssetSaver.queueAssetUpdate(updatedAsset);
+    timedAssetSaver.queueAssetUpdate(updatedAsset, 'update');
   },
 
   // Asset deletion with immediate UI update
@@ -129,7 +147,6 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     // Persist to IndexedDB asynchronously
     try {
       await db.deleteAsset(id, asset.projectId);
-      useSyncStore.getState().markForSync(id, 'delete', asset.projectId);
     } catch (error) {
       console.error('Failed to delete asset:', error);
       // TODO: Handle persistence failure
@@ -195,7 +212,7 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
           await db.updateAsset(id, changes);
           const asset = updatedAssets.get(id);
           if (asset) {
-            useSyncStore.getState().markForSync(id, 'update', asset.projectId);
+            useSyncStore.getState().markForSync(id, 'update', asset.projectId, asset);
           }
         }
       });

@@ -11,6 +11,7 @@ import { FileBlob } from '@/storage/indexeddb';
 import { db } from '@/storage/indexeddb';
 import { FileUploadState, createFileUploadState } from '@/types/SyncTypes';
 import { supabaseStorage } from './supabase';
+import { createId } from '@/utils/id';
 
 export interface BlobStorageConfig {
   maxFileSize: number; // 50MB max
@@ -65,7 +66,7 @@ export class BlobStorage {
     this.validateFile(file);
 
     // Create upload state
-    const uploadId = crypto.randomUUID();
+    const uploadId = createId();
     const uploadState = createFileUploadState(uploadId, assetId || '');
     this.activeUploads.set(uploadId, uploadState);
 
@@ -208,7 +209,7 @@ export class BlobStorage {
    */
   private async storeFileBlob(processed: ProcessedFile, assetId?: string): Promise<string> {
     const fileBlob: FileBlob = {
-      id: crypto.randomUUID(),
+      id: createId(),
       projectId: this.getCurrentProjectId() || '',
       assetId,
       storageKey: this.generateStorageKey(processed),
@@ -267,7 +268,7 @@ export class BlobStorage {
       .filter((result): result is PromiseFulfilledResult<ProcessedFile> => result.status === 'fulfilled')
       .map((result, index) => ({
         processedFile: result.value,
-        fileId: files[index].assetId || crypto.randomUUID(),
+        fileId: files[index].assetId || createId(),
       }));
 
     const failures = results

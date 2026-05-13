@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { emergencySaveService } from "@/services/emergencySaveService";
 import { useSyncStore } from "@/stores/syncStore";
 import { syncProcessor } from "@/sync/processor";
+import { timedAssetSaver } from "@/services/TimedAssetSaver";
 import { useUndoKeyboard } from "@/hooks/useUndoKeyboard";
 import { useAuthStore } from "@/stores/authStore";
 import { ProjectCacheLoadingIndicator } from "@/components/ProjectCacheLoadingIndicator";
@@ -31,10 +32,13 @@ const App = () => {
   const { user } = useAuthStore();
   
   // Get sync store for new architecture
-  const { setSyncStatus } = useSyncStore();
+  const { setSyncStatus, initialize } = useSyncStore();
   
   // Initialize services on app mount
   useEffect(() => {
+    // Clear broken sync entries and initialize sync store
+    initialize();
+    
     emergencySaveService.initialize();
     // NOTE: connectivityService heartbeat NOT started to prevent idle DB requests
     // It will be started on-demand when user interacts with the app
@@ -44,14 +48,25 @@ const App = () => {
 
     // Setup browser close warning for unsaved changes using sync processor
     const beforeUnloadHandler = () => {
-      syncProcessor.forceProcess();
+      timedAssetSaver.flushAll().finally(() => {
+        syncProcessor.forceProcess();
+      });
     };
     window.addEventListener('beforeunload', beforeUnloadHandler);
+    const visibilityChangeHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        timedAssetSaver.flushAll().finally(() => {
+          syncProcessor.forceProcess();
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', visibilityChangeHandler);
 
     return () => {
       // connectivityService.stopHeartbeat(); // Not started, no need to stop
       // Cleanup browser close warning on unmount
       window.removeEventListener('beforeunload', beforeUnloadHandler);
+      document.removeEventListener('visibilitychange', visibilityChangeHandler);
       syncProcessor.stop();
     };
   }, []);

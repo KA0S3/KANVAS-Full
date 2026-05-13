@@ -8,6 +8,7 @@
  */
 
 import { db, FileBlob } from '@/storage/indexeddb';
+import { createId } from '@/utils/id';
 
 /**
  * File persistence operations
@@ -19,7 +20,7 @@ export class FilePersistence {
   static async store(fileData: Omit<FileBlob, 'id' | 'createdAt'>): Promise<string> {
     const file: FileBlob = {
       ...fileData,
-      id: crypto.randomUUID(),
+      id: createId(),
       createdAt: new Date().toISOString(),
     };
 
@@ -82,7 +83,7 @@ export class FilePersistence {
   static async storeMultiple(filesData: Array<Omit<FileBlob, 'id' | 'createdAt'>>): Promise<string[]> {
     const files: FileBlob[] = filesData.map(fileData => ({
       ...fileData,
-      id: crypto.randomUUID(),
+      id: createId(),
       createdAt: new Date().toISOString(),
     }));
 
@@ -170,7 +171,7 @@ export class FilePersistence {
     const fileData: Omit<FileBlob, 'id' | 'createdAt'> = {
       projectId,
       assetId,
-      storageKey: storageKey || `uploads/${projectId}/${crypto.randomUUID()}`,
+      storageKey: storageKey || `uploads/${projectId}/${createId()}`,
       mimeType: file.type,
       sizeBytes: file.size,
       blob: file,

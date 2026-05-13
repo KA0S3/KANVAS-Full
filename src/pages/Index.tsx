@@ -797,6 +797,7 @@ const Index = () => {
             <BackgroundControls 
               assetId={currentViewportId} 
               onSave={handleBackgroundSave} 
+              onClose={() => setIsEditingBackground(false)}
               onToggleSidebar={() => setSidebarOpen(prev => !prev)}
             />
           )}

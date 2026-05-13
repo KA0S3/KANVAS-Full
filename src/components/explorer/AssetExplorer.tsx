@@ -132,12 +132,13 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     
     // Prevent dropping a parent onto its own child
     const isDescendant = (parentId: string, childId: string): boolean => {
-      const parent = assets[parentId];
+      const parent = assets.find(a => a.id === parentId);
       if (!parent) return false;
       
-      if (parent.children.includes(childId)) return true;
+      const children = assets.filter(a => a.parentId === parentId);
+      if (children.some(child => child.id === childId)) return true;
       
-      return parent.children.some(childId => isDescendant(childId, childId));
+      return children.some(child => isDescendant(child.id, childId));
     };
     
     if (isDescendant(activeAsset.id, overAsset.id)) {
@@ -191,12 +192,13 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     
     // Prevent dropping a parent onto its own child
     const isDescendant = (parentId: string, childId: string): boolean => {
-      const parent = assets[parentId];
+      const parent = assets.find(a => a.id === parentId);
       if (!parent) return false;
       
-      if (parent.children.includes(childId)) return true;
+      const children = assets.filter(a => a.parentId === parentId);
+      if (children.some(child => child.id === childId)) return true;
       
-      return parent.children.some(childId => isDescendant(childId, childId));
+      return children.some(child => isDescendant(child.id, childId));
     };
     
     if (isDescendant(activeAsset.id, overAsset.id)) {
@@ -249,6 +251,8 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   }, []);
   
   const rootAssets = Object.values(assets).filter(asset => !asset.parentId);
+  const allAssets = Object.values(assets);
+  const expandedNodes = new Set<string>(); // Default to all collapsed
   
   const openCreateAssetModal = useCallback(() => {
     console.log('🎯 Opening create modal');
@@ -302,7 +306,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
     
     // Calculate position for child asset (offset from parent)
     // assets already available from kanvasStore
-    const parentAsset = assets[parentId];
+    const parentAsset = assets.find(a => a.id === parentId);
     let position;
     if (parentAsset) {
       // Position child near parent
@@ -379,6 +383,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             className="h-6 w-6 p-0"
             onClick={() => {
               setIsEditingBackground(true);
+              window.dispatchEvent(new CustomEvent('openViewportBackgroundSettings'));
               if (onToggleSidebar) {
                 onToggleSidebar();
               }
@@ -522,6 +527,8 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
                 onSelectAndFocus={handleSelectAndFocus}
                 onCreateChildAsset={handleCreateChildAsset}
                 isDragActive={activeId !== null}
+                allAssets={allAssets}
+                expandedNodes={expandedNodes}
               />
             ))}
           </div>

@@ -8,6 +8,8 @@
  * 🔒 CRITICAL: These types are NEVER to be mixed with canonical Asset data
  */
 
+import { createId } from '@/utils/id';
+
 // Runtime sync state (Memory + IndexedDB syncQueue ONLY)
 export interface RuntimeSyncState {
   assetId: string;
@@ -114,7 +116,7 @@ export function createSyncQueueEntry(
 ): SyncQueueEntry {
   return {
     ...createRuntimeSyncState(assetId, operation),
-    id: crypto.randomUUID(),
+    id: createId(),
     projectId,
     assetData,
   };

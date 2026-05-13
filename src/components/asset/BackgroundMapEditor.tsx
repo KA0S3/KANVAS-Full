@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { X, Save, Upload, Maximize2 } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
-import { useBackgroundStore } from '@/stores/backgroundStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { db } from '@/storage/indexeddb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,10 +16,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import type { Asset } from '@/components/AssetItem';
-import type { BackgroundConfig, BackgroundMode } from '@/types/background';
+import { DEFAULT_BACKGROUND_CONFIG, type BackgroundConfig, type BackgroundMode } from '@/types/background';
 import { isColorPickerVisible, getBackgroundColor, validateBackgroundConfig, shouldShowParchmentOverlay, shouldShowGlassEffect } from '@/utils/backgroundUtils';
-import { getAssetKeyWithBook } from '@/stores/backgroundStore';
 
 interface BackgroundMapEditorProps {
   isOpen: boolean;
@@ -30,10 +28,8 @@ interface BackgroundMapEditorProps {
 }
 
 export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _viewportSize, onSave }: BackgroundMapEditorProps) {
-  const { getCurrentBookAssets, updateAsset } = useAssetStore();
-  const { getCurrentBook, getWorldData, updateWorldData } = useBookStore();
-  const { getBackground, setBackground, configs: backgroundConfigs } = useBackgroundStore();
-  const assets = getCurrentBookAssets();
+  const { getCurrentBook } = useBookStore();
+  const { getAsset, updateAsset, currentProjectId } = useKanvasStore();
 
   // Hook to get actual window size
   const [windowSize, setWindowSize] = useState({ width: 800, height: 600 });
@@ -66,12 +62,12 @@ export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _v
     };
   }, [assetId]);
   
-  const asset = assetId ? assets[assetId] : null;
+  const asset = assetId ? getAsset(assetId) : null;
   const currentBook = getCurrentBook();
 
-  // Get background config using new store - subscribe to configs for reactivity
-  const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-  const backgroundConfig = backgroundConfigs[assetKey] || getBackground(assetKey);
+  const backgroundConfig = (assetId && asset?.style.background)
+    ? { ...DEFAULT_BACKGROUND_CONFIG, ...asset.style.background }
+    : DEFAULT_BACKGROUND_CONFIG;
   const [localConfig, setLocalConfig] = useState<BackgroundConfig>(backgroundConfig);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -178,44 +174,34 @@ export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _v
   };
 
   const saveConfig = (config: BackgroundConfig) => {
-    const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-    setBackground(assetKey, config);
-    
-    // Also save to legacy locations for backward compatibility
-    if (!asset) {
-      // For root background, store in book-specific data
-      if (currentBook) {
-        const legacyConfig = {
-          isClear: config.mode === 'glass',
-          useParchment: config.mode === 'parchment',
-          color: config.color,
-          image: config.imageUrl,
-          position: config.position,
-          scale: config.scale,
-          gridSize: config.gridSize,
-          imageSize: config.imageSize,
-          edgeOpacity: config.edgeOpacity,
-        };
-        updateWorldData(currentBook.id, {
-          rootBackgroundConfig: legacyConfig
+    if (assetId && asset) {
+      updateAsset(asset.id, {
+        style: {
+          ...asset.style,
+          background: config,
+        },
+      });
+    } else {
+      const projectId = currentProjectId || currentBook?.id;
+      if (projectId) {
+        db.getProject(projectId).then(project => {
+          if (!project) return;
+          return db.updateProject({
+            ...project,
+            settings: {
+              ...project.settings,
+              backgrounds: {
+                ...(project.settings?.backgrounds || {}),
+                root: config,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+            version: (project.version || 0) + 1,
+          });
+        }).catch(error => {
+          console.error('Failed to save root background:', error);
         });
       }
-    } else {
-      // Update asset's background config with legacy format
-      const legacyConfig = {
-        isClear: config.mode === 'glass',
-        useParchment: config.mode === 'parchment',
-        color: config.color,
-        image: config.imageUrl,
-        position: config.position,
-        scale: config.scale,
-        gridSize: config.gridSize,
-        imageSize: config.imageSize,
-        edgeOpacity: config.edgeOpacity,
-      };
-      updateAsset(asset.id, {
-        backgroundConfig: legacyConfig,
-      });
     }
     
     // Dispatch event to notify other components
@@ -338,7 +324,7 @@ export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _v
   }, [localConfig.imageUrl, localConfig.scale]);
 
   const previewRef = useRef<HTMLDivElement>(null);
-  const assetName = asset ? asset.name : 'Root Background';
+  const assetName = asset ? asset.content.title : 'Root Background';
 
   return (
     <Dialog open={isOpen} onOpenChange={handleCloseAttempt}>

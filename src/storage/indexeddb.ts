@@ -11,6 +11,7 @@ import Dexie, { Table } from 'dexie';
 import type { Asset } from '@/types/Asset';
 import type { SyncQueueEntry } from '@/types/SyncTypes';
 import { validateAssetStrict, FORBIDDEN_ASSET_FIELDS } from '@/types/Safeguards';
+import { createId } from '@/utils/id';
 
 // Project metadata interface
 export interface Project {
@@ -208,7 +209,7 @@ export class KanvasDatabase extends Dexie {
       
       // Mark for sync
       await this.syncQueue.add({
-        id: crypto.randomUUID(),
+        id: createId(),
         projectId,
         assetId: id,
         operation: 'delete',
@@ -223,7 +224,7 @@ export class KanvasDatabase extends Dexie {
   async addToSyncQueue(entry: Omit<SyncQueueEntry, 'id'>): Promise<string> {
     const syncEntry: SyncQueueEntry = {
       ...entry,
-      id: crypto.randomUUID(),
+      id: createId(),
     };
     
     await this.syncQueue.add(syncEntry);
@@ -258,7 +259,7 @@ export class KanvasDatabase extends Dexie {
   async createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     const newProject: Project = {
       ...project,
-      id: crypto.randomUUID(),
+      id: createId(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: 1,

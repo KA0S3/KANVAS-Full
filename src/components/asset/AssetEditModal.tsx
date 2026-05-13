@@ -33,6 +33,7 @@ import { BackgroundMapEditor } from './BackgroundMapEditor';
 import type { Asset } from '@/components/AssetItem';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
 import { compressImageToThumbnail } from '@/utils/thumbnailCompression';
+import { createId } from '@/utils/id';
 import { uploadFile } from '@/services/ProjectService';
 
 interface AssetEditModalProps {
@@ -261,7 +262,7 @@ export function AssetEditModal({ isOpen, onClose, assetId, isNewAsset = false, v
         }
 
         // Upload to Cloudflare R2 via ProjectService
-        const assetIdForUpload = assetId || `temp-${crypto.randomUUID()}`;
+        const assetIdForUpload = assetId || `temp-${createId()}`;
         const { r2Url } = await uploadFile(currentBookId, `thumbnail-${assetIdForUpload}`, file);
         setFormData(prev => ({ ...prev, [field]: r2Url }));
       } catch (error) {

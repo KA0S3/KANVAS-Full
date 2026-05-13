@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Save, Upload, ChevronDown, ChevronRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useAssetStore } from '@/stores/assetStore';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { useTagStore } from '@/stores/tagStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +39,6 @@ import { Switch } from '@/components/ui/switch';
 import { CustomFieldsManager } from './CustomFieldsManager';
 import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager';
 import { BackgroundMapEditor } from './BackgroundMapEditor';
-import type { Asset } from '@/components/AssetItem';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
 import { assetSchema, type AssetFormData } from '@/utils/validationSchemas';
 
@@ -68,11 +67,17 @@ interface AssetEditModalProps {
 }
 
 export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = false, viewportSize, onCreateAsset, isCreating = false, initialData }: AssetEditModalProps) {
-  const { getCurrentBookAssets, updateAsset, deleteAsset } = useAssetStore();
-  const { tags, addTagToAsset, removeTagFromAsset } = useTagStore();
+  const { getAsset, updateAsset, deleteAsset } = useKanvasStore();
+  const { tags } = useTagStore();
   
-  const assets = getCurrentBookAssets();
-  const asset = assetId ? assets[assetId] : null;
+  const asset = assetId ? getAsset(assetId) : null;
+  const assetCustomFields = asset?.content.customFields || {};
+  const assetViewportSettings = assetCustomFields.viewportDisplaySettings || {
+    name: true,
+    description: false,
+    thumbnail: true,
+    portraitBlur: 0,
+  };
   
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState({
@@ -123,28 +128,23 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     if (asset) {
       console.log('📝 AssetEditModal: Setting form data from existing asset');
       form.reset({
-        name: asset.name || '',
-        description: asset.description || '',
-        type: asset.type || 'other',
-        x: asset.x || 0,
-        y: asset.y || 0,
-        width: asset.width || 200,
-        height: asset.height || 150,
-        tags: asset.tags || [],
-        thumbnail: asset.thumbnail || '',
-        background: asset.background || '',
-        content: asset.content || '',
-        customFields: asset.customFields || [],
-        customFieldValues: asset.customFieldValues || []
+        name: asset.content.title || '',
+        description: asset.content.description || '',
+        type: (asset.behavior.renderMode as any) || 'other',
+        x: asset.layout.x || 0,
+        y: asset.layout.y || 0,
+        width: asset.layout.width || 200,
+        height: asset.layout.height || 150,
+        tags: asset.metadata.tags || [],
+        thumbnail: asset.content.imageUrl || assetCustomFields.thumbnail || '',
+        background: typeof asset.style.background === 'string' ? asset.style.background : '',
+        content: asset.content.text || '',
+        customFields: assetCustomFields.customFields || [],
+        customFieldValues: assetCustomFields.customFieldValues || []
       });
-      setCustomFields(asset.customFields || []);
-      setCustomFieldValues(asset.customFieldValues || []);
-      setViewportDisplaySettings(asset.viewportDisplaySettings || {
-        name: true,
-        description: true,
-        thumbnail: true,
-        portraitBlur: 0,
-      });
+      setCustomFields(assetCustomFields.customFields || []);
+      setCustomFieldValues(assetCustomFields.customFieldValues || []);
+      setViewportDisplaySettings(assetViewportSettings);
     } else if (isNewAsset) {
       // Initialize with initialData for new asset
       console.log('📝 AssetEditModal: Setting form data from initialData for new asset');
@@ -179,28 +179,23 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     if (refreshTrigger > 0 && asset) {
       // Re-sync form data with updated asset data
       form.reset({
-        name: asset.name || '',
-        description: asset.description || '',
-        type: asset.type || 'other',
-        x: asset.x || 0,
-        y: asset.y || 0,
-        width: asset.width || 200,
-        height: asset.height || 150,
-        tags: asset.tags || [],
-        thumbnail: asset.thumbnail || '',
-        background: asset.background || '',
-        content: asset.content || '',
-        customFields: asset.customFields || [],
-        customFieldValues: asset.customFieldValues || []
+        name: asset.content.title || '',
+        description: asset.content.description || '',
+        type: (asset.behavior.renderMode as any) || 'other',
+        x: asset.layout.x || 0,
+        y: asset.layout.y || 0,
+        width: asset.layout.width || 200,
+        height: asset.layout.height || 150,
+        tags: asset.metadata.tags || [],
+        thumbnail: asset.content.imageUrl || assetCustomFields.thumbnail || '',
+        background: typeof asset.style.background === 'string' ? asset.style.background : '',
+        content: asset.content.text || '',
+        customFields: assetCustomFields.customFields || [],
+        customFieldValues: assetCustomFields.customFieldValues || []
       });
-      setCustomFields(asset.customFields || []);
-      setCustomFieldValues(asset.customFieldValues || []);
-      setViewportDisplaySettings(asset.viewportDisplaySettings || {
-        name: true,
-        description: true,
-        thumbnail: true,
-        portraitBlur: 0,
-      });
+      setCustomFields(assetCustomFields.customFields || []);
+      setCustomFieldValues(assetCustomFields.customFieldValues || []);
+      setViewportDisplaySettings(assetViewportSettings);
     }
   }, [refreshTrigger, asset, form]);
 
@@ -221,17 +216,17 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     // For existing assets, compare with original data
     if (!asset) return false;
     
-    return formValues.name !== (asset.name || '') ||
-           formValues.description !== (asset.description || '') ||
-           formValues.thumbnail !== (asset.thumbnail || '') ||
-           formValues.width !== (asset.width || 200) ||
-           formValues.height !== (asset.height || 150) ||
-           formValues.x !== (asset.x || 0) ||
-           formValues.y !== (asset.y || 0) ||
-           JSON.stringify(formValues.tags.sort()) !== JSON.stringify((asset.tags || []).sort()) ||
-           JSON.stringify(customFields) !== JSON.stringify(asset.customFields || []) ||
-           JSON.stringify(customFieldValues) !== JSON.stringify(asset.customFieldValues || []) ||
-           JSON.stringify(viewportDisplaySettings) !== JSON.stringify(asset.viewportDisplaySettings || {});
+    return formValues.name !== (asset.content.title || '') ||
+           formValues.description !== (asset.content.description || '') ||
+           formValues.thumbnail !== (asset.content.imageUrl || assetCustomFields.thumbnail || '') ||
+           formValues.width !== (asset.layout.width || 200) ||
+           formValues.height !== (asset.layout.height || 150) ||
+           formValues.x !== (asset.layout.x || 0) ||
+           formValues.y !== (asset.layout.y || 0) ||
+           JSON.stringify([...(formValues.tags || [])].sort()) !== JSON.stringify([...(asset.metadata.tags || [])].sort()) ||
+           JSON.stringify(customFields) !== JSON.stringify(assetCustomFields.customFields || []) ||
+           JSON.stringify(customFieldValues) !== JSON.stringify(assetCustomFields.customFieldValues || []) ||
+           JSON.stringify(viewportDisplaySettings) !== JSON.stringify(assetViewportSettings || {});
   };
 
   const handleCloseAttempt = () => {
@@ -291,7 +286,37 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
           return;
         } else {
           // Update existing asset
-          updateAsset(asset.id, assetData);
+          updateAsset(asset.id, {
+            layout: {
+              ...asset.layout,
+              x: data.x,
+              y: data.y,
+              width: data.width,
+              height: data.height,
+            },
+            content: {
+              ...asset.content,
+              title: data.name,
+              description: data.description || '',
+              text: data.content || asset.content.text || '',
+              imageUrl: data.thumbnail || undefined,
+              customFields: {
+                ...asset.content.customFields,
+                thumbnail: data.thumbnail || undefined,
+                customFields,
+                customFieldValues,
+                viewportDisplaySettings,
+              },
+            },
+            behavior: {
+              ...asset.behavior,
+              renderMode: data.type,
+            },
+            metadata: {
+              ...asset.metadata,
+              tags: data.tags || [],
+            },
+          });
           
           // Tag associations are already handled in real-time via handleTagToggle
           // No need to re-process them here to avoid duplicates
@@ -327,14 +352,6 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     
     form.setValue('tags', newTags);
     
-    // For existing assets, also update tag store immediately for visual feedback
-    if (asset && !isNewAsset) {
-      if (isCurrentlySelected) {
-        removeTagFromAsset(asset.id, tagId);
-      } else {
-        addTagToAsset(asset.id, tagId);
-      }
-    }
   };
 
   const handleBackgroundSave = () => {
@@ -582,8 +599,8 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                       <div>
                         <p className="text-sm font-medium">Configure background image and positioning</p>
                         <p className="text-xs text-muted-foreground">
-                          {asset.backgroundConfig?.image 
-                            ? `Background set: ${asset.backgroundConfig.position?.x || 0}, ${asset.backgroundConfig.position?.y || 0}` 
+                          {asset.style.background?.imageUrl 
+                            ? `Background set: ${asset.style.background.position?.x || 0}, ${asset.style.background.position?.y || 0}` 
                             : 'No background image set'}
                         </p>
                       </div>

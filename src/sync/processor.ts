@@ -12,8 +12,6 @@ import { db } from '@/storage/indexeddb';
 import { useSyncStore } from '@/stores/syncStore';
 import { supabaseStorage } from '@/storage/supabase';
 import { Asset } from '@/types/Asset';
-import { assetToAssetInput } from '@/services/ProjectService';
-import { supabase } from '@/lib/supabase';
 
 export interface SyncProcessorConfig {
   maxRetries: number;
@@ -142,11 +140,7 @@ export class SyncProcessor {
       await db.markSyncProcessed(entry.id);
       
       // Update local sync store
-      const syncStore = useSyncStore.getState();
-      const currentSyncState = syncStore.getSyncStatus(entry.assetId);
-      if (currentSyncState) {
-        syncStore.markForSync(entry.assetId, entry.operation as any, entry.projectId);
-      }
+      useSyncStore.getState().markSynced(entry.assetId);
 
     } catch (error) {
       await this.handleProcessingError(entry, error as Error);
@@ -180,13 +174,7 @@ export class SyncProcessor {
       throw new Error('Create operation requires asset data');
     }
 
-    const asset = entry.assetData as Asset;
-    const assetInput = assetToAssetInput(asset);
-    
-    // Use ProjectService RPC for create operation
-    await supabase.rpc('save_assets', {
-      p_assets: [assetInput]
-    });
+    await supabaseStorage.upsertAsset(entry.assetData as Asset);
   }
 
   /**
@@ -197,13 +185,7 @@ export class SyncProcessor {
       throw new Error('Update operation requires asset data');
     }
 
-    const asset = entry.assetData as Asset;
-    const assetInput = assetToAssetInput(asset);
-    
-    // Use ProjectService RPC for update operation
-    await supabase.rpc('save_assets', {
-      p_assets: [assetInput]
-    });
+    await supabaseStorage.upsertAsset(entry.assetData as Asset);
   }
 
   /**
@@ -225,6 +207,7 @@ export class SyncProcessor {
     if (retryCount >= this.config.maxRetries) {
       // Max retries reached - mark as permanently failed
       await db.markSyncFailed(entry.id, `Max retries exceeded: ${error.message}`);
+      useSyncStore.getState().markFailed(entry.assetId, error.message);
       console.error(`Sync failed permanently for entry ${entry.id}: ${error.message}`);
     } else {
       // Calculate exponential backoff delay

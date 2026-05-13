@@ -8,14 +8,19 @@
  */
 
 import { create } from 'zustand';
-import { RuntimeSyncState, SyncStoreState, createRuntimeSyncState } from '@/types/SyncTypes';
+import { RuntimeSyncState, SyncStoreState, createRuntimeSyncState, SyncQueueEntry } from '@/types/SyncTypes';
 import { db } from '@/storage/indexeddb';
+import { createId } from '@/utils/id';
 
 export interface SyncStore extends SyncStoreState {
   // Sync queue operations
-  markForSync: (assetId: string, operation: 'create' | 'update' | 'delete', projectId: string) => void;
+  markForSync: (assetId: string, operation: 'create' | 'update' | 'delete', projectId: string, assetData?: any) => void;
   getSyncStatus: (assetId: string) => RuntimeSyncState | undefined;
   clearSyncQueue: () => void;
+  clearSyncQueueDB: () => Promise<void>;
+  initialize: () => Promise<void>;
+  markSynced: (assetId: string) => void;
+  markFailed: (assetId: string, error: string) => void;
   
   // Sync status management
   setSyncStatus: (status: 'idle' | 'syncing' | 'error') => void;
@@ -32,8 +37,18 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   syncStatus: 'idle',
   errorCount: 0,
 
+  // Clear broken sync entries on initialization
+  async initialize() {
+    // Preserve durable offline work. Startup must not erase pending sync entries.
+    try {
+      await db.cleanupSyncedEntries();
+    } catch (error) {
+      console.warn('Failed to cleanup synced entries:', error);
+    }
+  },
+
   // Mark asset for sync
-  markForSync: (assetId: string, operation: 'create' | 'update' | 'delete', projectId: string) => {
+  markForSync: (assetId: string, operation: 'create' | 'update' | 'delete', projectId: string, assetData?: any) => {
     const syncState = createRuntimeSyncState(assetId, operation);
     
     set(state => {
@@ -43,14 +58,17 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
     });
 
     // Add to IndexedDB sync queue
-    db.addToSyncQueue({
+    const syncEntry: Omit<SyncQueueEntry, 'id'> = {
       assetId,
       operation,
       status: 'dirty',
       retryCount: 0,
       createdAt: syncState.createdAt,
       projectId,
-    }).catch(error => {
+      assetData: operation === 'delete' ? undefined : assetData,
+    };
+    
+    db.addToSyncQueue(syncEntry).catch(error => {
       console.error('Failed to add to sync queue:', error);
     });
   },
@@ -63,6 +81,40 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   // Clear entire sync queue
   clearSyncQueue: () => {
     set({ syncQueue: new Map() });
+  },
+
+  // Clear IndexedDB sync queue
+  clearSyncQueueDB: async () => {
+    try {
+      await db.syncQueue.clear();
+    } catch (error) {
+      console.error('Failed to clear sync queue DB:', error);
+    }
+  },
+
+  markSynced: (assetId: string) => {
+    set(state => {
+      const newQueue = new Map(state.syncQueue);
+      newQueue.delete(assetId);
+      return { syncQueue: newQueue };
+    });
+  },
+
+  markFailed: (assetId: string, error: string) => {
+    set(state => {
+      const current = state.syncQueue.get(assetId);
+      if (!current) return state;
+
+      const newQueue = new Map(state.syncQueue);
+      newQueue.set(assetId, {
+        ...current,
+        status: 'failed',
+        error,
+        retryCount: current.retryCount + 1,
+        lastAttempt: new Date().toISOString(),
+      });
+      return { syncQueue: newQueue };
+    });
   },
 
   // Set overall sync status

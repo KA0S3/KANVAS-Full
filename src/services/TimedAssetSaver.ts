@@ -7,11 +7,10 @@
 
 import { db } from '@/storage/indexeddb';
 import { useSyncStore } from '@/stores/syncStore';
-import { assetToAssetInput } from '@/services/ProjectService';
 import type { Asset } from '@/types/Asset';
 
 export class TimedAssetSaver {
-  private saveQueue = new Map<string, Asset>();
+  private saveQueue = new Map<string, { asset: Asset; operation: 'create' | 'update' }>();
   private saveInterval = 5000; // 5 seconds
   private saveTimer: NodeJS.Timeout | null = null;
   private isProcessing = false;
@@ -19,8 +18,12 @@ export class TimedAssetSaver {
   /**
    * Queue asset update for timed persistence
    */
-  queueAssetUpdate(asset: Asset): void {
-    this.saveQueue.set(asset.id, asset);
+  queueAssetUpdate(asset: Asset, operation: 'create' | 'update' = 'update'): void {
+    const existing = this.saveQueue.get(asset.id);
+    this.saveQueue.set(asset.id, {
+      asset,
+      operation: existing?.operation === 'create' ? 'create' : operation,
+    });
     
     // Reset timer on every change
     if (this.saveTimer) {
@@ -41,7 +44,7 @@ export class TimedAssetSaver {
     
     return db.transaction('rw', db.assets, () => {
       db.assets.put(asset);
-      useSyncStore.getState().markForSync(asset.id, 'update', asset.projectId);
+      useSyncStore.getState().markForSync(asset.id, 'update', asset.projectId, asset);
     });
   }
 
@@ -52,29 +55,29 @@ export class TimedAssetSaver {
     if (this.saveQueue.size === 0 || this.isProcessing) return;
     
     this.isProcessing = true;
-    const assetsToSave = Array.from(this.saveQueue.values());
+    const entriesToSave = Array.from(this.saveQueue.values());
     this.saveQueue.clear();
     
     try {
       // Batch save to IndexedDB
       await db.transaction('rw', db.assets, () => {
-        assetsToSave.forEach(asset => {
+        entriesToSave.forEach(({ asset }) => {
           db.assets.put(asset);
         });
       });
 
       // Mark for sync
-      assetsToSave.forEach(asset => {
-        useSyncStore.getState().markForSync(asset.id, 'update', asset.projectId);
+      entriesToSave.forEach(({ asset, operation }) => {
+        useSyncStore.getState().markForSync(asset.id, operation, asset.projectId, asset);
       });
       
-      console.log(`[TimedAssetSaver] Saved ${assetsToSave.length} assets to IndexedDB`);
+      console.log(`[TimedAssetSaver] Saved ${entriesToSave.length} assets to IndexedDB`);
     } catch (error) {
       console.error('[TimedAssetSaver] Failed to save assets:', error);
       
       // Re-queue failed assets
-      assetsToSave.forEach(asset => {
-        this.saveQueue.set(asset.id, asset);
+      entriesToSave.forEach(({ asset, operation }) => {
+        this.saveQueue.set(asset.id, { asset, operation });
       });
     } finally {
       this.isProcessing = false;

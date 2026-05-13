@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { CustomField, CustomFieldValue, CustomFieldType, GlobalCustomField } from '@/types/extendedAsset';
-import { useAssetStore } from '@/stores/assetStore';
+import { CustomField, CustomFieldValue, CustomFieldType } from '@/types/extendedAsset';
+import { useKanvasStore } from '@/stores/kanvasStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,16 +17,7 @@ interface CustomFieldsManagerProps {
 }
 
 export function CustomFieldsManager({ assetId, fields, values }: CustomFieldsManagerProps) {
-  const { 
-    addCustomField, 
-    updateCustomField, 
-    removeCustomField, 
-    updateCustomFieldValue,
-    addGlobalCustomField,
-    updateGlobalCustomField,
-    removeGlobalCustomField,
-    globalCustomFields
-  } = useAssetStore();
+  const { getAsset, updateAsset } = useKanvasStore();
   
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
@@ -43,36 +34,39 @@ export function CustomFieldsManager({ assetId, fields, values }: CustomFieldsMan
     return fieldValue?.value || '';
   };
 
+  const persistCustomFields = (nextFields: CustomField[], nextValues: CustomFieldValue[]) => {
+    const asset = getAsset(assetId);
+    if (!asset) return;
+
+    updateAsset(assetId, {
+      content: {
+        ...asset.content,
+        customFields: {
+          ...asset.content.customFields,
+          customFields: nextFields,
+          customFieldValues: nextValues,
+        },
+      },
+    });
+  };
+
   const handleAddField = (isGlobal: boolean = false) => {
     try {
       setError(null);
       if (!newFieldName.trim()) return;
       
-      if (isGlobal) {
-        // Add global field
-        addGlobalCustomField({
-          label: newFieldName.trim(),
-          type: newFieldType,
-          displayInViewport: false,
-        });
-        
-        // Apply to current asset immediately
-        const existingField = safeFields.find(f => f.label === newFieldName.trim());
-        if (!existingField) {
-          addCustomField(assetId, {
+      const existingField = safeFields.find(f => f.label === newFieldName.trim());
+      if (!existingField) {
+        persistCustomFields([
+          ...safeFields,
+          {
+            id: `field_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             label: newFieldName.trim(),
             type: newFieldType,
             displayInViewport: false,
-            isGlobal: true,
-          });
-        }
-      } else {
-        // Add local field
-        addCustomField(assetId, {
-          label: newFieldName.trim(),
-          type: newFieldType,
-          displayInViewport: false,
-        });
+            isGlobal,
+          },
+        ], safeValues);
       }
       
       setNewFieldName('');
@@ -86,19 +80,30 @@ export function CustomFieldsManager({ assetId, fields, values }: CustomFieldsMan
   };
 
   const handleRemoveGlobalField = (fieldId: string) => {
-    removeGlobalCustomField(fieldId);
+    handleRemoveField(fieldId);
   };
 
   const handleRemoveField = (fieldId: string) => {
-    removeCustomField(assetId, fieldId);
+    persistCustomFields(
+      safeFields.filter(field => field.id !== fieldId),
+      safeValues.filter(value => value.fieldId !== fieldId)
+    );
   };
 
   const handleFieldLabelChange = (fieldId: string, newLabel: string) => {
-    updateCustomField(assetId, fieldId, { label: newLabel });
+    persistCustomFields(
+      safeFields.map(field => field.id === fieldId ? { ...field, label: newLabel } : field),
+      safeValues
+    );
   };
 
   const handleFieldValueChange = (fieldId: string, value: string) => {
-    updateCustomFieldValue(assetId, fieldId, value);
+    const existingValue = safeValues.find(item => item.fieldId === fieldId);
+    const nextValues = existingValue
+      ? safeValues.map(item => item.fieldId === fieldId ? { ...item, value } : item)
+      : [...safeValues, { fieldId, value }];
+
+    persistCustomFields(safeFields, nextValues);
   };
 
   const handleImageUpload = (fieldId: string, event: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,7 +154,10 @@ export function CustomFieldsManager({ assetId, fields, values }: CustomFieldsMan
                 <Select
                   value={field.type}
                   onValueChange={(value: CustomFieldType) => 
-                    updateCustomField(assetId, field.id, { type: value })
+                    persistCustomFields(
+                      safeFields.map(item => item.id === field.id ? { ...item, type: value } : item),
+                      safeValues
+                    )
                   }
                   disabled={isGlobalField}
                 >
@@ -165,7 +173,10 @@ export function CustomFieldsManager({ assetId, fields, values }: CustomFieldsMan
                   <Switch
                     checked={field.displayInViewport}
                     onCheckedChange={(checked) => 
-                      updateCustomField(assetId, field.id, { displayInViewport: checked })
+                      persistCustomFields(
+                        safeFields.map(item => item.id === field.id ? { ...item, displayInViewport: checked } : item),
+                        safeValues
+                      )
                     }
                   />
                   <Label className="text-xs whitespace-nowrap text-card-foreground">

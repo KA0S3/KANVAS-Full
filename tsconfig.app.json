@@ -27,5 +27,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/**/*.legacy.tsx",
+    "src/**/*.legacy.ts",
+    "src/**/*Backup.tsx",
+    "src/**/*Minimal.tsx"
+  ]
 }

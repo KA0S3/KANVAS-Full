@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAssetStore } from '@/stores/assetStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
-import { AssetItem } from './AssetItem';
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { AssetItem } from '../AssetItem';
 import { AssetCreationModalFixed } from './AssetCreationModalFixed';
 import { BackgroundMapEditorFixed } from './BackgroundMapEditorFixed';
 import { StorageCleanup } from '@/utils/storageCleanup';
-import type { Asset } from './AssetItem';
+import type { Asset } from '@/types/Asset';
 
 interface AssetPortProps {
   assetId: string;
@@ -14,9 +15,11 @@ interface AssetPortProps {
 }
 
 export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortProps) {
-  const { getCurrentBookAssets, getAssetChildren } = useAssetStore();
+  const { getAsset } = useAssetStore();
   const { getCurrentBook } = useBookStore();
-  const assets = getCurrentBookAssets();
+  const { getProjectAssets } = useKanvasStore();
+  const currentBook = getCurrentBook();
+  const assets = currentBook ? getProjectAssets(currentBook.id) : [];
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBackgroundModal, setShowBackgroundModal] = useState(false);
   const [effectiveViewportSize, setEffectiveViewportSize] = useState(viewportSize);
@@ -64,9 +67,13 @@ export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortPr
     // return () => clearInterval(checkInterval);
   }, []);
 
-  const currentAsset = assets[assetId];
-  const currentBook = getCurrentBook();
-  const childAssets = useMemo(() => getAssetChildren(assetId), [assetId, getAssetChildren]);
+  const currentAsset = getAsset(assetId);
+  const childAssets = useMemo(() => {
+    if (!assetId) return [];
+    // Get child assets using the kanvasStore
+    const allAssets = currentBook ? getProjectAssets(currentBook.id) : [];
+    return allAssets.filter(asset => asset.parentId === assetId);
+  }, [assetId, currentBook, getProjectAssets]);
 
   // Memoize position calculation to prevent re-renders
   const createModalPosition = useMemo(() => {
@@ -95,7 +102,27 @@ export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortPr
     setShowBackgroundModal(false);
   }, []);
 
-  // Prevent setState during render by using callbacks
+  // Asset action handlers
+  const deleteAsset = useCallback((assetId: string) => {
+    console.log('Delete asset:', assetId);
+    // Implementation would go here
+  }, []);
+  
+  const selectAsset = useCallback((asset: Asset) => {
+    console.log('Select asset:', asset.id);
+    // Implementation would go here
+  }, []);
+  
+  const editAsset = useCallback((asset: Asset) => {
+    console.log('Edit asset:', asset.id);
+    // Implementation would go here
+  }, []);
+  
+  const resizeAsset = useCallback((assetId: string, width: number, height: number) => {
+    console.log('Resize asset:', assetId, width, height);
+    // Implementation would go here
+  }, []);
+  
   const handleAssetAction = useCallback((action: string, asset: Asset) => {
     // Handle asset actions without causing render loops
     console.log('Asset action:', action, asset.id);
@@ -108,17 +135,17 @@ export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortPr
       style={{ width: effectiveViewportSize.width, height: effectiveViewportSize.height }}
     >
       {/* Background */}
-      {currentAsset?.backgroundConfig && (
+      {currentAsset?.style.background && (
         <div
           className="absolute inset-0"
           style={{
-            backgroundColor: currentAsset.backgroundConfig.color || 'transparent',
-            backgroundImage: currentAsset.backgroundConfig.image 
-              ? `url(${currentAsset.backgroundConfig.image})` 
+            backgroundColor: currentAsset.style.background.color || 'transparent',
+            backgroundImage: currentAsset.style.background.image 
+              ? `url(${currentAsset.style.background.image})` 
               : 'none',
-            backgroundPosition: `${currentAsset.backgroundConfig.position?.x || 0}px ${currentAsset.backgroundConfig.position?.y || 0}px`,
-            backgroundSize: `${(currentAsset.backgroundConfig.scale || 1) * 100}%`,
-            opacity: currentAsset.backgroundConfig.isClear === false ? 1 : 0.3,
+            backgroundPosition: `${currentAsset.style.background.position?.x || 0}px ${currentAsset.style.background.position?.y || 0}px`,
+            backgroundSize: `${(currentAsset.style.background.scale || 1) * 100}%`,
+            opacity: currentAsset.style.opacity || 1,
           }}
         />
       )}
@@ -128,8 +155,12 @@ export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortPr
         <AssetItem
           key={childAsset.id}
           asset={childAsset}
-          viewportSize={effectiveViewportSize}
-          onAction={handleAssetAction}
+          onDelete={deleteAsset}
+          onMouseDown={(e, asset) => selectAsset(asset)}
+          onDoubleClick={editAsset}
+          isSelected={false}
+          onResize={resizeAsset}
+          onEdit={editAsset}
         />
       ))}
 

@@ -47,7 +47,7 @@ export function useAssetCreation() {
   });
 
   const createNewAsset = async (
-    assetData: Omit<Asset, 'id' | 'metadata'>, 
+    assetData: Omit<Asset, 'id' | 'metadata'> & { metadata?: Partial<Asset['metadata']> }, 
     options?: { 
       fromUserClick?: boolean;
       file?: File;

@@ -8,6 +8,7 @@
  */
 
 import React, { useRef, useState } from "react";
+import { createPortal } from 'react-dom';
 import {
   X,
   FileText,
@@ -55,6 +56,7 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const {
     updateAsset,
+    createAsset,
   } = useKanvasStore();
 
   // Calculate adjusted position to keep menu on screen
@@ -112,16 +114,8 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
       },
     };
     
-    // Remove id and metadata fields that should be generated
     const { id, metadata, ...assetDataToCopy } = newAssetData;
-    
-    if (onCreateAsset) {
-      onCreateAsset({
-        name: assetDataToCopy.content.title || 'New Asset',
-        parentId: assetDataToCopy.parentId,
-        ...assetDataToCopy
-      });
-    }
+    createAsset(assetDataToCopy);
     onClose();
   };
 
@@ -343,25 +337,13 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
               Delete Asset
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
 };
 
-// Helper function for creating portals
-function createPortal(children: React.ReactNode) {
-  const portalRoot = document.getElementById('portal-root');
-  if (!portalRoot) {
-    return children;
-  }
-
-  return React.createElement(
-    'div',
-    { id: 'portal-root' },
-    children
-  );
-}
 
 // Export alias for backward compatibility
 export const AssetContextMenu = AssetContextMenuFixed;

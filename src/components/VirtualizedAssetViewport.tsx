@@ -6,14 +6,20 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useKanvasStore, selectProjectAssets } from '@/stores/kanvasStore';
+import { AssetItem } from '@/components/AssetItem';
+import { useAssetDrag } from '@/hooks/useAssetDrag';
 import type { Asset } from '@/types/Asset';
 
 interface VirtualizedAssetViewportProps {
   bookId: string;
   viewportWidth: number;
   viewportHeight: number;
-  onAssetClick?: (asset: any) => void;
-  onAssetDoubleClick?: (asset: any) => void;
+  onAssetClick?: (asset: Asset) => void;
+  onAssetDoubleClick?: (asset: Asset) => void;
+  onAssetDelete?: (assetId: string) => void;
+  onAssetResize?: (assetId: string, width: number, height: number) => void;
+  onAssetEdit?: (asset: Asset) => void;
+  selectedAssets?: Set<string>;
   className?: string;
 }
 
@@ -32,14 +38,20 @@ export function VirtualizedAssetViewport({
   viewportHeight,
   onAssetClick,
   onAssetDoubleClick,
+  onAssetDelete,
+  onAssetResize,
+  onAssetEdit,
+  selectedAssets = new Set(),
   className = ''
 }: VirtualizedAssetViewportProps) {
   const [visibleAssets, setVisibleAssets] = useState<VisibleAsset[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [viewportBounds, setViewportBounds] = useState({ x: 0, y: 0, width: viewportWidth, height: viewportHeight });
-  const containerRef = useRef<HTMLDivElement>(null);
   const scrollOffset = useRef({ x: 0, y: 0 });
   const lastLoadTime = useRef(0);
+  
+  // Use the drag hook for drag functionality
+  const { containerRef: dragContainerRef, handleAssetMouseDown, handleAssetTouchStart, isDragging } = useAssetDrag();
   
   // Get asset store methods
   const getProjectAssets = useKanvasStore((state) => state.getProjectAssets);
@@ -129,7 +141,7 @@ export function VirtualizedAssetViewport({
   
   // Monitor scroll changes (implement based on your scroll container)
   useEffect(() => {
-    const container = containerRef.current;
+    const container = dragContainerRef.current;
     if (!container) return;
     
     const handleScroll = () => {
@@ -150,31 +162,26 @@ export function VirtualizedAssetViewport({
     
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [viewportWidth, viewportHeight, handleViewportChange]);
+  }, [viewportWidth, viewportHeight, handleViewportChange, dragContainerRef]);
   
-  // Render individual asset
+  // Render individual asset with full interactions and drag support
   const renderAsset = useCallback((asset: VisibleAsset): JSX.Element => {
-    const AssetItem = ({ asset, onClick, onDoubleClick }: any) => {
-      return (
-        <div
-          className="asset-item absolute border border-gray-300 bg-white p-2 cursor-pointer hover:shadow-lg transition-shadow"
-          style={{
-            left: `${asset.x - viewportBounds.x}px`,
-            top: `${asset.y - viewportBounds.y}px`,
-            width: `${asset.width}px`,
-            height: `${asset.height}px`
-          }}
-          onClick={() => onClick?.(asset)}
-          onDoubleClick={() => onDoubleClick?.(asset)}
-        >
-          <div className="text-sm font-medium truncate">{asset.name}</div>
-          <div className="text-xs text-gray-500">{asset.type}</div>
-        </div>
-      );
-    };
+    if (!asset.fullAsset) return null;
     
-    return <AssetItem key={asset.id} asset={asset} onClick={onAssetClick} onDoubleClick={onAssetDoubleClick} />;
-  }, [viewportBounds, onAssetClick, onAssetDoubleClick]);
+    return (
+      <AssetItem
+        key={asset.id}
+        asset={asset.fullAsset}
+        onDelete={onAssetDelete || (() => {})}
+        onMouseDown={handleAssetMouseDown}
+        onTouchStart={handleAssetTouchStart}
+        onDoubleClick={onAssetDoubleClick}
+        isSelected={selectedAssets.has(asset.id)}
+        onResize={onAssetResize}
+        onEdit={onAssetEdit}
+      />
+    );
+  }, [selectedAssets, handleAssetMouseDown, handleAssetTouchStart, onAssetDoubleClick, onAssetDelete, onAssetResize, onAssetEdit]);
   
   // Calculate total canvas size based on all assets
   const canvasSize = useMemo(() => {
@@ -193,8 +200,8 @@ export function VirtualizedAssetViewport({
   
   return (
     <div 
-      ref={containerRef}
-      className={`virtualized-viewport overflow-auto relative ${className}`}
+      ref={dragContainerRef}
+      className={`virtualized-viewport overflow-auto relative ${className} ${isDragging ? 'cursor-grabbing' : ''}`}
       style={{ width: viewportWidth, height: viewportHeight }}
     >
       {/* Loading indicator */}

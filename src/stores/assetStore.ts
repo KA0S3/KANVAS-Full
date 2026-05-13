@@ -182,6 +182,17 @@ export const useAssetStore = create<AssetStoreState>()((set, get) => ({
   // Get current book assets (backward compatibility for V2 migration)
   getCurrentBookAssets: () => {
     const { assets } = get();
-    return Object.values(assets);
+    const assetList = Object.values(assets) as any[];
+
+    // Several V2 migration-era components treat this helper as an array,
+    // while older modal/background code indexes it as a map by asset id.
+    // Return an array with id properties so both call sites keep working.
+    assetList.forEach(asset => {
+      if (asset?.id) {
+        assetList[asset.id] = asset;
+      }
+    });
+
+    return assetList;
   }
 }));

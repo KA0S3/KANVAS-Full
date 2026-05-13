@@ -20,6 +20,7 @@ import { LocalStorageWarning } from "@/components/LocalStorageWarning";
 import { Button } from "@/components/ui/button";
 import { useSampleData } from "@/hooks/useSampleData";
 import { AutosaveIndicator } from "@/components/autosave/AutosaveIndicator";
+import { useAssetDrag } from "@/hooks/useAssetDrag";
 import { 
   globalToLocalCoords, 
   localToGlobalCoords, 
@@ -30,9 +31,9 @@ import {
   type ViewportConfig 
 } from "@/utils/coordinateUtils";
 import { getBackgroundColor, shouldShowParchmentOverlay, shouldShowGlassEffect } from "@/utils/backgroundUtils";
-import { getAssetKeyWithBook } from "@/stores/backgroundStore";
 import type { BackgroundConfig } from "@/types/background";
-import { getBackgroundAsync, setBackgroundAsync } from "@/utils/backgroundStorage";
+import { DEFAULT_BACKGROUND_CONFIG } from "@/types/background";
+import { db } from "@/storage/indexeddb";
 
 const initialAssets: Omit<Asset, 'id' | 'children'>[] = [];
 
@@ -107,6 +108,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const containerRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
   
+  // Use drag hook with container ref
+  const { isDragging, handleAssetMouseDown, handleAssetTouchStart } = useAssetDrag(containerRef);
+  
   // Background editing state - use refs to prevent resets
   const backgroundDragStartRef = useRef({ x: 0, y: 0 });
   const backgroundStartPositionRef = useRef({ x: 0, y: 0 });
@@ -121,14 +125,45 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     outerRadius: 0.8,
     gridSize: 40,
   });
+
+  const {
+    getProjectAssets, 
+    updateAsset, 
+    currentProjectId,
+    deleteAsset,
+    getAsset,
+  } = useKanvasStore();
+  
+  const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
+  const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
+  const { quotaUsed, quotaLimit } = useCloudStore();
+  const {
+    getCurrentBook,
+    getWorldData,
+    updateWorldData,
+    currentBookId
+  } = useBookStore();
+  const navigate = useNavigate();
   
   // Load background config for current asset/book
   useEffect(() => {
     const loadBackgroundConfig = async () => {
-      const currentBook = getCurrentBook();
-      const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
       try {
-        const config = await getBackgroundAsync(assetKey);
+        let config: BackgroundConfig = JSON.parse(JSON.stringify(DEFAULT_BACKGROUND_CONFIG));
+
+        if (enteredAssetId) {
+          const asset = useKanvasStore.getState().getAsset(enteredAssetId);
+          config = asset?.style.background
+            ? { ...config, ...asset.style.background }
+            : config;
+        } else {
+          const projectId = useKanvasStore.getState().currentProjectId || currentBookId;
+          const project = projectId ? await db.getProject(projectId) : null;
+          config = project?.settings?.backgrounds?.root
+            ? { ...config, ...project.settings.backgrounds.root }
+            : config;
+        }
+
         setBackgroundConfig(config);
         backgroundConfigRef.current = config;
       } catch (error) {
@@ -137,7 +172,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     };
     
     loadBackgroundConfig();
-  }, [enteredAssetId, backgroundRefreshKey]);
+  }, [enteredAssetId, backgroundRefreshKey, currentBookId]);
 
   // Initialize sample data
   useSampleData();
@@ -161,24 +196,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       window.removeEventListener('backgroundSaved', handleBackgroundSave);
     };
   }, []);
-
-  const {
-    getProjectAssets, 
-    updateAsset, 
-    currentProjectId,
-    deleteAsset,
-  } = useKanvasStore();
-  
-  const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
-  const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
-  const { quotaUsed, quotaLimit } = useCloudStore();
-  const {
-    getCurrentBook,
-    getWorldData,
-    updateWorldData,
-    currentBookId
-  } = useBookStore();
-  const navigate = useNavigate();
   
   // Calculate effective viewport size based on current context
   const getEffectiveViewportSize = useCallback(() => {
@@ -220,7 +237,64 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
 
   const handleOpenBackgroundSettings = useCallback(() => {
     setShowBackgroundControls(true);
+    setIsEditingBackground(true);
   }, []);
+
+  const handleCloseBackgroundSettings = useCallback(() => {
+    setShowBackgroundControls(false);
+    setIsEditingBackground(false);
+    setIsDraggingBackground(false);
+  }, []);
+
+  const handleBackgroundConfigChange = useCallback((config: BackgroundConfig) => {
+    setBackgroundConfig(config);
+    backgroundConfigRef.current = config;
+
+    if (enteredAssetId) {
+      const asset = getAsset(enteredAssetId);
+      if (asset) {
+        updateAsset(enteredAssetId, {
+          style: {
+            ...asset.style,
+            background: config,
+          },
+        });
+      }
+      return;
+    }
+
+    const projectId = currentProjectId || currentBookId;
+    if (projectId) {
+      db.getProject(projectId).then(project => {
+        if (!project) return;
+        return db.updateProject({
+          ...project,
+          settings: {
+            ...project.settings,
+            backgrounds: {
+              ...(project.settings?.backgrounds || {}),
+              root: config,
+            },
+          },
+          updatedAt: new Date().toISOString(),
+          version: (project.version || 0) + 1,
+        });
+      }).catch(error => {
+        console.error('Failed to save root background:', error);
+      });
+    }
+  }, [enteredAssetId, getAsset, updateAsset, currentProjectId, currentBookId]);
+
+  useEffect(() => {
+    const handleOpenBackgroundPanel = () => {
+      handleOpenBackgroundSettings();
+    };
+
+    window.addEventListener('openViewportBackgroundSettings', handleOpenBackgroundPanel);
+    return () => {
+      window.removeEventListener('openViewportBackgroundSettings', handleOpenBackgroundPanel);
+    };
+  }, [handleOpenBackgroundSettings]);
 
   const handleResize = useCallback((assetId: string, width: number, height: number) => {
     const asset = assets.find(a => a.id === assetId);
@@ -361,135 +435,8 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     }
   }, [enteredAssetId, assets]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent, asset: Asset) => {
-    e.preventDefault();
-    
-    // Exit background editing if active
-    if (isEditingBackground) {
-      setIsEditingBackground(false);
-    }
-    
-    // Handle asset selection using UI store
-    selectAsset(asset.id);
-    
-    // Start drag operation
-    const rect = (e.target as HTMLElement).closest('.asset-item')?.getBoundingClientRect();
-    if (rect) {
-      const startPos = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-      };
-      startDrag([asset.id], startPos);
-    }
-  }, [isEditingBackground, selectAsset, startDrag]);
-
-  const handleTouchStart = useCallback((e: React.TouchEvent, asset: Asset) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    
-    // Handle asset selection using UI store
-    selectAsset(asset.id);
-    
-    // Start touch drag
-    const rect = (e.target as HTMLElement).closest('.asset-item')?.getBoundingClientRect();
-    if (rect && touch) {
-      const startPos = {
-        x: touch.clientX - rect.left,
-        y: touch.clientY - rect.top
-      };
-      startDrag([asset.id], startPos);
-    }
-  }, [selectAsset, startDrag]);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!dragState.isDragging || !containerRef.current) return;
-    
-    const touch = e.touches[0];
-    if (!touch) return;
-    
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const currentPos = {
-      x: touch.clientX - containerRect.left,
-      y: touch.clientY - containerRect.top
-    };
-    
-    // Update drag state in UI store
-    updateDrag(currentPos);
-    
-    // Update asset positions for dragged assets (similar to mouse move)
-    const delta = {
-      x: currentPos.x - dragState.dragStartPos.x,
-      y: currentPos.y - dragState.dragStartPos.y
-    };
-    
-    dragState.draggedAssetIds.forEach(assetId => {
-      const asset = assets.find(a => a.id === assetId);
-      if (asset) {
-        const newX = asset.layout.x + delta.x;
-        const newY = asset.layout.y + delta.y;
-        
-        const boundedX = Math.max(0, Math.min(newX, containerRect.width - asset.layout.width));
-        const boundedY = Math.max(0, Math.min(newY, containerRect.height - asset.layout.height));
-        
-        updateAsset(assetId, {
-          layout: {
-            ...asset.layout,
-            x: boundedX,
-            y: boundedY
-          }
-        });
-      }
-    });
-  }, [dragState, containerRef, assets, updateAsset, updateDrag]);
-
-  const handleTouchEnd = useCallback(() => {
-    endDrag();
-  }, [endDrag]);
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragState.isDragging || !containerRef.current) return;
-    
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const currentPos = {
-      x: e.clientX - containerRect.left,
-      y: e.clientY - containerRect.top
-    };
-    
-    // Update drag state in UI store
-    updateDrag(currentPos);
-    
-    // Update asset positions for dragged assets
-    const delta = {
-      x: currentPos.x - dragState.dragStartPos.x,
-      y: currentPos.y - dragState.dragStartPos.y
-    };
-    
-    // Apply position updates to all dragged assets
-    dragState.draggedAssetIds.forEach(assetId => {
-      const asset = assets.find(a => a.id === assetId);
-      if (asset) {
-        const newX = asset.layout.x + delta.x;
-        const newY = asset.layout.y + delta.y;
-        
-        // Keep within bounds
-        const boundedX = Math.max(0, Math.min(newX, containerRect.width - asset.layout.width));
-        const boundedY = Math.max(0, Math.min(newY, containerRect.height - asset.layout.height));
-        
-        // Update asset position immediately for smooth dragging
-        updateAsset(assetId, {
-          layout: {
-            ...asset.layout,
-            x: boundedX,
-            y: boundedY
-          }
-        });
-      }
-    });
-  }, [dragState, containerRef, assets, updateAsset, updateDrag]);
-
-  const handleMouseUp = useCallback(() => {
-    endDrag();
-  }, [endDrag]);
+  
+  // Old drag handlers removed - now using useAssetDrag hook
 
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -549,28 +496,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     }
   }, []);
 
-  // Mouse move and touch move event listeners
-  useEffect(() => {
-    if (dragState.isDragging) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-    }
-  }, [dragState.isDragging, handleMouseMove, handleMouseUp]);
-
-  useEffect(() => {
-    if (dragState.isDragging) {
-      window.addEventListener("touchmove", handleTouchMove, { passive: false });
-      window.addEventListener("touchend", handleTouchEnd);
-      return () => {
-        window.removeEventListener("touchmove", handleTouchMove);
-        window.removeEventListener("touchend", handleTouchEnd);
-      };
-    }
-  }, [dragState.isDragging, handleTouchMove, handleTouchEnd]);
+  // Drag event listeners are now handled by useAssetDrag hook
 
   // Get assets to display based on current context
   const displayAssets = useMemo(() => {
@@ -623,15 +549,12 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       
       // Only update config with image size if it's not already set
       if (!backgroundConfig.imageSize) {
-        const currentBook = getCurrentBook();
-        const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
         const updatedConfig = { ...backgroundConfig, imageSize: newSize };
-        setBackgroundConfig(updatedConfig);
-        setBackgroundAsync(assetKey, updatedConfig);
+        handleBackgroundConfigChange(updatedConfig);
       }
     };
     img.src = backgroundConfig.imageUrl;
-  }, [backgroundConfig?.imageUrl, backgroundConfig?.imageSize, enteredAssetId]);
+  }, [backgroundConfig?.imageUrl, backgroundConfig?.imageSize, enteredAssetId, handleBackgroundConfigChange]);
 
   // Background editing handlers
   const handleBackgroundMouseDown = useCallback((e: React.MouseEvent) => {
@@ -670,22 +593,16 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const updateBackgroundPosition = useCallback((x: number, y: number) => {
     if (!backgroundConfig) return;
     
-    const currentBook = getCurrentBook();
-    const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
     const updatedConfig = { ...backgroundConfig, position: { x, y } };
-    setBackgroundConfig(updatedConfig);
-    setBackgroundAsync(assetKey, updatedConfig);
-  }, [enteredAssetId, backgroundConfig]);
+    handleBackgroundConfigChange(updatedConfig);
+  }, [backgroundConfig, handleBackgroundConfigChange]);
 
   const updateBackgroundScale = useCallback((scale: number) => {
     if (!backgroundConfig) return;
     
-    const currentBook = getCurrentBook();
-    const assetKey = getAssetKeyWithBook(enteredAssetId || 'root', currentBook?.id);
     const updatedConfig = { ...backgroundConfig, scale };
-    setBackgroundConfig(updatedConfig);
-    setBackgroundAsync(assetKey, updatedConfig);
-  }, [enteredAssetId, backgroundConfig]);
+    handleBackgroundConfigChange(updatedConfig);
+  }, [backgroundConfig, handleBackgroundConfigChange]);
 
   const handleBackgroundWheel = useCallback((e: WheelEvent) => {
     if (!isEditingBackground || !backgroundConfig?.imageUrl) return;
@@ -1030,9 +947,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
               // When inside a parent asset, position relative to parent's bounds
               let displayAsset = { ...asset };
               
-              if (enteredAssetId && assets && assets[enteredAssetId]) {
-                const parentAsset = assets[enteredAssetId];
-                // For nested assets, just use the stored coordinates as-is since we're not using transforms
+              if (enteredAssetId) {
+                const parentAsset = assets.find(a => a.id === enteredAssetId);
+                // For nested assets, just use stored coordinates as-is since we're not using transforms
                 displayAsset = asset;
               }
               
@@ -1041,9 +958,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
                   key={asset.id}
                   asset={displayAsset}
                   onDelete={handleDeleteAsset}
-                  onMouseDown={handleMouseDown}
-                  onTouchStart={handleTouchStart}
-          onDoubleClick={handleAssetDoubleClick}
+                  onMouseDown={handleAssetMouseDown}
+                  onTouchStart={handleAssetTouchStart}
+                  onDoubleClick={handleAssetDoubleClick}
           isSelected={selectedAssets.has(asset.id)}
           onResize={handleResize}
           onEdit={handleEditAsset}
@@ -1083,7 +1000,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       {showBackgroundControls && (
         <BackgroundControls
           assetId={enteredAssetId}
-          onSave={() => setShowBackgroundControls(false)}
+          onSave={handleCloseBackgroundSettings}
+          onClose={handleCloseBackgroundSettings}
+          onChange={handleBackgroundConfigChange}
         />
       )}
 

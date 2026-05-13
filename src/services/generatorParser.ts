@@ -1,4 +1,5 @@
 import type { ExtendedAsset, CustomField, CustomFieldValue, GeneratorData } from '@/types/extendedAsset';
+import { createId } from '@/utils/id';
 
 export interface GeneratorMapping {
   [key: string]: {
@@ -151,7 +152,7 @@ export class GeneratorParser {
             processedValue = String(value);
         }
 
-        const fieldId = crypto.randomUUID();
+        const fieldId = createId();
         customFields.push({
           id: fieldId,
           label: key,
@@ -182,7 +183,7 @@ export class GeneratorParser {
           processedValue = String(value);
         }
 
-        const fieldId = crypto.randomUUID();
+        const fieldId = createId();
         customFields.push({
           id: fieldId,
           label: key,

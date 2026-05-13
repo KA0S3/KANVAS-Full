@@ -31,29 +31,8 @@ import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager
 import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import { calculateViewportCenterPosition, calculateChildAssetCenterPosition } from '@/utils/coordinateUtils';
 import type { Asset } from '@/types/Asset';
-// Types will be defined inline for now to avoid import issues
+import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
 import { GeneratorParser, EXAMPLE_GENERATOR_DATA } from '@/services/generatorParser';
-
-// Inline type definitions
-interface CustomField {
-  id: string;
-  name: string;
-  type: 'text' | 'number' | 'boolean' | 'date' | 'select';
-  options?: string[];
-  required?: boolean;
-}
-
-interface CustomFieldValue {
-  fieldId: string;
-  value: any;
-}
-
-interface ViewportDisplaySettings {
-  showInViewport?: boolean;
-  viewportOpacity?: number;
-  viewportScale?: number;
-  viewportPosition?: { x: number; y: number };
-}
 
 interface AssetCreationModalProps {
   isOpen: boolean;
@@ -165,7 +144,7 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
     setIsCreating(true);
     
     try {
-      const assetId = createNewAsset({
+      const assetId = await createNewAsset({
         projectId: projectId || '',
         parentId: parentId,
         layout: {
@@ -178,18 +157,24 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
         content: {
           title: formData.name,
           description: formData.description,
+          imageUrl: formData.thumbnail || undefined,
           text: '',
           customFields: {
-            ...formData.customFields,
             type: formData.type,
             tags: formData.tags,
             thumbnail: formData.thumbnail,
+            customFields: formData.customFields,
             customFieldValues: formData.customFieldValues,
             viewportDisplaySettings: formData.viewportDisplaySettings
           }
         },
         style: {},
-        behavior: {}
+        behavior: {
+          renderMode: formData.type,
+        },
+        metadata: {
+          tags: formData.tags,
+        },
       }, { 
         fromUserClick: true,
         file: selectedFile || undefined,

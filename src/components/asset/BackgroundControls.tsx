@@ -1,46 +1,100 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Save, Upload } from 'lucide-react';
-import { useAssetStore } from '@/stores/assetStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
-import { useBackgroundStore } from "@/stores/backgroundStore";
+import { useKanvasStore } from '@/stores/kanvasStore';
+import { db } from '@/storage/indexeddb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import type { Asset } from '@/components/AssetItem';
-import type { BackgroundConfig, BackgroundMode } from '@/types/background';
+import { DEFAULT_BACKGROUND_CONFIG, type BackgroundConfig, type BackgroundMode } from '@/types/background';
 import { isColorPickerVisible, getBackgroundColor, validateBackgroundConfig } from '@/utils/backgroundUtils';
-import { getAssetKeyWithBook } from "@/stores/backgroundStore";
 
 interface BackgroundControlsProps {
   assetId: string | null;
   onSave?: () => void;
+  onClose?: () => void;
+  onChange?: (config: BackgroundConfig) => void;
   onToggleSidebar?: () => void;
 }
 
-export function BackgroundControls({ assetId, onSave, onToggleSidebar }: BackgroundControlsProps) {
-  const { getCurrentBookAssets, updateAsset, setIsEditingBackground } = useAssetStore();
-  const { getCurrentBook, getWorldData, updateWorldData } = useBookStore();
-  const { getBackground, setBackground, migrateLegacyConfig, configs: backgroundConfigs } = useBackgroundStore();
+export function BackgroundControls({ assetId, onSave, onClose, onChange, onToggleSidebar }: BackgroundControlsProps) {
+  const { getCurrentBook } = useBookStore();
+  const { getAsset, updateAsset, currentProjectId } = useKanvasStore();
 
-  const assets = getCurrentBookAssets();
-  const asset = assetId ? assets[assetId] : null;
+  const asset = assetId ? getAsset(assetId) : null;
   const currentBook = getCurrentBook();
 
-  // Get background config using new store - subscribe to configs for reactivity
-  const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-  const backgroundConfig = backgroundConfigs[assetKey] || getBackground(assetKey);
+  const backgroundConfig = (assetId && asset?.style.background)
+    ? { ...DEFAULT_BACKGROUND_CONFIG, ...asset.style.background }
+    : DEFAULT_BACKGROUND_CONFIG;
   const [localConfig, setLocalConfig] = useState<BackgroundConfig>(backgroundConfig);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const saveConfig = (config: BackgroundConfig) => {
+    if (assetId && asset) {
+      updateAsset(assetId, {
+        style: {
+          ...asset.style,
+          background: config,
+        },
+      });
+    } else {
+      const projectId = currentProjectId || currentBook?.id;
+      if (projectId) {
+        db.getProject(projectId).then(project => {
+          if (!project) return;
+          return db.updateProject({
+            ...project,
+            settings: {
+              ...project.settings,
+              backgrounds: {
+                ...(project.settings?.backgrounds || {}),
+                root: config,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+            version: (project.version || 0) + 1,
+          });
+        }).catch(error => {
+          console.error('Failed to save root background:', error);
+        });
+      }
+    }
+
+    onChange?.(config);
+    window.dispatchEvent(new CustomEvent('backgroundPreviewChanged', {
+      detail: {
+        assetId: assetId || 'root',
+        config,
+      },
+    }));
+  };
+
   // Initialize local config when background config changes
   useEffect(() => {
     setLocalConfig(backgroundConfig);
     setHasUnsavedChanges(false);
-  }, [backgroundConfig]);
+  }, [assetId, asset?.style.background]);
+
+  useEffect(() => {
+    if (assetId) return;
+
+    const projectId = currentProjectId || currentBook?.id;
+    if (!projectId) return;
+
+    db.getProject(projectId).then(project => {
+      const config = project?.settings?.backgrounds?.root
+        ? { ...DEFAULT_BACKGROUND_CONFIG, ...project.settings.backgrounds.root }
+        : DEFAULT_BACKGROUND_CONFIG;
+      setLocalConfig(config);
+    }).catch(error => {
+      console.error('Failed to load root background:', error);
+    });
+  }, [assetId, currentProjectId, currentBook?.id]);
 
   // Handle image loading for natural size detection
   useEffect(() => {
@@ -57,7 +111,9 @@ export function BackgroundControls({ assetId, onSave, onToggleSidebar }: Backgro
         if (prev.imageSize && prev.imageSize.width === newSize.width && prev.imageSize.height === newSize.height) {
           return prev;
         }
-        return { ...prev, imageSize: newSize };
+        const updatedConfig = { ...prev, imageSize: newSize };
+        saveConfig(updatedConfig);
+        return updatedConfig;
       });
     };
     img.src = localConfig.imageUrl;
@@ -92,10 +148,7 @@ export function BackgroundControls({ assetId, onSave, onToggleSidebar }: Backgro
     const updatedConfig = validateBackgroundConfig({ ...localConfig, mode: newMode });
     setLocalConfig(updatedConfig);
     setHasUnsavedChanges(true);
-    
-    // Auto-save immediately via store
-    const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-    setBackground(assetKey, updatedConfig);
+    saveConfig(updatedConfig);
   };
 
   const handleSave = () => {
@@ -108,26 +161,24 @@ export function BackgroundControls({ assetId, onSave, onToggleSidebar }: Backgro
     
     // Dispatch event to notify other components
     window.dispatchEvent(new CustomEvent('backgroundSaved'));
-    setIsEditingBackground(false);
     
     // Reopen sidebar if toggle function is provided
     if (onToggleSidebar) {
       onToggleSidebar();
     }
+
+    onClose?.();
   };
 
   const handleCancel = () => {
     setLocalConfig(backgroundConfig);
     setImageNaturalSize(null);
     setHasUnsavedChanges(false);
-    setIsEditingBackground(false);
+    onChange?.(backgroundConfig);
   };
 
   const handleExit = () => {
-    setIsEditingBackground(false);
-    if (onToggleSidebar) {
-      onToggleSidebar();
-    }
+    onClose?.();
   };
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,12 +197,10 @@ export function BackgroundControls({ assetId, onSave, onToggleSidebar }: Backgro
         const updatedConfig = { ...localConfig, imageUrl: result };
         setLocalConfig(updatedConfig);
         setHasUnsavedChanges(true);
-        
-        // Auto-save immediately via store
-        const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-        setBackground(assetKey, updatedConfig);
+        saveConfig(updatedConfig);
       };
       reader.readAsDataURL(file);
+      event.target.value = '';
     }
   };
 
@@ -159,23 +208,17 @@ export function BackgroundControls({ assetId, onSave, onToggleSidebar }: Backgro
     const updatedConfig = { ...localConfig, imageUrl: null };
     setLocalConfig(updatedConfig);
     setHasUnsavedChanges(true);
-    
-    // Auto-save immediately via store
-    const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-    setBackground(assetKey, updatedConfig);
+    saveConfig(updatedConfig);
   };
 
   const updateLocalConfig = (updates: Partial<BackgroundConfig>) => {
     const updatedConfig = validateBackgroundConfig({ ...localConfig, ...updates });
     setLocalConfig(updatedConfig);
     setHasUnsavedChanges(true);
-    
-    // Auto-save immediately via store
-    const assetKey = getAssetKeyWithBook(assetId || 'root', currentBook?.id);
-    setBackground(assetKey, updatedConfig);
+    saveConfig(updatedConfig);
   };
 
-  const assetName = asset ? asset.name : 'Root Background';
+  const assetName = asset ? asset.content.title : 'Root Background';
 
   return (
     <div className="fixed right-4 top-4 w-80 max-h-[calc(100vh-2rem)] glass/60 cosmic-glow border border-glass-border/30 rounded-md p-4 space-y-4 overflow-y-auto z-50 backdrop-blur-md">

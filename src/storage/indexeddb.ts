@@ -12,6 +12,53 @@ import type { Asset } from '@/types/Asset';
 import type { SyncQueueEntry } from '@/types/SyncTypes';
 import { validateAssetStrict, FORBIDDEN_ASSET_FIELDS } from '@/types/Safeguards';
 import { createId } from '@/utils/id';
+import { USE_SUPABASE } from '@/config/features';
+
+export const REQUIRED_OBJECT_STORES = [
+  'projects',
+  'assets',
+  'files',
+  'syncQueue',
+  'migrationProgress',
+] as const;
+
+export class IndexedDBSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IndexedDBSchemaError';
+  }
+}
+
+const getNativeObjectStoreNames = (databaseName: string): Promise<string[]> => {
+  return new Promise((resolve, reject) => {
+    if (!globalThis.indexedDB) {
+      reject(new IndexedDBSchemaError('Browser IndexedDB API is unavailable'));
+      return;
+    }
+
+    const request = globalThis.indexedDB.open(databaseName);
+
+    request.onerror = () => {
+      reject(request.error || new IndexedDBSchemaError(`Failed to open native IndexedDB database ${databaseName}`));
+    };
+
+    request.onsuccess = () => {
+      const nativeDb = request.result;
+      const storeNames = Array.from(nativeDb.objectStoreNames);
+      nativeDb.close();
+      resolve(storeNames);
+    };
+  });
+};
+
+const deleteNativeDatabase = (databaseName: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.deleteDatabase(databaseName);
+    request.onerror = () => reject(request.error || new Error(`Failed to delete IndexedDB database ${databaseName}`));
+    request.onblocked = () => reject(new Error(`Delete blocked for IndexedDB database ${databaseName}; close other tabs and retry`));
+    request.onsuccess = () => resolve();
+  });
+};
 
 // Project metadata interface
 export interface Project {
@@ -25,6 +72,26 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
+}
+
+export interface ProjectTag {
+  id: string;
+  projectId: string;
+  name: string;
+  color?: string;
+  scope: 'project';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GlobalTag {
+  id: string;
+  userId: string;
+  name: string;
+  color?: string;
+  scope: 'global';
+  createdAt: string;
+  updatedAt: string;
 }
 
 // File blob interface (separate from assets)
@@ -82,6 +149,12 @@ export class KanvasDatabase extends Dexie {
   // Zone 5: Migration progress tracking
   migrationProgress!: Table<MigrationProgress>;
 
+  // Zone 6: Project-local tag definitions
+  projectTags!: Table<ProjectTag>;
+
+  // Zone 7: User-local shared tags
+  globalTags!: Table<GlobalTag>;
+
   constructor() {
     super('kanvas-db-v2');
 
@@ -105,8 +178,75 @@ export class KanvasDatabase extends Dexie {
       migrationProgress: 'migrationId, status, startTime, endTime, progressPercentage'
     });
 
+    // Version 2: add local tag stores and richer project hydration support
+    this.version(2).stores({
+      projects: 'id, userId, name, updatedAt, deletedAt',
+      assets: 'id, projectId, parentId, updatedAt, [projectId+parentId]',
+      files: 'id, projectId, assetId, storageKey, mimeType, [projectId+assetId]',
+      syncQueue: 'id, projectId, assetId, operation, status, createdAt, retryCount, [projectId+status]',
+      migrationProgress: 'migrationId, status, startTime, endTime, progressPercentage',
+      projectTags: 'id, projectId, name, updatedAt, [projectId+name]',
+      globalTags: 'id, userId, name, updatedAt, [userId+name]'
+    });
+
     // Runtime validation hooks to prevent zone pollution
     this.setupValidationHooks();
+  }
+
+  async verifySchemaHealth(): Promise<void> {
+    try {
+      if (!this.isOpen()) {
+        await this.open();
+      }
+
+      const nativeStoreNames = await getNativeObjectStoreNames(this.name);
+      const nativeMissingStores = REQUIRED_OBJECT_STORES.filter(store => !nativeStoreNames.includes(store));
+
+      if (nativeMissingStores.length > 0) {
+        throw new IndexedDBSchemaError(
+          `Native IndexedDB database is missing required object store(s): ${nativeMissingStores.join(', ')}`
+        );
+      }
+
+      const dexieStoreNames = Array.from(this.backendDB().objectStoreNames);
+      const missingStores = REQUIRED_OBJECT_STORES.filter(store => !dexieStoreNames.includes(store));
+
+      if (missingStores.length > 0) {
+        throw new IndexedDBSchemaError(
+          `IndexedDB schema is missing required object store(s): ${missingStores.join(', ')}`
+        );
+      }
+
+      // Touch every required table so Dexie/table bindings fail during startup, not later writes.
+      await Promise.all([
+        this.projects.limit(1).toArray(),
+        this.assets.limit(1).toArray(),
+        this.files.limit(1).toArray(),
+        this.syncQueue.limit(1).toArray(),
+        this.migrationProgress.limit(1).toArray(),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[IndexedDB] FATAL: local persistence schema is unhealthy.', {
+        database: this.name,
+        requiredStores: REQUIRED_OBJECT_STORES,
+        error: message,
+      });
+      throw error instanceof IndexedDBSchemaError
+        ? error
+        : new IndexedDBSchemaError(`IndexedDB schema health check failed: ${message}`);
+    }
+  }
+
+  async resetDevDatabaseForSchemaRepair(): Promise<void> {
+    if (!import.meta.env.DEV) {
+      throw new IndexedDBSchemaError('Refusing to reset IndexedDB outside development');
+    }
+
+    this.close();
+    await deleteNativeDatabase(this.name);
+    await this.open();
+    await this.verifySchemaHealth();
   }
 
   /**
@@ -179,10 +319,13 @@ export class KanvasDatabase extends Dexie {
     // Validate canonical asset structure before storing
     validateAssetStrict(asset);
     
-    return await this.transaction('rw', this.assets, async () => {
+    const id = await this.transaction('rw', this.assets, async () => {
       const id = await this.assets.add(asset);
       return id.toString();
     });
+
+    await this.verifyAssetReadAfterWrite(id, 'createAsset');
+    return id;
   }
 
   async getAsset(id: string): Promise<Asset | undefined> {
@@ -197,18 +340,36 @@ export class KanvasDatabase extends Dexie {
   }
 
   async updateAsset(id: string, updates: Partial<Asset>): Promise<number> {
-    return await this.transaction('rw', this.assets, async () => {
+    const updatedCount = await this.transaction('rw', this.assets, async () => {
       return await this.assets.update(id, updates);
     });
+
+    await this.verifyAssetReadAfterWrite(id, 'updateAsset');
+    return updatedCount;
+  }
+
+  private async verifyAssetReadAfterWrite(id: string, operation: string): Promise<void> {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    const savedAsset = await this.assets.get(id);
+    if (!savedAsset) {
+      throw new Error(`[IndexedDB] Read-after-write failed for ${operation}: asset ${id} was not found`);
+    }
+
+    console.log(`[IndexedDB] Read-after-write verified for ${operation}: asset ${id}`);
   }
 
   async deleteAsset(id: string, projectId: string): Promise<void> {
-    return await this.transaction('rw', this.assets, this.syncQueue, async () => {
-      // Delete asset
-      await this.assets.delete(id);
-      
-      // Mark for sync
-      await this.syncQueue.add({
+    await this.assets.delete(id);
+
+    if (!USE_SUPABASE) {
+      return;
+    }
+
+    try {
+      await Dexie.ignoreTransaction(() => this.syncQueue.add({
         id: createId(),
         projectId,
         assetId: id,
@@ -216,8 +377,10 @@ export class KanvasDatabase extends Dexie {
         status: 'dirty',
         retryCount: 0,
         createdAt: new Date().toISOString(),
-      });
-    });
+      }));
+    } catch (error) {
+      console.warn('[IndexedDB] Asset deleted locally, but sync queue write failed. Local persistence remains valid.', error);
+    }
   }
 
   // Sync queue operations
@@ -226,8 +389,18 @@ export class KanvasDatabase extends Dexie {
       ...entry,
       id: createId(),
     };
+
+    if (!USE_SUPABASE) {
+      return syncEntry.id;
+    }
     
-    await this.syncQueue.add(syncEntry);
+    try {
+      await this.verifySchemaHealth();
+      await Dexie.ignoreTransaction(() => this.syncQueue.add(syncEntry));
+    } catch (error) {
+      console.warn('[IndexedDB] Non-fatal sync queue write failed. Cloud sync queue was not updated, but local persistence was not blocked.', error);
+    }
+
     return syncEntry.id;
   }
 
@@ -256,16 +429,17 @@ export class KanvasDatabase extends Dexie {
   }
 
   // Project operations
-  async createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  async createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'> & Partial<Pick<Project, 'id' | 'createdAt' | 'updatedAt'>>): Promise<string> {
+    const now = new Date().toISOString();
     const newProject: Project = {
       ...project,
-      id: createId(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      version: 1,
+      id: project.id || createId(),
+      createdAt: project.createdAt || now,
+      updatedAt: project.updatedAt || now,
+      version: project.version || 1,
     };
 
-    await this.projects.add(newProject);
+    await this.projects.put(newProject);
     return newProject.id;
   }
 
@@ -281,6 +455,12 @@ export class KanvasDatabase extends Dexie {
       .toArray();
   }
 
+  async getAllProjects(): Promise<Project[]> {
+    return await this.projects
+      .filter(project => !project.deletedAt)
+      .toArray();
+  }
+
   async updateProject(project: Project): Promise<void> {
     await this.projects.update(project.id, {
       name: project.name,
@@ -291,6 +471,52 @@ export class KanvasDatabase extends Dexie {
       updatedAt: project.updatedAt,
       deletedAt: project.deletedAt,
     });
+  }
+
+  async createProjectTag(tag: ProjectTag): Promise<string> {
+    await this.projectTags.put(tag);
+    return tag.id;
+  }
+
+  async getProjectTags(projectId: string): Promise<ProjectTag[]> {
+    return await this.projectTags
+      .where('projectId')
+      .equals(projectId)
+      .sortBy('updatedAt');
+  }
+
+  async updateProjectTag(id: string, updates: Partial<ProjectTag>): Promise<void> {
+    await this.projectTags.update(id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async deleteProjectTag(id: string): Promise<void> {
+    await this.projectTags.delete(id);
+  }
+
+  async createGlobalTag(tag: GlobalTag): Promise<string> {
+    await this.globalTags.put(tag);
+    return tag.id;
+  }
+
+  async getGlobalTags(userId: string): Promise<GlobalTag[]> {
+    return await this.globalTags
+      .where('userId')
+      .equals(userId)
+      .sortBy('updatedAt');
+  }
+
+  async updateGlobalTag(id: string, updates: Partial<GlobalTag>): Promise<void> {
+    await this.globalTags.update(id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async deleteGlobalTag(id: string): Promise<void> {
+    await this.globalTags.delete(id);
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -341,12 +567,39 @@ export class KanvasDatabase extends Dexie {
 
   // Database maintenance
   async clearAllData(): Promise<void> {
-    return await this.transaction('rw', this.projects, this.assets, this.files, this.syncQueue, async () => {
+    return await this.transaction('rw', this.projects, this.assets, this.files, this.syncQueue, this.projectTags, this.globalTags, async () => {
       await this.projects.clear();
       await this.assets.clear();
       await this.files.clear();
       await this.syncQueue.clear();
+      await this.projectTags.clear();
+      await this.globalTags.clear();
     });
+  }
+
+  async loadProjectBundle(projectId: string, userId?: string): Promise<{
+    project: Project | undefined;
+    assets: Asset[];
+    projectTags: ProjectTag[];
+    globalTags: GlobalTag[];
+    files: FileBlob[];
+  }> {
+    const project = await this.getProject(projectId);
+    const resolvedUserId = userId || project?.userId;
+    const [assets, projectTags, globalTags, files] = await Promise.all([
+      this.getProjectAssets(projectId),
+      this.getProjectTags(projectId),
+      resolvedUserId ? this.getGlobalTags(resolvedUserId) : Promise.resolve([]),
+      this.getProjectFiles(projectId),
+    ]);
+
+    return {
+      project,
+      assets,
+      projectTags,
+      globalTags,
+      files,
+    };
   }
 
   async exportProjectData(projectId: string): Promise<{
@@ -366,3 +619,7 @@ export class KanvasDatabase extends Dexie {
 
 // Singleton instance
 export const db = new KanvasDatabase();
+
+export const verifyIndexedDBSchemaHealth = () => db.verifySchemaHealth();
+
+export const repairIndexedDBSchemaInDevelopment = () => db.resetDevDatabaseForSchemaRepair();

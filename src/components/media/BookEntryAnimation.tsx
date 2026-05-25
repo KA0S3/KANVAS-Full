@@ -8,50 +8,79 @@ interface BookEntryAnimationProps {
 
 const BookEntryAnimation = ({ onEntryComplete }: BookEntryAnimationProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { enterBookView, videosEnabled, videoSoundsEnabled, audioVolume } = useMediaStore();
+  const {
+    enterBookView,
+    videosEnabled,
+    videoSoundsEnabled,
+    audioEnabled,
+    audioVolume,
+    hasCompletedBookEntryExperience,
+    markBookEntryExperienceComplete,
+  } = useMediaStore();
   const [clickCount, setClickCount] = useState(0);
 
   useEffect(() => {
-  // If videos are disabled, just fade to black and complete immediately
-  if (!videosEnabled) {
-    setTimeout(() => {
+    if (hasCompletedBookEntryExperience) {
       enterBookView();
       onEntryComplete();
-    }, 500);
-    return;
-  }
+      return;
+    }
 
-  const video = videoRef.current;
-  if (!video) return;
+    // If videos are disabled, just fade to black and complete immediately
+    if (!videosEnabled) {
+      const timer = window.setTimeout(() => {
+        markBookEntryExperienceComplete();
+        enterBookView();
+        onEntryComplete();
+      }, 500);
 
-  const handleEnded = () => {
-    enterBookView();
-    onEntryComplete();
-  };
+      return () => window.clearTimeout(timer);
+    }
 
-  video.addEventListener('ended', handleEnded);
+    const video = videoRef.current;
+    if (!video) return;
 
-  // Auto-play video
-  video.play().catch(error => {
-    console.error('Entry video autoplay failed:', error);
-  });
+    const handleEnded = () => {
+      markBookEntryExperienceComplete();
+      enterBookView();
+      onEntryComplete();
+    };
 
-  return () => {
-    video.removeEventListener('ended', handleEnded);
-  };
-}, [enterBookView, onEntryComplete, videosEnabled, videoSoundsEnabled]);
+    video.addEventListener('ended', handleEnded);
+    video.muted = !videoSoundsEnabled || !audioEnabled;
+    video.volume = audioVolume;
+
+    // Auto-play video
+    video.play().catch(error => {
+      console.error('Entry video autoplay failed:', error);
+    });
+
+    return () => {
+      video.removeEventListener('ended', handleEnded);
+    };
+  }, [
+    enterBookView,
+    onEntryComplete,
+    videosEnabled,
+    videoSoundsEnabled,
+    audioEnabled,
+    audioVolume,
+    hasCompletedBookEntryExperience,
+    markBookEntryExperienceComplete,
+  ]);
 
 // Update video muted state when setting changes
 useEffect(() => {
   const video = videoRef.current;
   if (video) {
-    video.muted = !videoSoundsEnabled;
+    video.muted = !videoSoundsEnabled || !audioEnabled;
   }
-}, [videoSoundsEnabled]);
+}, [videoSoundsEnabled, audioEnabled]);
 
   const handleVideoClick = () => {
     setClickCount(prev => prev + 1);
     if (clickCount >= 1) { // Skip on second click
+      markBookEntryExperienceComplete();
       enterBookView();
       onEntryComplete();
     }
@@ -67,7 +96,7 @@ useEffect(() => {
           ref={videoRef}
           className="w-full h-full object-cover cursor-pointer"
           playsInline
-          muted={!videoSoundsEnabled}
+          muted={!videoSoundsEnabled || !audioEnabled}
           autoPlay
           onClick={handleVideoClick}
         >

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 
 export interface DebugStep {
   step: string;
@@ -43,6 +44,10 @@ export interface DebugResponse {
  * Only accessible to owners and administrators
  */
 export async function fetchEffectiveLimitsDebug(): Promise<DebugResponse> {
+  if (!USE_SUPABASE) {
+    return { error: 'Effective limits debug is disabled when USE_SUPABASE=false' };
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     

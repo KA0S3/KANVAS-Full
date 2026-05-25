@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 
 interface ContactSheetProps {
   isOpen: boolean;
@@ -46,6 +47,10 @@ export function ContactSheet({ isOpen, onClose }: ContactSheetProps) {
     setIsSubmitting(true);
 
     try {
+      if (!USE_SUPABASE) {
+        throw new Error('Contact form is disabled when USE_SUPABASE=false');
+      }
+
       // Call the Supabase Edge Function to send email
       const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(

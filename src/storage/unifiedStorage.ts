@@ -12,6 +12,7 @@ import { Project } from '@/storage/indexeddb';
 import { supabaseStorage } from './supabase';
 import { blobStorage, ProcessedFile } from './blobStorage';
 import { db } from '@/storage/indexeddb';
+import { USE_SUPABASE } from '@/config/features';
 import { createId } from '@/utils/id';
 
 export interface UnifiedStorageConfig {
@@ -78,6 +79,7 @@ export class UnifiedStorage {
       // Store locally first (immediate)
       await db.assets.add(asset);
       
+      if (USE_SUPABASE) {
       // Queue for cloud sync
       if (this.config.enableBatching) {
         this.queueOperation({
@@ -90,6 +92,7 @@ export class UnifiedStorage {
         // Immediate cloud sync
         await supabaseStorage.createAsset(asset);
       }
+    }
     } catch (error) {
       console.error('Unified asset creation failed:', error);
       throw error;
@@ -104,6 +107,7 @@ export class UnifiedStorage {
       // Update locally first (immediate)
       await db.assets.update(asset.id, { ...asset });
       
+      if (USE_SUPABASE) {
       // Queue for cloud sync
       if (this.config.enableBatching) {
         this.queueOperation({
@@ -116,6 +120,7 @@ export class UnifiedStorage {
         // Immediate cloud sync
         await supabaseStorage.updateAsset(asset);
       }
+    }
     } catch (error) {
       console.error('Unified asset update failed:', error);
       throw error;
@@ -138,6 +143,7 @@ export class UnifiedStorage {
         await blobStorage.deleteFile(assetId);
       }
       
+      if (USE_SUPABASE) {
       // Queue for cloud sync (high priority for deletions)
       this.queueOperation({
         type: 'asset',
@@ -148,6 +154,7 @@ export class UnifiedStorage {
       
       // Immediate cloud sync for deletions
       await supabaseStorage.deleteAsset(assetId, projectId);
+    }
     } catch (error) {
       console.error('Unified asset deletion failed:', error);
       throw error;
@@ -241,6 +248,10 @@ export class UnifiedStorage {
         };
       }
 
+      if (!USE_SUPABASE) {
+        throw new Error('Supabase is disabled; local project data not available for this project');
+      }
+
       // Fallback to cloud
       return await supabaseStorage.getProjectWithAssets(projectId);
     } catch (error) {
@@ -257,6 +268,17 @@ export class UnifiedStorage {
     files: { uploaded: Array<{ id: string; url: string }>; deleted: string[] };
   }> {
     try {
+      if (!USE_SUPABASE) {
+        const fileSync = await blobStorage.syncFilesWithCloud(projectId);
+        return {
+          assets: { created: [], updated: [], deleted: [] },
+          files: {
+            uploaded: fileSync.uploaded.map(id => ({ id, url: '' })),
+            deleted: fileSync.deleted,
+          },
+        };
+      }
+
       // Sync assets
       const assetSync = await supabaseStorage.syncProjectState(projectId);
       
@@ -447,12 +469,14 @@ export class UnifiedStorage {
       const updates = assetOps.filter(op => op.operation === 'update').map(op => op.data);
       const deletes = assetOps.filter(op => op.operation === 'delete').map(op => op.data);
 
-      if (creates.length > 0) await supabaseStorage.createAssetsBatch(creates);
-      if (updates.length > 0) await supabaseStorage.updateAssetsBatch(updates);
-      if (deletes.length > 0) {
-        const deleteIds = deletes.map(d => d.assetId);
-        const projectId = deletes[0]?.projectId;
-        if (projectId) await supabaseStorage.deleteAssetsBatch(deleteIds, projectId);
+      if (USE_SUPABASE) {
+        if (creates.length > 0) await supabaseStorage.createAssetsBatch(creates);
+        if (updates.length > 0) await supabaseStorage.updateAssetsBatch(updates);
+        if (deletes.length > 0) {
+          const deleteIds = deletes.map(d => d.assetId);
+          const projectId = deletes[0]?.projectId;
+          if (projectId) await supabaseStorage.deleteAssetsBatch(deleteIds, projectId);
+        }
       }
     }
 

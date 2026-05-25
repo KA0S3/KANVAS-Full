@@ -3,6 +3,7 @@ import { X, Crown, Zap, User, CreditCard, Loader2, AlertCircle, Tag, ChevronDown
 import { PAYSTACK_PRODUCTS, type PaystackProduct } from '@/lib/paystack';
 import { createTransaction, launchPaystackInline, verifyTransaction, type PaystackSession } from '@/services/payments/paystack';
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 import { useAuthStore } from '@/stores/authStore';
 import {
   Dialog,
@@ -146,6 +147,11 @@ export function UpgradePromptModal({
       return;
     }
 
+    if (!USE_SUPABASE) {
+      setError('Purchases are disabled when USE_SUPABASE=false');
+      return;
+    }
+
     // If we have an applied free plan promo, bypass payment
     if (appliedPromo && appliedPromo.type === 'free_plan') {
       setIsProcessing(true);
@@ -238,6 +244,11 @@ export function UpgradePromptModal({
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !user) return;
 
+    if (!USE_SUPABASE) {
+      setError('Promo codes are disabled when USE_SUPABASE=false');
+      return;
+    }
+
     setIsApplyingPromo(true);
     setError(null);
 
@@ -284,6 +295,10 @@ export function UpgradePromptModal({
   const applyPromoCode = async () => {
     if (!appliedPromo || !user) {
       return { success: false, error: 'No promo code applied' };
+    }
+
+    if (!USE_SUPABASE) {
+      return { success: false, error: 'Promo codes are disabled when USE_SUPABASE=false' };
     }
 
     try {

@@ -11,8 +11,11 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 import type { Asset } from '@/components/AssetItem';
-import { documentMutationService } from './DocumentMutationService';
+import { projectPersistence } from '@/persistence/projects';
+import { assetPersistence } from '@/persistence/assets';
+import type { Project as LocalProject } from '@/storage/indexeddb';
 
 // =====================================================
 // TYPE DEFINITIONS
@@ -61,6 +64,19 @@ export interface DbProject {
  * AssetNode is used ONLY in tree-building and rendering layer
  */
 export type AssetNode = Asset & { children?: AssetNode[] };
+
+const mapLocalProjectToDbProject = (project: LocalProject, assetCount: number): DbProject => ({
+  id: project.id,
+  user_id: project.userId,
+  name: project.name,
+  description: project.description || null,
+  viewport: project.settings?.viewport || {},
+  backgrounds: project.settings?.backgrounds || {},
+  tags_config: project.settings?.tagsConfig || {},
+  last_version: project.version || 1,
+  asset_count: assetCount,
+  updated_at: project.updatedAt,
+});
 
 // =====================================================
 // ASSET MAPPING FUNCTIONS
@@ -123,6 +139,21 @@ const loadedNodes: Set<string | null> = new Set();
  * Rule 6: Rebuild hierarchy ONLY in frontend
  */
 export async function loadProject(currentProjectId: string): Promise<{ project: DbProject; assets: AssetNode[] }> {
+  if (!USE_SUPABASE) {
+    const project = await projectPersistence.get(currentProjectId);
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    const assets = await assetPersistence.getProjectAssets(currentProjectId);
+    const assetTree = buildAssetTree(assets);
+
+    return {
+      project: mapLocalProjectToDbProject(project, assets.length),
+      assets: assetTree,
+    };
+  }
+
   // Rule 1: Load project first
   const { data: projectData, error: projectError } = await supabase.rpc('load_project', {
     p_project_id: currentProjectId
@@ -135,9 +166,6 @@ export async function loadProject(currentProjectId: string): Promise<{ project: 
   }
 
   const project = projectData[0];
-
-  // Store version for conflict detection
-  documentMutationService.setCurrentProjectVersion(project.last_version || 0);
 
   // CRITICAL FIX: Use asset_count from load_project to avoid redundant query
   const assetCount = project.asset_count || 0;
@@ -169,9 +197,6 @@ export async function loadProject(currentProjectId: string): Promise<{ project: 
   // Rule 6: Reconstruct tree client-side
   const assetTree = buildAssetTree(assets);
 
-  // Start auto-save
-  documentMutationService.startAutoSave(currentProjectId);
-
   return {
     project,
     assets: assetTree
@@ -183,6 +208,11 @@ export async function loadProject(currentProjectId: string): Promise<{ project: 
  * Rule 5: Check cache first
  */
 export async function loadAssetsByParent(currentProjectId: string, parentId: string): Promise<Asset[]> {
+  if (!USE_SUPABASE) {
+    const assets = await assetPersistence.getProjectAssets(currentProjectId);
+    return assets.filter(asset => asset.parentId === parentId);
+  }
+
   // Rule 5: Check cache first
   if (loadedNodes.has(parentId)) {
     return []; // Already loaded

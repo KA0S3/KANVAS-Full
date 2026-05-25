@@ -11,7 +11,7 @@ import type { Asset } from '@/types/Asset';
 
 export class TimedAssetSaver {
   private saveQueue = new Map<string, { asset: Asset; operation: 'create' | 'update' }>();
-  private saveInterval = 5000; // 5 seconds
+  private saveInterval = 2500; // 2.5 seconds
   private saveTimer: NodeJS.Timeout | null = null;
   private isProcessing = false;
 
@@ -41,11 +41,10 @@ export class TimedAssetSaver {
    */
   async forceSave(asset: Asset): Promise<void> {
     this.saveQueue.delete(asset.id);
-    
-    return db.transaction('rw', db.assets, () => {
-      db.assets.put(asset);
-      useSyncStore.getState().markForSync(asset.id, 'update', asset.projectId, asset);
-    });
+
+    await db.assets.put(asset);
+    await this.verifyAssetReadable(asset.id, 'forceSave');
+    useSyncStore.getState().markForSync(asset.id, 'update', asset.projectId, asset);
   }
 
   /**
@@ -60,11 +59,13 @@ export class TimedAssetSaver {
     
     try {
       // Batch save to IndexedDB
-      await db.transaction('rw', db.assets, () => {
-        entriesToSave.forEach(({ asset }) => {
-          db.assets.put(asset);
-        });
+      await db.transaction('rw', db.assets, async () => {
+        await db.assets.bulkPut(entriesToSave.map(({ asset }) => asset));
       });
+
+      await Promise.all(
+        entriesToSave.map(({ asset }) => this.verifyAssetReadable(asset.id, 'flushSaveQueue'))
+      );
 
       // Mark for sync
       entriesToSave.forEach(({ asset, operation }) => {
@@ -129,6 +130,19 @@ export class TimedAssetSaver {
     }
     
     await this.flushSaveQueue();
+  }
+
+  private async verifyAssetReadable(assetId: string, source: string): Promise<void> {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    const savedAsset = await db.assets.get(assetId);
+    if (!savedAsset) {
+      throw new Error(`[TimedAssetSaver] Read-after-write failed in ${source}: asset ${assetId} was not found in IndexedDB`);
+    }
+
+    console.log(`[TimedAssetSaver] Read-after-write verified for asset ${assetId}`);
   }
 }
 

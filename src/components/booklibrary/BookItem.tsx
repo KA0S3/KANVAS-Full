@@ -3,7 +3,9 @@ import { BookOpen, Edit, Trash2, X, Calendar, Tag, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { Book } from '@/types/book';
-import { useTagStore } from '@/stores/tagStore';
+import { useBookWorldStats } from '@/hooks/useBookWorldStats';
+import { useResolvedBookCover } from '@/hooks/useResolvedBookCover';
+import { cssUrl } from '@/utils/cssUrl';
 
 interface BookItemProps {
   book: Book;
@@ -25,10 +27,11 @@ export function BookItem({
   const [isHovered, setIsHovered] = useState(false);
   const [isFlipped, setIsFlipped] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const { tags } = useTagStore();
+  const resolvedCoverImage = useResolvedBookCover(book);
+  const worldStats = useBookWorldStats(book);
 
-  const bookStyle = book.coverImage 
-    ? { backgroundImage: `url(${book.coverImage})` }
+  const bookStyle = resolvedCoverImage
+    ? { backgroundImage: cssUrl(resolvedCoverImage) }
     : book.gradient 
       ? { background: book.gradient }
       : { backgroundColor: book.color };
@@ -56,14 +59,6 @@ export function BookItem({
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onClick?.();
-  };
-
-  const getAssetCount = () => {
-    return Object.keys(book.worldData.assets || {}).length;
-  };
-
-  const getTagCount = () => {
-    return Object.keys(tags).length;
   };
 
   const formatDate = (timestamp: number) => {
@@ -175,11 +170,11 @@ export function BookItem({
               <div className="space-y-2 pt-2 border-t border-white/20">
                 <div className="flex items-center gap-2">
                   <Image className="w-3 h-3 text-green-400" />
-                  <span className="text-xs">{getAssetCount()} Assets</span>
+                  <span className="text-xs">{worldStats.assetCount} Assets</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Tag className="w-3 h-3 text-yellow-400" />
-                  <span className="text-xs">{getTagCount()} Tags</span>
+                  <span className="text-xs">{worldStats.tagCount} Tags</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-3 h-3 text-purple-400" />

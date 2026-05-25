@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { BookOpen, ChevronLeft, Database, Trash2, Edit } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { BookOpen, ChevronLeft, Trash2, Edit, Archive } from "lucide-react";
 import { ConflictStatusIndicator } from "@/components/ConflictStatusIndicator";
 import cosmicBackground from "@/assets/cosmic-background.png";
 import lightBackground from "@/assets/BG-light.png";
@@ -8,29 +8,36 @@ import { AssetExplorer } from "@/components/explorer/AssetExplorer";
 import { BackgroundControls } from "@/components/asset/BackgroundControls";
 import { Button } from "@/components/ui/button";
 import WorldCreationDialog from "@/components/WorldCreationDialog";
-import DataManager from "@/components/DataManager";
+import { ZipBackupManager } from "@/components/ZipBackupManager";
 import BookShelf from "@/components/books/BookShelf";
 import BookEditDialog from "@/components/BookEditDialog";
 import "@/components/books/leather-styles.css";
 import SideAdBanner from "@/components/SideAdBanner";
-import { QuotaWarningBar } from "@/components/QuotaWarningBar";
-import { EnhancedAccountModal } from "@/components/account/EnhancedAccountModal";
 import { UndoStatus } from "@/components/UndoStatus";
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from "@/stores/themeStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useKanvasStore } from '@/stores/kanvasStore';
+import { useProjectStore } from '@/stores/projectStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSyncStore } from '@/stores/syncStore';
 import { useMediaStore } from '@/stores/mediaStore';
 import { audioEngine } from "@/services/AudioEngine";
-import { listProjects } from '@/services/ProjectService';
+import { hydrateLocalPersistenceFromIndexedDB } from "@/startup/localPersistenceHydration";
 import SplashScreen from "@/components/media/SplashScreen";
 import IntroVideo from "@/components/media/IntroVideo";
-import BookEntryAnimation from "@/components/media/BookEntryAnimation";
+import { WorldAssetTransition } from "@/components/media/WorldAssetTransition";
 import OnboardingPopup from "@/components/OnboardingPopup";
 import type { Book } from "@/types/book";
 import { navigationCache } from "@/utils/navigationCache";
+import { cssUrl } from "@/utils/cssUrl";
+
+const ENTER_TRANSITION_MS = 1250;
+const RETURN_TRANSITION_MS = 950;
+const BOOK_VIEW_MOUNT_DELAY_MS = 80;
+const LIBRARY_REVEAL_DELAY_MS = 180;
+
+const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
 const Index = () => {
   // FEATURE FLAG: Change to true to re-enable ads for all users
@@ -38,19 +45,30 @@ const Index = () => {
   
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [backgroundRefreshTrigger, setBackgroundRefreshTrigger] = useState(0);
-  const [showBookEntryAnimation, setShowBookEntryAnimation] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isCloudLoading, setIsCloudLoading] = useState(false);
+  const [isHydratingLocal, setIsHydratingLocal] = useState(true);
+  const [viewportTransition, setViewportTransition] = useState<{
+    direction: 'enter' | 'return';
+    book?: Book;
+  } | null>(null);
   const createWorldButtonRef = useRef<HTMLButtonElement>(null);
+  const transitionActiveRef = useRef(false);
+  const transitionTokenRef = useRef(0);
+  const delayedPhaseTimerRef = useRef<number | null>(null);
   const { getProjectAssets, currentProjectId } = useKanvasStore();
+  const { setCurrentProject, userProjects } = useProjectStore();
   const { selectedAssets, selectAsset, clearSelection } = useUIStore();
   const { syncStatus } = useSyncStore();
-  const { currentBookId, setCurrentBook, getAllBooks, deleteBook, updateWorldData } = useBookStore(); // Adding back book store - confirmed working
+  const { currentBookId, setCurrentBook, getAllBooks, deleteBook, hydrateBooks } = useBookStore();
   const { theme } = useThemeStore(); // Adding back theme store - confirmed working
-  const { appPhase, setAppPhase, showLibrary, setTransitioning } = useMediaStore(); // Using mediaStore for app phase management
-  // Simple auth state for storage quota functionality
-  const { effectiveLimits, isAuthenticated, initializeAuth } = useAuthStore(); // Using working auth store
+  const {
+    appPhase,
+    showLibrary,
+    hasCompletedIntroExperience,
+    enterBookView,
+    completeReturningSplash,
+  } = useMediaStore(); // Using mediaStore for app phase management
+  const { effectiveLimits, initializeAuth } = useAuthStore();
   
   // Fallback for missing stores
   const bookLibraryOpen = appPhase === 'LIBRARY';
@@ -79,123 +97,32 @@ const Index = () => {
     console.log('[Index] Auth initialized');
   }, [initializeAuth]);
 
-  // Load data from cloud when user authenticates - LOW I/O OPTIMIZED
-  // Sync project metadata from Supabase to local bookStore on sign-in only
-  // Full project data loads only when opening a specific project
   useEffect(() => {
-    if (isAuthenticated && !isCloudLoading) {
-      console.log('[Index] User authenticated, syncing project metadata from Supabase...');
-      setIsCloudLoading(true);
-      
-      // Add a small delay to ensure auth state is fully settled
-      const loadTimeout = setTimeout(async () => {
-        try {
-          console.log('[Index] Calling listProjects()...');
-          // Sync project metadata from Supabase to local bookStore
-          const projects = await listProjects();
-          console.log(`[Index] Fetched ${projects.length} projects from Supabase:`, projects);
-          
-          if (projects.length === 0) {
-            console.log('[Index] No projects found in Supabase for this user');
-          }
-          
-          const currentBooks = getAllBooks();
-          const existingBookIds = new Set(currentBooks.map(book => book.id));
-          
-          // Sync metadata - create new books OR update existing books with latest cover settings
-          let syncedCount = 0;
-          let updatedCount = 0;
-          for (const project of projects) {
-            const bookStore = useBookStore.getState();
-            const existingBook = currentBooks.find(b => b.id === project.id);
-            
-            if (!existingBook) {
-              // Create new local book entry
-              bookStore.createBook({
-                id: project.id, // Use Supabase project ID instead of generating new one
-                title: project.name,
-                color: project.color || '#3b82f6',
-                gradient: project.gradient || undefined,
-                leatherColor: project.leather_color || undefined,
-                isLeatherMode: project.is_leather_mode || false,
-                coverImage: project.cover_image || undefined,
-                coverPageSettings: project.cover_page_settings || {},
-                worldData: {
-                  assets: {},
-                  tags: project.tags_config || {},
-                  globalCustomFields: [],
-                  viewportOffset: { x: -45, y: -20 },
-                  viewportScale: 1,
-                },
-              });
-              syncedCount++;
-              console.log(`[Index] Synced project metadata to local book: ${project.name}`);
-            } else {
-              // Update existing book with latest cover/text settings from Supabase
-              bookStore.updateBook(project.id, {
-                title: project.name,
-                color: project.color || existingBook.color,
-                gradient: project.gradient || existingBook.gradient,
-                leatherColor: project.leather_color || existingBook.leatherColor,
-                isLeatherMode: project.is_leather_mode ?? existingBook.isLeatherMode,
-                coverImage: project.cover_image || existingBook.coverImage,
-                coverPageSettings: project.cover_page_settings || existingBook.coverPageSettings,
-              });
-              updatedCount++;
-              console.log(`[Index] Updated existing book with latest metadata: ${project.name}`);
-            }
-          }
-          
-          console.log(`[Index] Synced ${syncedCount} new projects and updated ${updatedCount} existing projects from Supabase`);
-          
-          // Load full data for current book if one is selected
-          const targetBookId = getTargetBookId();
-          let success = false;
-          
-          if (targetBookId) {
-            try {
-              // Load project using V2 stores
-              await useKanvasStore.getState().loadProject(targetBookId);
-              success = true;
-              
-              console.log('[Index] V2 project load completed for:', targetBookId);
-              
-              // Set book ID for future operations (in case it changed)
-              if (currentBookId !== targetBookId) {
-                console.log('[Index] Setting book ID for future operations:', targetBookId);
-                setCurrentBook(targetBookId);
-              }
-              
-              // Load sync queue for this project
-              await useSyncStore.getState().loadSyncQueue(targetBookId);
-              
-            } catch (error) {
-              console.error('[Index] Failed to load project with V2 stores:', error);
-              success = false;
-            }
-          } else {
-            // No current book, just mark as success for now
-            success = true;
-          }
-          
-          if (success) {
-            console.log('[Index] Project metadata sync and current book data load completed');
-          } else {
-            console.warn('[Index] Failed to load current book data from cloud');
-          }
-        } catch (err) {
-          console.error('[Index] Cloud loading failed:', err);
-        } finally {
-          setIsCloudLoading(false);
+    let cancelled = false;
+
+    const hydrateLocalProjects = async () => {
+      setIsHydratingLocal(true);
+      try {
+        await hydrateLocalPersistenceFromIndexedDB();
+      } catch (error) {
+        console.error('[Index] Failed to hydrate local projects:', error);
+      } finally {
+        if (!cancelled) {
+          setIsHydratingLocal(false);
         }
-      }, 1000); // Increased delay to 1 second for auth state settlement
-      
-      return () => {
-        clearTimeout(loadTimeout);
-        setIsCloudLoading(false);
-      };
-    }
-  }, [isAuthenticated]); // Only depend on isAuthenticated to prevent infinite loop
+      }
+    };
+
+    void hydrateLocalProjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    hydrateBooks(userProjects);
+  }, [hydrateBooks, userProjects]);
 
   // Initialize autosave service when authenticated
   // useEffect(() => {
@@ -222,66 +149,59 @@ const Index = () => {
   useEffect(() => {
     return () => {
       audioEngine.cleanup();
+      if (delayedPhaseTimerRef.current) {
+        window.clearTimeout(delayedPhaseTimerRef.current);
+      }
     };
   }, []);
 
-  // Restore cached navigation state on mount (non-intrusive)
-  useEffect(() => {
-    // Only attempt restoration if we're not already in a specific phase
-    // This prevents interfering with normal app flow
-    if (appPhase !== 'SPLASH') {
-      return;
-    }
-
+  const restoreCachedNavigationAfterSplash = useCallback(async () => {
     const cachedState = navigationCache.getState();
-    if (!cachedState) {
+    if (!cachedState || cachedState.appPhase === 'SPLASH') {
+      completeReturningSplash('LIBRARY');
       return;
     }
 
-    // Only restore if we have meaningful state to restore
-    if (cachedState.appPhase !== 'SPLASH' && cachedState.currentBookId) {
-      // Restore app phase
-      setAppPhase(cachedState.appPhase);
-
-      // Restore current book if it still exists
-      const book = getAllBooks().find(b => b.id === cachedState.currentBookId);
-      if (book) {
-        setCurrentBook(cachedState.currentBookId);
-        
-        // Load project using V2 stores
-        useKanvasStore.getState().loadProject(cachedState.currentBookId).then(() => {
-          // Load sync queue for this project
-          return useSyncStore.getState().loadSyncQueue(cachedState.currentBookId);
-        }).then(() => {
-          console.log('[Index] V2 state restored for cached project:', cachedState.currentBookId);
-        }).catch(err => {
-          console.error('[Index] Failed to restore cached project with V2 stores:', err);
-        });
-      }
-
-      // Note: Viewport restoration is now handled by assetStore.initFromBookStore()
-      // which runs after assets are loaded, ensuring the viewport asset exists
-      // before attempting to restore. This prevents race conditions.
-
-      // Restore active asset if it exists
-      if (cachedState.currentActiveId) {
-        setActiveAsset(cachedState.currentActiveId);
-      }
-
-      // Restore UI states
-      setSidebarOpen(cachedState.sidebarOpen);
-      if (cachedState.bookLibraryOpen) {
-        showLibrary();
-      }
-      setIsEditingBackground(cachedState.isEditingBackground ?? false);
+    if (!cachedState.currentBookId) {
+      completeReturningSplash('LIBRARY');
+      return;
     }
-  }, []); // Empty dependency array - only run once on mount
+
+    const book = getAllBooks().find(b => b.id === cachedState.currentBookId);
+    if (!book) {
+      completeReturningSplash('LIBRARY');
+      return;
+    }
+
+    setCurrentBook(cachedState.currentBookId);
+    setCurrentViewportId(cachedState.currentViewportId);
+    setSidebarOpen(cachedState.sidebarOpen);
+    setIsEditingBackground(cachedState.isEditingBackground ?? false);
+
+    if (cachedState.currentActiveId) {
+      setActiveAsset(cachedState.currentActiveId);
+    } else {
+      setActiveAsset(null);
+    }
+
+    try {
+      await setCurrentProject(cachedState.currentBookId);
+      await useSyncStore.getState().loadSyncQueue(cachedState.currentBookId);
+      console.log('[Index] Local state restored for cached project:', cachedState.currentBookId);
+    } catch (err) {
+      console.error('[Index] Failed to restore cached project locally:', err);
+    }
+
+    completeReturningSplash(cachedState.bookLibraryOpen ? 'LIBRARY' : cachedState.appPhase === 'BOOK_VIEW' ? 'BOOK_VIEW' : 'LIBRARY');
+  }, [completeReturningSplash, getAllBooks, setCurrentBook, setCurrentProject]);
 
   // Save navigation state when relevant state changes (non-intrusive)
   useEffect(() => {
     // Don't save state during splash screen - let users have fresh starts
     if (appPhase === 'SPLASH') {
-      navigationCache.clearState();
+      if (!hasCompletedIntroExperience) {
+        navigationCache.clearState();
+      }
       return;
     }
 
@@ -329,6 +249,7 @@ const Index = () => {
     sidebarOpen,
     isEditingBackground,
     getCurrentBookAssets, // Include getCurrentBookAssets to capture viewport changes
+    hasCompletedIntroExperience,
   ]);
 
   // Helper function for consistent book ID resolution
@@ -561,71 +482,89 @@ const Index = () => {
   const handleBookSelect = async (book: Book) => {
     setCurrentBook(book.id);
     
-    // Load project using V2 stores
     try {
-      await useKanvasStore.getState().loadProject(book.id);
+      await setCurrentProject(book.id);
       await useSyncStore.getState().loadSyncQueue(book.id);
-      console.log('[Index] V2 project loaded for book selection:', book.title);
+      console.log('[Index] Local project bundle loaded for book selection:', book.title);
     } catch (err) {
-      console.warn('[Index] Failed to load project with V2 stores:', err);
+      console.warn('[Index] Failed to load local project bundle:', err);
     }
-    
-    // Don't load world data here - only load when entering viewport from single view
-    // Don't close library here - let user stay in book library
   };
 
   const handleEnterBook = async (book: Book) => {
-    // Start book entry animation instead of direct entry
-    setShowBookEntryAnimation(true);
-    // Library state will be managed by appPhase transition to BOOK_VIEW
-    
-    // Load project using V2 stores
-    const { isAuthenticated } = useAuthStore.getState();
-    if (isAuthenticated) {
-      try {
-        await useKanvasStore.getState().loadProject(book.id);
-        await useSyncStore.getState().loadSyncQueue(book.id);
-        console.log('[Index] V2 project loaded for book entry:', book.title);
-      } catch (error) {
-        console.warn('[Index] Failed to load project with V2 stores:', error);
-      }
+    if (transitionActiveRef.current) {
+      return;
     }
-    
-    // Store the book data immediately - no setTimeout to avoid timing issues
+
+    transitionActiveRef.current = true;
+    const token = transitionTokenRef.current + 1;
+    transitionTokenRef.current = token;
+
+    if (delayedPhaseTimerRef.current) {
+      window.clearTimeout(delayedPhaseTimerRef.current);
+      delayedPhaseTimerRef.current = null;
+    }
+
+    setViewportTransition({ direction: 'enter', book });
     setCurrentBook(book.id);
-    
-    // Use unified function for consistent book world data loading
-    if (book.worldData) {
-      // Create a mock document result for unified function
-      const mockDocumentResult = {
-        success: true,
-        data: {
-          world_document: book.worldData
-        }
-      };
-      
-      // Use unified function for consistent data loading
-      loadWorldDocumentData(mockDocumentResult, book.id, {
-        loadAssets: true,
-        loadBackgrounds: true,
-        loadTags: true,
-        skipIfAssetsExist: true // Preserve existing assets if they exist
-      }).then(loadSuccess => {
-        if (!loadSuccess) {
-          console.error('[Index] Failed to load book world data');
-        }
-      }).catch(err => {
-        console.error('[Index] Error loading book world data:', err);
-      });
+
+    const projectLoad = (async () => {
+      try {
+        await setCurrentProject(book.id);
+        await useSyncStore.getState().loadSyncQueue(book.id);
+        console.log('[Index] Local project bundle loaded for book entry:', book.title);
+      } catch (error) {
+        console.warn('[Index] Failed to load local project bundle:', error);
+      }
+    })();
+
+    delayedPhaseTimerRef.current = window.setTimeout(() => {
+      if (transitionTokenRef.current === token) {
+        enterBookView();
+      }
+      delayedPhaseTimerRef.current = null;
+    }, BOOK_VIEW_MOUNT_DELAY_MS);
+
+    await Promise.all([projectLoad, wait(ENTER_TRANSITION_MS)]);
+
+    if (transitionTokenRef.current === token) {
+      enterBookView();
+      setViewportTransition(null);
+      transitionActiveRef.current = false;
     }
   };
 
-  const handleBookEntryComplete = () => {
-    setShowBookEntryAnimation(false);
-  };
+  const handleOpenBookLibrary = async () => {
+    if (transitionActiveRef.current) {
+      return;
+    }
 
-  const handleOpenBookLibrary = () => {
-    showLibrary();
+    transitionActiveRef.current = true;
+    const token = transitionTokenRef.current + 1;
+    transitionTokenRef.current = token;
+    const currentBook = getAllBooks().find(b => b.id === currentBookId);
+
+    if (delayedPhaseTimerRef.current) {
+      window.clearTimeout(delayedPhaseTimerRef.current);
+      delayedPhaseTimerRef.current = null;
+    }
+
+    setViewportTransition({ direction: 'return', book: currentBook });
+
+    delayedPhaseTimerRef.current = window.setTimeout(() => {
+      if (transitionTokenRef.current === token) {
+        showLibrary();
+      }
+      delayedPhaseTimerRef.current = null;
+    }, LIBRARY_REVEAL_DELAY_MS);
+
+    await wait(RETURN_TRANSITION_MS);
+
+    if (transitionTokenRef.current === token) {
+      showLibrary();
+      setViewportTransition(null);
+      transitionActiveRef.current = false;
+    }
   };
 
   const handleDeleteWorld = async (book: Book) => {
@@ -638,9 +577,9 @@ const Index = () => {
     const newBook = allBooks.find(book => book.id === newBookId);
     
     if (newBook) {
-      // Select the new book and focus on it in single view mode
-      // This will load the project using V2 stores
-      await handleBookSelect(newBook);
+      // Open the new world immediately. The first-ever entry uses the transition animation,
+      // later creations go straight into the book view.
+      await handleEnterBook(newBook);
       console.log('[Index] V2 project initialized for new book:', newBook.title);
     }
   };
@@ -653,17 +592,14 @@ const Index = () => {
   };
 
   const backgroundStyle = {
-    backgroundImage: `url(${theme === 'dark' ? cosmicBackground : lightBackground})`,
-    backgroundSize: '300%',
+    backgroundImage: cssUrl(theme === 'dark' ? cosmicBackground : lightBackground),
+    backgroundSize: '270%',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
   };
 
   return (
     <div className="h-screen bg-background text-foreground relative overflow-hidden">
-      {/* Quota Warning Bar */}
-      <QuotaWarningBar />
-      
       {/* Conflict Resolution Status */}
       <div className="absolute top-12 right-4 z-50">
         <ConflictStatusIndicator />
@@ -671,11 +607,14 @@ const Index = () => {
       
             
       {/* Media Experience Layers */}
-      {appPhase === 'SPLASH' && <SplashScreen />}
-      {appPhase === 'INTRO_VIDEO' && <IntroVideo />}
-      {showBookEntryAnimation && (
-        <BookEntryAnimation onEntryComplete={handleBookEntryComplete} />
+      {appPhase === 'SPLASH' && (
+        <SplashScreen
+          isAppLoading={isHydratingLocal}
+          hasCompletedIntroExperience={hasCompletedIntroExperience}
+          onReturningSplashComplete={restoreCachedNavigationAfterSplash}
+        />
       )}
+      {appPhase === 'INTRO_VIDEO' && <IntroVideo />}
 
       {/* Background Layer */}
       <div
@@ -683,7 +622,7 @@ const Index = () => {
           appPhase === 'LIBRARY' || appPhase === 'BOOK_VIEW' ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
-          backgroundImage: `url(${theme === 'dark' ? cosmicBackground : lightBackground})`,
+          backgroundImage: cssUrl(theme === 'dark' ? cosmicBackground : lightBackground),
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
@@ -746,34 +685,42 @@ const Index = () => {
               </WorldCreationDialog>
             </div>
 
-            {/* Backup/Restore Button */}
-            <div className="absolute bottom-6 right-6 z-10">
-              <DataManager>
-                <Button 
-                  id="backup-restore-button"
-                  variant="outline" 
-                  size="sm" 
+            {/* ZIP Backup button */}
+            <div className="absolute bottom-6 right-6 z-10 flex flex-col items-end gap-2">
+              <ZipBackupManager>
+                <Button
+                  id="zip-backup-button"
+                  variant="outline"
+                  size="sm"
                   className={`${
                     theme === 'dark'
                       ? 'border-gray-600 text-gray-200 hover:bg-gray-800'
                       : 'border-border text-foreground hover:bg-accent'
-                  }`}>
-                  <Database className="w-4 h-4 mr-2" />
-                  Backup/Restore
+                  }`}
+                >
+                  <Archive className="w-4 h-4 mr-2" />
+                  ZIP Backup
                 </Button>
-              </DataManager>
+              </ZipBackupManager>
             </div>
+
           </div>
         </div>
       )}
 
       {/* Main App Content */}
       {currentBookId && (
-        <div className="flex h-screen flex-col md:flex-row overflow-hidden">
+        <div className={`asset-viewport-shell flex h-screen flex-col md:flex-row overflow-hidden ${
+          viewportTransition?.direction === 'enter'
+            ? 'is-transition-enter'
+            : viewportTransition?.direction === 'return'
+              ? 'is-transition-return'
+              : ''
+        }`}>
           {/* Main Content Area */}
           <div className="flex-1 flex flex-col relative min-h-0 overflow-hidden">
             {/* Asset Port */}
-            <div className="flex-1 p-2 md:p-4 overflow-hidden">
+            <div className="flex-1 overflow-hidden">
               <AssetPort 
                 onToggleSidebar={() => setSidebarOpen(prev => !prev)} 
                 currentWorldTitle={getAllBooks().find(b => b.id === currentBookId)?.title || 'Current World'}
@@ -809,12 +756,6 @@ const Index = () => {
         <SideAdBanner />
       </div>
       
-      {/* Account Modal */}
-      <EnhancedAccountModal
-        isOpen={showAccountModal}
-        onClose={() => setShowAccountModal(false)}
-      />
-
       {/* Book Edit Dialog */}
       <BookEditDialog
         book={getAllBooks().find(b => b.id === currentBookId)}
@@ -827,6 +768,13 @@ const Index = () => {
 
       {/* Undo Status Indicator */}
       <UndoStatus />
+
+      {viewportTransition && (
+        <WorldAssetTransition
+          direction={viewportTransition.direction}
+          book={viewportTransition.book}
+        />
+      )}
 
     </div>
   );

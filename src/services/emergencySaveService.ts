@@ -4,6 +4,7 @@ import { useBackgroundStore } from '@/stores/backgroundStore';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { documentMutationService } from './DocumentMutationService';
 import { logEmergency, reportError } from '@/utils/logger';
+import { USE_SUPABASE } from '@/config/features';
 
 interface EmergencyBackup {
   assets: Record<string, any>;
@@ -125,6 +126,11 @@ class EmergencySaveService {
 
   private sendBeaconSync(): void {
     try {
+      if (!USE_SUPABASE) {
+        logEmergency('Supabase disabled; skipping emergency beacon sync');
+        return;
+      }
+
       const bookStore = useBookStore.getState();
       const projectId = bookStore.currentBookId;
       

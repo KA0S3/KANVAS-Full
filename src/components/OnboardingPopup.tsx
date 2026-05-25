@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { useMediaStore } from '@/stores/mediaStore';
 import { X } from 'lucide-react';
+import { resolvePublicAssetUrl } from '@/utils/appUrls';
 
 interface OnboardingPopupProps {
   anchorElement?: HTMLElement | null;
@@ -10,6 +11,7 @@ interface OnboardingPopupProps {
 const OnboardingPopup: React.FC<OnboardingPopupProps> = ({ anchorElement }) => {
   const { getAllBooks } = useBookStore();
   const { appPhase } = useMediaStore();
+  const kaosSmokeSrc = resolvePublicAssetUrl('kaos-smoke.png');
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -178,7 +180,7 @@ const OnboardingPopup: React.FC<OnboardingPopupProps> = ({ anchorElement }) => {
         {/* Character image */}
         <div className="flex-shrink-0">
           <img
-            src="/kaos-smoke.png"
+            src={kaosSmokeSrc}
             alt="Helper Character"
             className="w-16 h-16 object-contain"
           />

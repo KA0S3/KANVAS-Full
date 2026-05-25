@@ -5,8 +5,12 @@
  * and follows the unified persistence architecture.
  * 
  * 🔒 CRITICAL: Must maintain zone separation principles
+ * 
+ * Updated to use TEXT-based IDs (v3 schema) instead of UUIDs
+ * New ID format: {prefix}_{userShortId}_{timestampBase36}_{randomChars}
  */
 
+import { USE_SUPABASE } from '@/config/features';
 import { supabase } from '@/lib/supabase';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Asset } from '@/types/Asset';
@@ -23,14 +27,26 @@ export class SupabaseStorage {
     this.client = supabase;
   }
 
+  private assertEnabled(action: string): void {
+    if (!USE_SUPABASE) {
+      console.warn(`Supabase disabled; skipping ${action}`);
+    }
+  }
+
   /**
-   * Upsert asset in cloud storage. This is the v2 sync primitive for both
-   * local creates and local updates because queued updates can outlive reloads.
+   * Upsert asset in cloud storage. This uses the v3 schema with TEXT-based IDs.
+   * This is the sync primitive for both local creates and local updates because
+   * queued updates can outlive reloads.
    */
   async upsertAsset(asset: Asset): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('upsertAsset');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .upsert({
           id: asset.id,
           project_id: asset.projectId,
@@ -56,12 +72,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Create asset in cloud storage
+   * Create asset in cloud storage (v3 schema with TEXT-based IDs)
    */
   async createAsset(asset: Asset): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('createAsset');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .insert({
           id: asset.id,
           project_id: asset.projectId,
@@ -83,12 +104,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Update asset in cloud storage
+   * Update asset in cloud storage (v3 schema with TEXT-based IDs)
    */
   async updateAsset(asset: Asset): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('updateAsset');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .update({
           parent_id: asset.parentId,
           layout: asset.layout,
@@ -111,12 +137,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Delete asset from cloud storage
+   * Delete asset from cloud storage (v3 schema with TEXT-based IDs)
    */
   async deleteAsset(assetId: string, projectId: string): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('deleteAsset');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .delete()
         .eq('id', assetId)
         .eq('project_id', projectId);
@@ -131,12 +162,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Get project assets from cloud storage
+   * Get project assets from cloud storage (v3 schema with TEXT-based IDs)
    */
   async getProjectAssets(projectId: string): Promise<Asset[]> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('getProjectAssets');
+      return [];
+    }
+
     try {
       const { data, error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .select('*')
         .eq('project_id', projectId)
         .is('deleted_at', null)
@@ -154,12 +190,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Create project in cloud storage
+   * Create project in cloud storage (v3 schema with TEXT-based IDs)
    */
   async createProject(project: Project): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('createProject');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .insert({
           id: project.id,
           user_id: project.userId,
@@ -179,12 +220,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Update project in cloud storage
+   * Update project in cloud storage (v3 schema with TEXT-based IDs)
    */
   async updateProject(project: Project): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('updateProject');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .update({
           name: project.name,
           description: project.description,
@@ -206,12 +252,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Delete project in cloud storage
+   * Delete project in cloud storage (v3 schema with TEXT-based IDs)
    */
   async deleteProject(projectId: string): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('deleteProject');
+      return;
+    }
+
     try {
       const { error } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .update({ deleted_at: new Date().toISOString() })
         .eq('id', projectId);
 
@@ -225,12 +276,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Get user projects from cloud storage
+   * Get user projects from cloud storage (v3 schema with TEXT-based IDs)
    */
   async getUserProjects(userId: string): Promise<Project[]> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('getUserProjects');
+      return [];
+    }
+
     try {
       const { data, error } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .select('*')
         .eq('user_id', userId)
         .is('deleted_at', null)
@@ -251,6 +307,11 @@ export class SupabaseStorage {
    * Upload file to R2 storage
    */
   async uploadFile(file: File, storageKey: string): Promise<string> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('uploadFile');
+      return storageKey;
+    }
+
     try {
       const { data, error } = await this.client.storage
         .from('assets')
@@ -279,6 +340,11 @@ export class SupabaseStorage {
    * Delete file from R2 storage
    */
   async deleteFile(storageKey: string): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('deleteFile');
+      return;
+    }
+
     try {
       const { error } = await this.client.storage
         .from('assets')
@@ -301,6 +367,11 @@ export class SupabaseStorage {
     contentType: string;
     lastModified: string;
   } | null> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('getFileInfo');
+      return null;
+    }
+
     try {
       const { data, error } = await this.client.storage
         .from('assets')
@@ -326,9 +397,14 @@ export class SupabaseStorage {
   }
 
   /**
-   * Create multiple assets in batch
+   * Create multiple assets in batch (v3 schema with TEXT-based IDs)
    */
   async createAssetsBatch(assets: Asset[]): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('createAssetsBatch');
+      return;
+    }
+
     if (assets.length === 0) return;
 
     try {
@@ -344,7 +420,7 @@ export class SupabaseStorage {
       }));
 
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .insert(payload);
 
       if (error) {
@@ -360,6 +436,11 @@ export class SupabaseStorage {
    * Update multiple assets in batch
    */
   async updateAssetsBatch(assets: Asset[]): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('updateAssetsBatch');
+      return;
+    }
+
     if (assets.length === 0) return;
 
     try {
@@ -409,14 +490,19 @@ export class SupabaseStorage {
   }
 
   /**
-   * Delete multiple assets in batch
+   * Delete multiple assets in batch (v3 schema with TEXT-based IDs)
    */
   async deleteAssetsBatch(assetIds: string[], projectId: string): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('deleteAssetsBatch');
+      return;
+    }
+
     if (assetIds.length === 0) return;
 
     try {
       const { error } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .delete()
         .in('id', assetIds)
         .eq('project_id', projectId);
@@ -431,7 +517,7 @@ export class SupabaseStorage {
   }
 
   /**
-   * Get project with full asset tree
+   * Get project with full asset tree (v3 schema with TEXT-based IDs)
    */
   async getProjectWithAssets(projectId: string): Promise<{
     project: Project;
@@ -445,10 +531,15 @@ export class SupabaseStorage {
       cloudUrl?: string;
     }>;
   }> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('getProjectWithAssets');
+      throw new Error('Supabase is disabled; cannot fetch project with assets');
+    }
+
     try {
       // Get project
       const { data: projectData, error: projectError } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .select('*')
         .eq('id', projectId)
         .is('deleted_at', null)
@@ -460,7 +551,7 @@ export class SupabaseStorage {
 
       // Get assets
       const { data: assetsData, error: assetsError } = await this.client
-        .from('assets_v2')
+        .from('assets_v3')
         .select('*')
         .eq('project_id', projectId)
         .is('deleted_at', null)
@@ -472,7 +563,7 @@ export class SupabaseStorage {
 
       // Get files
       const { data: filesData, error: filesError } = await this.client
-        .from('files_v2')
+        .from('files_v3')
         .select('*')
         .eq('project_id', projectId);
 
@@ -498,6 +589,14 @@ export class SupabaseStorage {
     assets: { created: Asset[]; updated: Asset[]; deleted: string[] };
     files: { uploaded: Array<{ id: string; url: string }>; deleted: string[] };
   }> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('syncProjectState');
+      return {
+        assets: { created: [], updated: [], deleted: [] },
+        files: { uploaded: [], deleted: [] },
+      };
+    }
+
     try {
       // This would implement delta sync based on last_sync_at
       // For now, return full sync
@@ -527,6 +626,11 @@ export class SupabaseStorage {
     file: File;
     storageKey: string;
   }>): Promise<Array<{ storageKey: string; url: string }>> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('uploadFilesBatch');
+      return [];
+    }
+
     if (files.length === 0) return [];
 
     try {
@@ -559,6 +663,11 @@ export class SupabaseStorage {
    * Delete multiple files
    */
   async deleteFilesBatch(storageKeys: string[]): Promise<void> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('deleteFilesBatch');
+      return;
+    }
+
     if (storageKeys.length === 0) return;
 
     try {
@@ -584,6 +693,11 @@ export class SupabaseStorage {
     contentType: string;
     lastModified: string;
   } | null>> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('getFilesMetadataBatch');
+      return [];
+    }
+
     if (storageKeys.length === 0) return [];
 
     try {
@@ -607,12 +721,17 @@ export class SupabaseStorage {
   }
 
   /**
-   * Test connection to Supabase
+   * Test connection to Supabase (v3 schema with TEXT-based IDs)
    */
   async testConnection(): Promise<boolean> {
+    if (!USE_SUPABASE) {
+      this.assertEnabled('testConnection');
+      return false;
+    }
+
     try {
       const { data, error } = await this.client
-        .from('projects_v2')
+        .from('projects_v3')
         .select('id')
         .limit(1);
 

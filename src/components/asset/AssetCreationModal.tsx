@@ -29,7 +29,6 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { CustomFieldsManager } from './CustomFieldsManager';
 import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager';
-import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import { calculateViewportCenterPosition, calculateChildAssetCenterPosition } from '@/utils/coordinateUtils';
 import type { Asset } from '@/types/Asset';
 import { GeneratorParser, EXAMPLE_GENERATOR_DATA } from '@/services/generatorParser';
@@ -644,23 +643,6 @@ export function AssetCreationModal({ isOpen, onClose, initialData, parentId, gen
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Upgrade Modal */}
-      <UpgradePromptModal
-        isOpen={upgradeModal.isOpen}
-        onClose={closeUpgradeModal}
-        title={isOverQuota ? "Storage Quota Exceeded" : "Approaching Storage Limit"}
-        message={isOverQuota 
-          ? `You've exceeded your storage quota. Upgrade to continue uploading files.`
-          : `You're approaching your storage limit. Upgrade to get more space.`
-        }
-        action="Upgrade Now"
-        type="plan_limit"
-        onAction={() => {
-          // TODO: Navigate to upgrade page or open payment flow
-          console.log('Navigate to upgrade flow');
-        }}
-      />
     </>
   );
 }

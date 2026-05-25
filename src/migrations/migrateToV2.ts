@@ -9,7 +9,7 @@
 
 import { Asset, createCanonicalAsset } from '@/types/Asset';
 import { validateAssetStrict } from '@/types/Safeguards';
-import { db } from '@/storage/indexeddb';
+import { db, verifyIndexedDBSchemaHealth } from '@/storage/indexeddb';
 import { createRuntimeSyncState } from '@/types/SyncTypes';
 
 // Legacy data interfaces (from old system)
@@ -94,7 +94,7 @@ export class DataMigrator {
 
       // Check if migration has already been performed
       if (await this.isAlreadyMigrated()) {
-        this.log('Migration already completed');
+        this.log('Migration already completed and IndexedDB schema verified');
         result.success = true;
         return result;
       }
@@ -134,11 +134,21 @@ export class DataMigrator {
    * Check if migration has already been performed
    */
   private async isAlreadyMigrated(): Promise<boolean> {
-    try {
-      const migrationKey = 'kanvas_v2_migration_complete';
-      return localStorage.getItem(migrationKey) === 'true';
-    } catch {
+    const migrationKey = 'kanvas_v2_migration_complete';
+    const migrationFlagSet = localStorage.getItem(migrationKey) === 'true';
+
+    if (!migrationFlagSet) {
+      await verifyIndexedDBSchemaHealth();
       return false;
+    }
+
+    try {
+      await verifyIndexedDBSchemaHealth();
+      return true;
+    } catch (error) {
+      localStorage.removeItem(migrationKey);
+      this.log(`Migration flag ignored because IndexedDB schema is unhealthy: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
     }
   }
 
@@ -148,6 +158,7 @@ export class DataMigrator {
   private async markMigrationComplete(): Promise<void> {
     try {
       const migrationKey = 'kanvas_v2_migration_complete';
+      await verifyIndexedDBSchemaHealth();
       localStorage.setItem(migrationKey, 'true');
       this.log('Migration marked as complete');
     } catch (error) {
@@ -255,8 +266,9 @@ export class DataMigrator {
   /**
    * Convert legacy project to canonical format
    */
-  private async convertLegacyProject(legacyProject: LegacyProject): Promise<Omit<any, 'id' | 'createdAt' | 'updatedAt'>> {
+  private async convertLegacyProject(legacyProject: LegacyProject): Promise<any> {
     return {
+      id: legacyProject.id,
       userId: legacyProject.user_id,
       name: legacyProject.name,
       description: legacyProject.description,
@@ -267,6 +279,8 @@ export class DataMigrator {
       },
       version: legacyProject.last_version || 1,
       lastSyncAt: undefined,
+      createdAt: legacyProject.created_at,
+      updatedAt: legacyProject.updated_at,
       deletedAt: legacyProject.deleted_at,
     };
   }

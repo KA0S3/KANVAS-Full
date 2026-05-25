@@ -24,7 +24,7 @@ class FixedBackgroundAutosave {
   }
 
   // Save background config without causing loops
-  saveBackgroundConfig(assetId: string, config: BackgroundConfig): void {
+  saveBackgroundConfig(assetId: string, config: BackgroundConfig, projectId?: string | null): void {
     const now = Date.now();
     
     // Prevent rapid saves
@@ -33,20 +33,20 @@ class FixedBackgroundAutosave {
       return;
     }
 
-    this.performSave(assetId, config);
+    this.performSave(assetId, config, projectId);
   }
 
-  private scheduleSave(assetId: string, config: BackgroundConfig): void {
+  private scheduleSave(assetId: string, config: BackgroundConfig, projectId?: string | null): void {
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
     }
 
     this.saveTimeout = window.setTimeout(() => {
-      this.performSave(assetId, config);
+      this.performSave(assetId, config, projectId);
     }, this.DEBOUNCE_MS);
   }
 
-  private performSave(assetId: string, config: BackgroundConfig): void {
+  private performSave(assetId: string, config: BackgroundConfig, projectId?: string | null): void {
     const { user, isAuthenticated } = useAuthStore.getState();
     const { currentBookId } = useBookStore.getState();
     const { updateAsset } = useAssetStore.getState();
@@ -59,7 +59,8 @@ class FixedBackgroundAutosave {
 
     try {
       // 1. Save to background store (single source of truth)
-      const assetKey = getAssetKeyWithBook(assetId, currentBookId);
+      const resolvedProjectId = projectId || currentBookId;
+      const assetKey = getAssetKeyWithBook(assetId, resolvedProjectId || undefined);
       setBackground(assetKey, config);
 
       // 2. Update asset if it exists (but don't trigger store events)
@@ -74,9 +75,9 @@ class FixedBackgroundAutosave {
       }
 
       // 3. Update world data for root background
-      if (assetId === 'root' && currentBookId) {
+      if (assetId === 'root' && resolvedProjectId) {
         const { updateWorldData } = useBookStore.getState();
-        updateWorldData(currentBookId, {
+        updateWorldData(resolvedProjectId, {
           rootBackgroundConfig: this.convertToLegacyConfig(config),
         });
       }
@@ -104,11 +105,12 @@ class FixedBackgroundAutosave {
   }
 
   // Load background config on startup
-  loadBackgroundConfig(assetId: string): BackgroundConfig {
+  loadBackgroundConfig(assetId: string, projectId?: string | null): BackgroundConfig {
     const { currentBookId } = useBookStore.getState();
     const { getBackground } = useBackgroundStore.getState();
     
-    const assetKey = getAssetKeyWithBook(assetId, currentBookId);
+    const resolvedProjectId = projectId || currentBookId;
+    const assetKey = getAssetKeyWithBook(assetId, resolvedProjectId || undefined);
     return getBackground(assetKey);
   }
 }

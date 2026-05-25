@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { X, Upload, Palette, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Upload, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,11 +11,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useBookStore } from '@/stores/bookStoreSimple';
-import { useCanCreateBook } from '@/lib/limits';
-import { useAuthStore } from '@/stores/authStore';
-import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import type { Book } from '@/types/book';
-import { uploadFile } from '@/services/ProjectService';
+import { loadBookCover, removeBookCover, saveBookCover } from '@/utils/bookCoverStorage';
+import { cssUrl } from '@/utils/cssUrl';
+
+const DEFAULT_FORM_DATA = {
+  title: '',
+  description: '',
+  color: '#3b82f6',
+  gradient: '',
+  coverImage: '',
+};
 
 interface BookEditorProps {
   isOpen: boolean;
@@ -24,60 +30,108 @@ interface BookEditorProps {
 }
 
 export function BookEditor({ isOpen, onClose, book }: BookEditorProps) {
-  const { createBook, updateBook, coverPresets } = useBookStore();
-  const { canCreate: canCreateBook, reason, upgradePrompt } = useCanCreateBook();
+  const { createBook, updateBook, leatherPresets } = useBookStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [formData, setFormData] = useState({
-    title: book?.title || '',
-    description: book?.description || '',
-    color: book?.color || '#3b82f6',
-    gradient: book?.gradient || '',
-    coverImage: book?.coverImage || '',
-  });
+  const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
 
   const [selectedPreset, setSelectedPreset] = useState(
-    book ? coverPresets.find(p => p.color === book.color) : coverPresets[0]
+    book ? leatherPresets.find(p => p.color === (book.leatherColor || book.color)) : leatherPresets[0]
   );
 
   const [isUploadingCover, setIsUploadingCover] = useState(false);
-  const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
+  const [coverRemoved, setCoverRemoved] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateForm = async () => {
+      if (!isOpen) {
+        return;
+      }
+
+      if (!book) {
+        setFormData(DEFAULT_FORM_DATA);
+        setSelectedPreset(leatherPresets[0]);
+        setPendingCoverFile(null);
+        setCoverRemoved(false);
+        return;
+      }
+
+      const resolvedCoverImage = book.hasLocalCoverImage || book.coverImageStorageKey
+        ? await loadBookCover(book.coverImageStorageKey || book.id)
+        : book.coverImage || '';
+
+      if (cancelled) {
+        return;
+      }
+
+      setFormData({
+        title: book.title || '',
+        description: book.description || '',
+        color: book.leatherColor || book.color || leatherPresets[0]?.color || '#8b4513',
+        gradient: '',
+        coverImage: resolvedCoverImage || book.coverImage || '',
+      });
+      setSelectedPreset(
+        leatherPresets.find(p => p.color === (book.leatherColor || book.color)) || leatherPresets[0]
+      );
+      setPendingCoverFile(null);
+      setCoverRemoved(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+
+    hydrateForm();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book, leatherPresets, isOpen]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Check limits for new book creation (not for editing existing books)
-    if (!book && !canCreateBook) {
-      setShowUpgradePrompt(true);
-      return;
-    }
-    
-    const bookData = {
+
+    const bookData: Record<string, unknown> = {
       title: formData.title.trim(),
       description: formData.description.trim() || undefined,
-      color: formData.color,
-      gradient: formData.gradient || undefined,
-      coverImage: formData.coverImage || undefined,
+      color: selectedPreset?.color || formData.color,
+      gradient: undefined,
+      leatherColor: selectedPreset?.color || formData.color,
+      isLeatherMode: true,
+      coverPresetId: selectedPreset?.id,
       worldData: book?.worldData,
     };
 
     if (book) {
+      if (pendingCoverFile) {
+        const { storageKey } = await saveBookCover(book.id, pendingCoverFile);
+        bookData.coverImage = undefined;
+        bookData.coverImageStorageKey = storageKey;
+        bookData.hasLocalCoverImage = true;
+      } else if (coverRemoved) {
+        await removeBookCover(book.coverImageStorageKey || book.id);
+        bookData.coverImage = undefined;
+        bookData.coverImageStorageKey = undefined;
+        bookData.hasLocalCoverImage = false;
+      }
+
       updateBook(book.id, bookData);
     } else {
-      createBook(bookData);
+      const newBookId = await createBook(bookData);
+      if (pendingCoverFile) {
+        const { storageKey } = await saveBookCover(newBookId, pendingCoverFile);
+        updateBook(newBookId, {
+          coverImage: undefined,
+          coverImageStorageKey: storageKey,
+          hasLocalCoverImage: true,
+        });
+      }
     }
 
     onClose();
-  };
-
-  const handleUpgradeAction = () => {
-    if (reason === 'guest_limit') {
-      // TODO: Open account modal for sign in
-      console.log('Open account modal for sign in');
-    } else if (reason === 'plan_limit') {
-      // TODO: Navigate to upgrade page or open upgrade modal
-      console.log('Navigate to upgrade flow');
-    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,41 +139,40 @@ export function BookEditor({ isOpen, onClose, book }: BookEditorProps) {
     if (file) {
       setIsUploadingCover(true);
       try {
-        const authStore = useAuthStore.getState();
-        if (!authStore.user || !authStore.isAuthenticated) {
-          throw new Error('User not authenticated');
-        }
+        const previewUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve((event.target?.result as string) || '');
+          reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(file);
+        });
 
-        // Upload to Cloudflare R2 via ProjectService
-        const { r2Url } = await uploadFile(book?.id || 'temp', `cover-${book?.id || 'temp'}`, file);
-        setFormData(prev => ({ ...prev, coverImage: r2Url }));
+        setPendingCoverFile(file);
+        setCoverRemoved(false);
+        setFormData(prev => ({ ...prev, coverImage: previewUrl }));
       } catch (error) {
-        console.error('Failed to upload cover image:', error);
-        // Fallback to base64 if upload fails
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const dataUrl = event.target?.result as string;
-          setFormData(prev => ({ ...prev, coverImage: dataUrl }));
-        };
-        reader.readAsDataURL(file);
+        console.error('Failed to load cover image locally:', error);
       } finally {
         setIsUploadingCover(false);
       }
     }
   };
 
-  const handlePresetSelect = (preset: typeof coverPresets[0]) => {
+  const handlePresetSelect = (preset: typeof leatherPresets[0]) => {
     setSelectedPreset(preset);
     setFormData(prev => ({
       ...prev,
       color: preset.color,
-      gradient: preset.gradient || '',
-      coverImage: '', // Clear custom image when using preset
+      gradient: '',
+      coverImage: '',
     }));
+    setPendingCoverFile(null);
+    setCoverRemoved(!!book?.hasLocalCoverImage || !!book?.coverImageStorageKey || !!book?.coverImage);
   };
 
   const handleRemoveImage = () => {
     setFormData(prev => ({ ...prev, coverImage: '' }));
+    setPendingCoverFile(null);
+    setCoverRemoved(!!book?.hasLocalCoverImage || !!book?.coverImageStorageKey || !!book?.coverImage);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -143,7 +196,7 @@ export function BookEditor({ isOpen, onClose, book }: BookEditorProps) {
                   className="w-24 h-36 rounded-sm shadow-xl flex items-center justify-center text-white font-bold text-center p-2"
                   style={{
                     background: formData.coverImage 
-                      ? `url(${formData.coverImage}) center/cover` 
+                      ? `${cssUrl(formData.coverImage)} center/cover`
                       : formData.gradient || formData.color,
                   }}
                 >
@@ -208,16 +261,16 @@ export function BookEditor({ isOpen, onClose, book }: BookEditorProps) {
 
               {/* Preset Colors */}
               <div className="space-y-2">
-                <Label className="text-sm">Color presets (Leather and Gradient):</Label>
+                <Label className="text-sm">Leather bound presets:</Label>
                 <div className="grid grid-cols-3 gap-2">
-                  {coverPresets.map((preset) => (
+                  {leatherPresets.map((preset) => (
                     <Button
                       key={preset.id}
                       type="button"
                       variant={selectedPreset?.id === preset.id ? "default" : "outline"}
                       className="h-12 p-0"
                       style={{
-                        background: preset.gradient || preset.color,
+                        background: `linear-gradient(135deg, ${preset.lightVariant}, ${preset.darkVariant})`,
                       }}
                       onClick={() => handlePresetSelect(preset)}
                     >
@@ -268,18 +321,6 @@ export function BookEditor({ isOpen, onClose, book }: BookEditorProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Upgrade Prompt Modal */}
-      {upgradePrompt && (
-        <UpgradePromptModal
-          isOpen={showUpgradePrompt}
-          onClose={() => setShowUpgradePrompt(false)}
-          title={upgradePrompt.title}
-          message={upgradePrompt.message}
-          action={upgradePrompt.action}
-          onAction={handleUpgradeAction}
-          type={reason === 'guest_limit' ? 'guest' : 'plan_limit'}
-        />
-      )}
     </>
   );
 }

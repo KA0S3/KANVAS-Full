@@ -40,8 +40,8 @@ const ViewModeSelector: React.FC<ViewModeSelectorProps> = ({
   ];
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <div className={`flex rounded-lg p-1 ${
+    <div className={`flex items-center gap-1.5 ${className}`}>
+      <div className={`flex rounded-md p-0.5 ${
         theme === 'dark' ? 'bg-gray-700/50' : 'bg-muted/50'
       }`}>
         {modes.map((mode) => {
@@ -55,7 +55,7 @@ const ViewModeSelector: React.FC<ViewModeSelectorProps> = ({
               onClick={() => !mode.disabled && onModeChange(mode.id)}
               disabled={mode.disabled}
               className={`
-                relative flex items-center gap-2 px-3 py-2 rounded-md
+                relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm
                 transition-all duration-200 ease-in-out
                 ${isActive 
                   ? (theme === 'dark' ? 'bg-blue-600 text-white shadow-lg' : 'bg-primary text-primary-foreground shadow-lg')
@@ -68,8 +68,8 @@ const ViewModeSelector: React.FC<ViewModeSelectorProps> = ({
               `}
               title={mode.description}
             >
-              <Icon className="w-4 h-4" />
-              <span className="hidden sm:inline text-sm font-medium">
+              <Icon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-xs font-medium">
                 {mode.name}
               </span>
               
@@ -94,10 +94,10 @@ const ViewModeSelector: React.FC<ViewModeSelectorProps> = ({
           }`}
           title="Edit book"
         >
-          <Edit className={`w-4 h-4 ${
+          <Edit className={`w-3.5 h-3.5 ${
             theme === 'dark' ? 'text-white' : 'text-primary-foreground'
           }`} />
-          <span className={`text-sm font-medium ${
+          <span className={`text-xs font-medium ${
             theme === 'dark' ? 'text-white' : 'text-primary-foreground'
           }`}>Edit</span>
         </button>

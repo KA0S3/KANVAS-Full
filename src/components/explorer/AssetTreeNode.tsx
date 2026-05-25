@@ -162,11 +162,13 @@ export function AssetTreeNode({
         {/* Expand/Collapse Icon */}
         {hasChildren && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               handleToggleExpand();
             }}
             className="p-0.5 hover:bg-accent/30 rounded transition-colors"
+            aria-label={isExpanded ? `Collapse ${title}` : `Expand ${title}`}
           >
             {isExpanded ? (
               <ChevronDown className="w-3 h-3 text-muted-foreground" />
@@ -248,8 +250,7 @@ export function AssetTreeNode({
       {contextMenu.visible && (
         <AssetContextMenu
           asset={asset}
-          x={contextMenu.x}
-          y={contextMenu.y}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={closeContextMenu}
         />
       )}

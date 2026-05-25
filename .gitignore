@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+out
+release
+release-fixed
 *.local
 
 # Environment Variables (NEVER commit these)

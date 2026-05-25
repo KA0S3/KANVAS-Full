@@ -7,6 +7,7 @@ import { AssetCreationModalFixed } from './AssetCreationModalFixed';
 import { BackgroundMapEditorFixed } from './BackgroundMapEditorFixed';
 import { StorageCleanup } from '@/utils/storageCleanup';
 import type { Asset } from '@/types/Asset';
+import { cssUrl } from '@/utils/cssUrl';
 
 interface AssetPortProps {
   assetId: string;
@@ -141,7 +142,7 @@ export function AssetPortFixed({ assetId, viewportSize, className }: AssetPortPr
           style={{
             backgroundColor: currentAsset.style.background.color || 'transparent',
             backgroundImage: currentAsset.style.background.image 
-              ? `url(${currentAsset.style.background.image})` 
+              ? cssUrl(currentAsset.style.background.image)
               : 'none',
             backgroundPosition: `${currentAsset.style.background.position?.x || 0}px ${currentAsset.style.background.position?.y || 0}px`,
             backgroundSize: `${(currentAsset.style.background.scale || 1) * 100}%`,

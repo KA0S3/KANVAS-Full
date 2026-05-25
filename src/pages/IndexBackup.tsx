@@ -10,6 +10,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useThemeStore } from "@/stores/themeStore";
 import type { Book } from "@/types/book";
+import { cssUrl } from "@/utils/cssUrl";
 
 const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -74,7 +75,7 @@ const Index = () => {
       <div 
         className="absolute inset-0 bg-center bg-no-repeat"
         style={{ 
-          backgroundImage: `url(${backgroundImage})`,
+          backgroundImage: cssUrl(backgroundImage),
           backgroundSize: theme === 'light' ? "100%" : "95%",
           backgroundPositionY: theme === 'light' ? "-75px" : "-15px",
         }}

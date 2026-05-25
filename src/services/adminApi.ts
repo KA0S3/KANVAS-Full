@@ -1,6 +1,7 @@
 // Simple API client for admin operations
 // Replace direct Supabase queries with these calls
 import { supabase } from '@/lib/supabase'
+import { USE_SUPABASE } from '@/config/features'
 
 const API_BASE_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') + '/functions/v1'
 
@@ -11,6 +12,10 @@ interface ApiResponse<T> {
 
 // Helper function to get auth headers
 const getAuthHeaders = async () => {
+  if (!USE_SUPABASE) {
+    return null
+  }
+
   const { data: { session } } = await supabase.auth.getSession()
   return {
     'Authorization': `Bearer ${session?.access_token || ''}`,
@@ -20,6 +25,10 @@ const getAuthHeaders = async () => {
 
 // Admin Users API
 export const fetchAdminUsers = async (page = 1, search = ''): Promise<ApiResponse<any[]>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const url = `${API_BASE_URL}/admin-users?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`
@@ -44,6 +53,10 @@ export const fetchAdminUsers = async (page = 1, search = ''): Promise<ApiRespons
 
 // Admin Promo Codes API
 export const fetchAdminPromoCodes = async (): Promise<ApiResponse<any[]>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const response = await fetch(`${API_BASE_URL}/admin-promo-codes`, {
@@ -66,6 +79,10 @@ export const fetchAdminPromoCodes = async (): Promise<ApiResponse<any[]>> => {
 
 // Admin Owner Keys API
 export const fetchAdminOwnerKeys = async (): Promise<ApiResponse<any[]>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const response = await fetch(`${API_BASE_URL}/admin-owner-keys`, {
@@ -88,6 +105,10 @@ export const fetchAdminOwnerKeys = async (): Promise<ApiResponse<any[]>> => {
 
 // Additional functions for admin operations
 export const updateUser = async (userId: string, updates: any): Promise<ApiResponse<any>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const response = await fetch(`${API_BASE_URL}/admin-users`, {
@@ -110,6 +131,10 @@ export const updateUser = async (userId: string, updates: any): Promise<ApiRespo
 }
 
 export const createPromoCode = async (promoData: any): Promise<ApiResponse<any>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const response = await fetch(`${API_BASE_URL}/admin-promo-codes`, {
@@ -132,6 +157,10 @@ export const createPromoCode = async (promoData: any): Promise<ApiResponse<any>>
 }
 
 export const createOwnerKey = async (email: string, notes?: string): Promise<ApiResponse<any>> => {
+  if (!USE_SUPABASE) {
+    return { error: 'Admin cloud APIs are disabled when USE_SUPABASE=false' }
+  }
+
   try {
     const headers = await getAuthHeaders()
     const response = await fetch(`${API_BASE_URL}/admin-owner-keys`, {

@@ -10,8 +10,7 @@
 import { SyncQueueEntry } from '@/types/SyncTypes';
 import { db } from '@/storage/indexeddb';
 import { useSyncStore } from '@/stores/syncStore';
-import { supabaseStorage } from '@/storage/supabase';
-import { Asset } from '@/types/Asset';
+import { supabaseStorage } from '@/storage/supabase';import { USE_SUPABASE } from '@/config/features';import { Asset } from '@/types/Asset';
 
 export interface SyncProcessorConfig {
   maxRetries: number;
@@ -44,6 +43,11 @@ export class SyncProcessor {
    * Start the background processor
    */
   start(): void {
+    if (!USE_SUPABASE) {
+      console.warn('Supabase disabled; sync processor will not start');
+      return;
+    }
+
     if (this.isRunning) {
       return;
     }
@@ -60,6 +64,10 @@ export class SyncProcessor {
    * Stop the background processor
    */
   stop(): void {
+    if (!USE_SUPABASE) {
+      return;
+    }
+
     if (!this.isRunning) {
       return;
     }
@@ -77,6 +85,10 @@ export class SyncProcessor {
    * Process the next batch of sync entries
    */
   private async processNextBatch(): Promise<void> {
+    if (!USE_SUPABASE) {
+      return;
+    }
+
     if (!this.isRunning) {
       return;
     }
@@ -245,6 +257,10 @@ export class SyncProcessor {
    * Force immediate processing
    */
   async forceProcess(): Promise<void> {
+    if (!USE_SUPABASE) {
+      return;
+    }
+
     if (!this.isRunning) {
       return;
     }

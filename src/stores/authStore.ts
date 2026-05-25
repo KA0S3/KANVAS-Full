@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { USE_DESKTOP_MODE, USE_SUPABASE, USE_SUPABASE_AUTH } from '@/config/features';
 import { supabase } from '@/lib/supabase';
 import { secureStorage } from '@/utils/secureStorage';
 import { dataMigrationService, type MigrationConflict, type MigrationResult } from '@/services/dataMigrationService';
@@ -20,6 +21,22 @@ import {
   validateStorageOperation 
 } from '@/config/plans';
 import { projectCacheService } from '@/services/projectCacheService';
+
+const DESKTOP_AUTH_LIMITS: EffectiveLimits = {
+  maxAssets: Infinity,
+  maxProjects: Infinity,
+  maxFileSize: Infinity,
+  maxStorage: Infinity,
+  maxApiCalls: Infinity,
+  features: ['all'],
+  quotaBytes: Infinity,
+  maxBooks: Infinity,
+  adsEnabled: false,
+  importExportEnabled: true,
+  source: {
+    plan: 'desktop',
+  },
+};
 
 type Plan = 'guest' | 'free' | 'pro' | 'lifetime' | 'owner';
 
@@ -102,19 +119,36 @@ export const useAuthStore = create<AuthStore>()(
     (set, get) => ({
       // Initial state
       user: null,
-      plan: 'guest',
+      plan: 'lifetime',
       isAuthenticated: false,
-      loading: true,
-      planLoading: true,
+      loading: false,
+      planLoading: false,
       ownerKeyInfo: null,
       licenseInfo: null,
-      effectiveLimits: null,
+      effectiveLimits: DESKTOP_AUTH_LIMITS,
       isVerificationPending: false,
       verificationEmail: null,
       _userExistsCache: new Map(),
 
       // Initialize auth listener
       initializeAuth: () => {
+        if (USE_DESKTOP_MODE || !USE_SUPABASE_AUTH) {
+          set({
+            user: null,
+            plan: 'lifetime',
+            isAuthenticated: false,
+            loading: false,
+            planLoading: false,
+            ownerKeyInfo: null,
+            licenseInfo: null,
+            effectiveLimits: DESKTOP_AUTH_LIMITS,
+            isVerificationPending: false,
+            verificationEmail: null,
+          });
+          updateQuotaBasedOnPlan();
+          return () => undefined;
+        }
+
         // Clear old persisted _authStateInitialized if it exists in localStorage
         try {
           const stored = localStorage.getItem('kanvas-auth');
@@ -138,7 +172,24 @@ export const useAuthStore = create<AuthStore>()(
 
         logAuth('Initializing auth store');
         set({ _authStateInitialized: true, loading: true });
-        
+
+        if (!USE_SUPABASE) {
+          logAuth('Supabase disabled; skipping auth listener initialization');
+          set({
+            user: null,
+            plan: 'lifetime',
+            isAuthenticated: false,
+            loading: false,
+            planLoading: false,
+            ownerKeyInfo: null,
+            licenseInfo: null,
+            effectiveLimits: DESKTOP_AUTH_LIMITS,
+            isVerificationPending: false,
+            verificationEmail: null,
+          });
+          return () => undefined;
+        }
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
           async (event, session) => {
             logAuth('Auth state changed:', { event, email: session?.user?.email });
@@ -732,6 +783,12 @@ export const useAuthStore = create<AuthStore>()(
 
   // Update effective limits using server-side computation
   updateEffectiveLimits: async () => {
+    if (USE_DESKTOP_MODE || !USE_SUPABASE_AUTH) {
+      set({ effectiveLimits: DESKTOP_AUTH_LIMITS, plan: 'lifetime' });
+      updateQuotaBasedOnPlan();
+      return;
+    }
+
     const { user } = get();
     
     if (!user) {
@@ -883,38 +940,31 @@ export const useAuthStore = create<AuthStore>()(
 
   // Plan-based storage behavior methods
   getStorageBehavior: () => {
-    const state = get();
-    return getStorageBehavior(state.plan);
+    return getStorageBehavior('lifetime');
   },
 
   shouldUseLocalStorage: () => {
-    const state = get();
-    return shouldUseLocalStorage(state.plan);
+    return true;
   },
 
   shouldSyncToCloud: () => {
-    const state = get();
-    return shouldSyncToCloud(state.plan);
+    return false;
   },
 
   shouldPersistData: () => {
-    const state = get();
-    return shouldPersistData(state.plan);
+    return true;
   },
 
   shouldSyncMetadata: () => {
-    const state = get();
-    return shouldSyncMetadata(state.plan);
+    return false;
   },
 
   shouldMonitorQuota: () => {
-    const state = get();
-    return shouldMonitorQuota(state.plan);
+    return false;
   },
 
   validateStorageOperation: (operation: 'localStorage' | 'cloudSync' | 'metadataSync' | 'quotaMonitoring') => {
-    const state = get();
-    return validateStorageOperation(state.plan, operation);
+    return true;
   },
 
   // Check if user exists and what providers they have (OPTIMIZED - minimal DB calls)

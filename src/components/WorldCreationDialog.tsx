@@ -10,10 +10,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ChevronDown, ChevronUp, Type, Palette, Settings, ImageIcon, Loader2 } from "lucide-react";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useThemeStore } from "@/stores/themeStore";
-import { useCanCreateBook } from "@/lib/limits";
 import { useAuthStore } from "@/stores/authStore";
 import LeatherColorPicker from "./books/LeatherColorPicker";
-import { UpgradePromptModal } from "@/components/UpgradePromptModal";
 import { toast } from "sonner";
 import type { LeatherColorPreset } from "@/types/book";
 import { uploadFile } from "@/services/ProjectService";
@@ -36,12 +34,10 @@ const WorldCreationDialog = ({ children, onWorldCreated }: WorldCreationDialogPr
   const [customCoverImage, setCustomCoverImage] = useState<string | null>(null);
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
-  const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const [activeTab, setActiveTab] = useState('cover');
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const { createBook, leatherPresets, updateBook } = useBookStore();
-  const { canCreate: canCreateNewBook, reason, upgradePrompt } = useCanCreateBook();
   
   // Typography settings for title
   const [titleTextSettingsOpen, setTitleTextSettingsOpen] = useState(false);
@@ -98,17 +94,11 @@ const WorldCreationDialog = ({ children, onWorldCreated }: WorldCreationDialogPr
   const handleCreateWorld = async () => {
     if (!title.trim() || isCreating) return;
 
-    // Check if user can create more worlds
-    if (!canCreateNewBook) {
-      setShowUpgradePrompt(true);
-      return;
-    }
-
     setIsCreating(true);
 
     try {
       // Create the book first without the cover image (will upload to R2 after)
-      const worldId = createBook({
+      const worldId = await createBook({
         title,
         subheading,
         description,
@@ -858,19 +848,6 @@ const WorldCreationDialog = ({ children, onWorldCreated }: WorldCreationDialogPr
           </Button>
         </DialogFooter>
       </DialogContent>
-      {/* Upgrade Prompt Modal */}
-      <UpgradePromptModal
-        isOpen={showUpgradePrompt}
-        onClose={() => setShowUpgradePrompt(false)}
-        title={upgradePrompt?.title || 'World Creation Limit Reached'}
-        message={upgradePrompt?.message || reason || 'You have reached the maximum number of worlds for your current plan.'}
-        action={upgradePrompt?.action || 'Upgrade Plan'}
-        type="plan_limit"
-        onAction={() => {
-          setShowUpgradePrompt(false);
-          toast.info('Upgrade feature coming soon!');
-        }}
-      />
     </Dialog>
   );
 };

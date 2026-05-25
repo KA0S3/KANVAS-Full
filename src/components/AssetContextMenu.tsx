@@ -29,11 +29,11 @@ import {
 } from 'lucide-react';
 import { useKanvasStore, selectAssetsByParentId } from '@/stores/kanvasStore';
 import { DeleteAssetDialog } from '@/components/DeleteAssetDialog';
-import type { Asset } from '@/types/Asset';
+import { isValidAsset, type Asset } from '@/types/Asset';
 
 interface AssetContextMenuProps {
   asset: Asset;
-  position: { x: number; y: number };
+  position?: { x: number; y: number };
   onClose: () => void;
   onEdit?: (asset: Asset) => void;
   onSelectAndFocus?: (asset: Asset) => void;
@@ -59,6 +59,42 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
     createAsset,
   } = useKanvasStore();
 
+  const isRenderableAsset = isValidAsset(asset);
+  const safePosition = position ?? { x: 0, y: 0 };
+
+  React.useEffect(() => {
+    if (!isRenderableAsset) {
+      console.error('AssetContextMenu: Invalid asset structure, cannot render menu', asset);
+      onClose();
+    }
+  }, [asset, isRenderableAsset, onClose]);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  if (!isRenderableAsset) {
+    return null;
+  }
+
   // Calculate adjusted position to keep menu on screen
   const getAdjustedPosition = () => {
     const menuWidth = 240; // Approximate menu width
@@ -66,8 +102,8 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
     const screenWidth = window.innerWidth;
     const screenHeight = window.innerHeight;
     
-    let adjustedX = position.x;
-    let adjustedY = position.y;
+    let adjustedX = safePosition.x;
+    let adjustedY = safePosition.y;
     
     // Adjust horizontal position
     if (adjustedX + menuWidth > screenWidth) {
@@ -211,29 +247,6 @@ export const AssetContextMenuFixed: React.FC<AssetContextMenuProps> = ({
 
   // Calculate adjusted position
   const adjustedPosition = getAdjustedPosition();
-
-  // Setup event listeners
-  React.useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('click', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [onClose]);
 
   return (
     <>

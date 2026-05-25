@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import type { Book } from '@/types/book';
 import { useThemeStore } from '@/stores/themeStore';
 import useImageColorExtractor from '@/hooks/useImageColorExtractor';
+import { useResolvedBookCover } from '@/hooks/useResolvedBookCover';
+import { cssUrl } from '@/utils/cssUrl';
 
 // Import book cover images
 import BlackBook from '@/assets/Book-Covers/Black_book.png';
@@ -25,6 +27,7 @@ const BookSpine: React.FC<BookSpineProps> = ({
   const { theme } = useThemeStore();
   const { extractColor, getColor } = useImageColorExtractor();
   const [extractedSpineColor, setExtractedSpineColor] = useState<string | null>(null);
+  const resolvedCoverImage = useResolvedBookCover(book);
   
   const heightClasses = {
     small: 'h-24',
@@ -34,17 +37,17 @@ const BookSpine: React.FC<BookSpineProps> = ({
 
   // Extract color from cover image when it changes
   useEffect(() => {
-    if (book.coverImage) {
+    if (resolvedCoverImage) {
       console.log('BookSpine: Extracting color for book:', book.title);
       // Check cache first
-      const cachedColor = getColor(book.coverImage);
+      const cachedColor = getColor(resolvedCoverImage);
       if (cachedColor) {
         console.log('BookSpine: Using cached color:', cachedColor);
         setExtractedSpineColor(cachedColor);
       } else {
         console.log('BookSpine: Extracting new color...');
         // Extract color asynchronously
-        extractColor(book.coverImage).then((color) => {
+        extractColor(resolvedCoverImage).then((color) => {
           if (color) {
             console.log('BookSpine: Color extracted:', color);
             setExtractedSpineColor(color);
@@ -54,10 +57,10 @@ const BookSpine: React.FC<BookSpineProps> = ({
     } else {
       setExtractedSpineColor(null);
     }
-  }, [book.coverImage, extractColor, getColor]);
+  }, [resolvedCoverImage, book.title, extractColor, getColor]);
 
   const getLeatherStyle = () => {
-    if (!book.isLeatherMode || book.coverImage) return null;
+    if (!book.isLeatherMode || resolvedCoverImage) return null;
     
     // Map leather colors to book cover images based on preset names
     const getBookCoverImage = (leatherColor: string) => {
@@ -90,7 +93,7 @@ const BookSpine: React.FC<BookSpineProps> = ({
     const coverImage = getBookCoverImage(book.leatherColor || '#8B4513');
     
     return {
-      backgroundImage: `url(${coverImage})`,
+      backgroundImage: cssUrl(coverImage),
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
@@ -101,7 +104,7 @@ const BookSpine: React.FC<BookSpineProps> = ({
   };
 
   const getSpineStyle = () => {
-    if (book.coverImage && extractedSpineColor) {
+    if (resolvedCoverImage && extractedSpineColor) {
       // Use extracted color with vertical gradient for depth
       return {
         background: `
@@ -119,21 +122,17 @@ const BookSpine: React.FC<BookSpineProps> = ({
       };
     }
     
-    if (book.coverImage && !extractedSpineColor) {
+    if (resolvedCoverImage && !extractedSpineColor) {
       // Fallback while color is being extracted
       return {
         backgroundColor: book.color || '#3b82f6'
       };
     }
     
-    if (book.gradient) {
-      return {
-        background: `linear-gradient(90deg, ${book.gradient})`
-      };
-    }
-    
     return getLeatherStyle() || {
-      backgroundColor: book.color || '#3b82f6'
+      ...(book.gradient
+        ? { background: `linear-gradient(90deg, ${book.gradient})` }
+        : { backgroundColor: book.color || '#3b82f6' })
     };
   };
 
@@ -149,7 +148,7 @@ const BookSpine: React.FC<BookSpineProps> = ({
         w-12 flex items-center justify-center 
         transition-all duration-200 ease-in-out
         hover:w-14 cursor-pointer
-        ${book.isLeatherMode && !book.coverImage ? 'leather-spine' : ''}
+        ${book.isLeatherMode && !resolvedCoverImage ? 'leather-spine' : ''}
         ${className}
       `}
       style={getSpineStyle()}

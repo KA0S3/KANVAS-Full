@@ -28,6 +28,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { loadBookCover } from '@/utils/bookCoverStorage';
 
 interface BookSpineViewProps {
   books: Book[];
@@ -52,6 +53,7 @@ const BookSpineView: React.FC<BookSpineViewProps> = ({
   const { theme } = useThemeStore();
   const { extractColor, getColor } = useImageColorExtractor();
   const [extractedColors, setExtractedColors] = useState<Map<string, string>>(new Map());
+  const [resolvedCoverImages, setResolvedCoverImages] = useState<Map<string, string>>(new Map());
   const [currentPage, setCurrentPage] = useState(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [bookToDelete, setBookToDelete] = useState<Book | null>(null);
@@ -128,21 +130,51 @@ const BookSpineView: React.FC<BookSpineViewProps> = ({
     setContextMenu(null);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateLocalCovers = async () => {
+      const nextResolvedCovers = new Map<string, string>();
+
+      await Promise.all(books.map(async (book) => {
+        if (book.hasLocalCoverImage || book.coverImageStorageKey) {
+          const coverImage = await loadBookCover(book.coverImageStorageKey || book.id);
+          if (coverImage) {
+            nextResolvedCovers.set(book.id, coverImage);
+          }
+        } else if (book.coverImage) {
+          nextResolvedCovers.set(book.id, book.coverImage);
+        }
+      }));
+
+      if (!cancelled) {
+        setResolvedCoverImages(nextResolvedCovers);
+      }
+    };
+
+    hydrateLocalCovers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [books]);
+
   // Extract colors for books with cover images
   useEffect(() => {
     console.log('BookSpineView: Processing books for color extraction...');
     books.forEach(async (book) => {
-      if (book.coverImage) {
+      const coverImage = resolvedCoverImages.get(book.id) || book.coverImage;
+      if (coverImage) {
         console.log('BookSpineView: Processing book:', book.title);
         // Check cache first
-        const cachedColor = getColor(book.coverImage);
+        const cachedColor = getColor(coverImage);
         if (cachedColor) {
           console.log('BookSpineView: Using cached color for', book.title, ':', cachedColor);
           setExtractedColors(prev => new Map(prev.set(book.id, cachedColor)));
         } else {
           console.log('BookSpineView: Extracting new color for', book.title);
           // Extract color asynchronously
-          const color = await extractColor(book.coverImage);
+          const color = await extractColor(coverImage);
           if (color) {
             console.log('BookSpineView: Color extracted for', book.title, ':', color);
             setExtractedColors(prev => new Map(prev.set(book.id, color)));
@@ -150,7 +182,7 @@ const BookSpineView: React.FC<BookSpineViewProps> = ({
         }
       }
     });
-  }, [books, extractColor, getColor]);
+  }, [books, resolvedCoverImages, extractColor, getColor]);
 
   // Arrange books in reading order with pagination
   const booksPerRow = 13;
@@ -192,7 +224,7 @@ const BookSpineView: React.FC<BookSpineViewProps> = ({
 
   const generateSpineColor = (book: Book) => {
     // First priority: custom cover image with extracted color
-    if (book.coverImage) {
+    if (resolvedCoverImages.get(book.id) || book.coverImage) {
       const extractedColor = extractedColors.get(book.id);
       if (extractedColor) {
         return extractedColor;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Save, Upload, ChevronDown, ChevronRight } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useKanvasStore } from '@/stores/kanvasStore';
 import { useTagStore } from '@/stores/tagStore';
@@ -23,6 +23,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -105,6 +112,10 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       customFieldValues: []
     }
   });
+  const selectedTags = useWatch({
+    control: form.control,
+    name: 'tags',
+  }) ?? [];
 
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [customFieldValues, setCustomFieldValues] = useState<CustomFieldValue[]>([]);
@@ -113,6 +124,10 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     description: false,
     thumbnail: true,
     portraitBlur: 0,
+  });
+  const [tagBorderSettings, setTagBorderSettings] = useState({
+    enabled: false,
+    tagId: '',
   });
   const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
   const [backgroundEditorOpen, setBackgroundEditorOpen] = useState(false);
@@ -145,6 +160,12 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       setCustomFields(assetCustomFields.customFields || []);
       setCustomFieldValues(assetCustomFields.customFieldValues || []);
       setViewportDisplaySettings(assetViewportSettings);
+      setTagBorderSettings({
+        enabled: Boolean(asset.style.border?.showTagBorder),
+        tagId: asset.style.border?.tagId && (asset.metadata.tags || []).includes(asset.style.border.tagId)
+          ? asset.style.border.tagId
+          : (asset.metadata.tags || [])[0] || '',
+      });
     } else if (isNewAsset) {
       // Initialize with initialData for new asset
       console.log('📝 AssetEditModal: Setting form data from initialData for new asset');
@@ -171,6 +192,10 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
         thumbnail: true,
         portraitBlur: 0,
       });
+      setTagBorderSettings({
+        enabled: false,
+        tagId: initialData?.tags?.[0] || '',
+      });
     }
   }, [asset, isNewAsset, initialData, form]);
 
@@ -196,6 +221,12 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       setCustomFields(assetCustomFields.customFields || []);
       setCustomFieldValues(assetCustomFields.customFieldValues || []);
       setViewportDisplaySettings(assetViewportSettings);
+      setTagBorderSettings(prev => ({
+        ...prev,
+        tagId: prev.tagId && (asset.metadata.tags || []).includes(prev.tagId)
+          ? prev.tagId
+          : (asset.metadata.tags || [])[0] || '',
+      }));
     }
   }, [refreshTrigger, asset, form]);
 
@@ -215,6 +246,9 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
     
     // For existing assets, compare with original data
     if (!asset) return false;
+    const currentBorderTagId = selectedTags.includes(tagBorderSettings.tagId)
+      ? tagBorderSettings.tagId
+      : selectedTags[0] || '';
     
     return formValues.name !== (asset.content.title || '') ||
            formValues.description !== (asset.content.description || '') ||
@@ -226,7 +260,9 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
            JSON.stringify([...(formValues.tags || [])].sort()) !== JSON.stringify([...(asset.metadata.tags || [])].sort()) ||
            JSON.stringify(customFields) !== JSON.stringify(assetCustomFields.customFields || []) ||
            JSON.stringify(customFieldValues) !== JSON.stringify(assetCustomFields.customFieldValues || []) ||
-           JSON.stringify(viewportDisplaySettings) !== JSON.stringify(assetViewportSettings || {});
+           JSON.stringify(viewportDisplaySettings) !== JSON.stringify(assetViewportSettings || {}) ||
+           tagBorderSettings.enabled !== Boolean(asset.style.border?.showTagBorder) ||
+           currentBorderTagId !== (asset.style.border?.tagId || (asset.metadata.tags || [])[0] || '');
   };
 
   const handleCloseAttempt = () => {
@@ -253,15 +289,8 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       console.log('💾 AssetEditModal: initialData:', initialData);
       
       // Validate form before saving
-      form.handleSubmit((data) => {
+      form.handleSubmit(async (data) => {
         console.log('💾 AssetEditModal: Validated form data:', data);
-        
-        const assetData = {
-          ...data,
-          customFields,
-          customFieldValues,
-          viewportDisplaySettings,
-        };
 
         if (isNewAsset || !asset) {
           // Create new asset
@@ -286,7 +315,7 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
           return;
         } else {
           // Update existing asset
-          updateAsset(asset.id, {
+          await updateAsset(asset.id, {
             layout: {
               ...asset.layout,
               x: data.x,
@@ -311,6 +340,14 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
             behavior: {
               ...asset.behavior,
               renderMode: data.type,
+            },
+            style: {
+              ...asset.style,
+              border: {
+                ...asset.style.border,
+                showTagBorder: tagBorderSettings.enabled,
+                tagId: selectedBorderTag || undefined,
+              },
             },
             metadata: {
               ...asset.metadata,
@@ -350,8 +387,23 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
       ? currentTags.filter(id => id !== tagId)
       : [...currentTags, tagId];
     
-    form.setValue('tags', newTags);
-    
+    form.setValue('tags', newTags, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
+
+    if (tagBorderSettings.tagId === tagId && !newTags.includes(tagId)) {
+      setTagBorderSettings(prev => ({
+        ...prev,
+        tagId: newTags[0] || '',
+      }));
+    } else if (!tagBorderSettings.tagId && newTags.length > 0) {
+      setTagBorderSettings(prev => ({
+        ...prev,
+        tagId: newTags[0] || '',
+      }));
+    }
   };
 
   const handleBackgroundSave = () => {
@@ -387,6 +439,9 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
   );
 
   const availableTags = Object.values(tags);
+  const selectedBorderTag = selectedTags.includes(tagBorderSettings.tagId)
+    ? tagBorderSettings.tagId
+    : selectedTags[0] || '';
 
   return (
     <>
@@ -462,8 +517,7 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                       {availableTags.map((tag) => {
                         // Ensure tag has a valid color, fallback to gray if not
                         const tagColor = tag.color && tag.color.trim() !== '' ? tag.color : '#6b7280';
-                        const currentTags = form.getValues('tags') || [];
-                        const isSelected = currentTags.includes(tag.id);
+                        const isSelected = selectedTags.includes(tag.id);
                         
                         return (
                           <Badge
@@ -484,6 +538,46 @@ export function AssetEditModalImproved({ isOpen, onClose, assetId, isNewAsset = 
                       })}
                     </div>
                   </div>
+
+                  {selectedTags.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-glass-border/30 bg-glass/10 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <Label className="text-sm font-medium">Tag border</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Choose which selected tag drives the viewport outline.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={tagBorderSettings.enabled}
+                          onCheckedChange={(checked) => setTagBorderSettings(prev => ({
+                            ...prev,
+                            enabled: checked,
+                            tagId: prev.tagId || selectedTags[0] || '',
+                          }))}
+                        />
+                      </div>
+                      {tagBorderSettings.enabled && (
+                        <Select
+                          value={selectedBorderTag}
+                          onValueChange={(value) => setTagBorderSettings(prev => ({ ...prev, tagId: value }))}
+                        >
+                          <SelectTrigger className="bg-glass/50 border-glass-border/40">
+                            <SelectValue placeholder="Choose a tag color" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableTags
+                              .filter((tag) => selectedTags.includes(tag.id))
+                              .map((tag) => (
+                                <SelectItem key={tag.id} value={tag.id}>
+                                  {tag.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Form>
             </div>

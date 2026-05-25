@@ -4,6 +4,8 @@ export interface Book {
   subheading?: string;
   description?: string;
   coverImage?: string;
+  coverImageStorageKey?: string;
+  hasLocalCoverImage?: boolean;
   color: string;
   gradient?: string;
   leatherColor?: string;

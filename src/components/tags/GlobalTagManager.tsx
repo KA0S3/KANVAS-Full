@@ -11,6 +11,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { DeleteTagDialog } from '@/components/DeleteTagDialog';
@@ -21,6 +28,7 @@ export function GlobalTagManager() {
   const [isOpen, setIsOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState(`hsl(${Math.random() * 360}, 70%, 50%)`);
+  const [newTagScope, setNewTagScope] = useState<'project' | 'global'>('project');
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [editingTagName, setEditingTagName] = useState('');
   const [editingTagColor, setEditingTagColor] = useState('');
@@ -35,6 +43,7 @@ export function GlobalTagManager() {
       createTag({
         name: newTagName.trim(),
         color: newTagColor,
+        scope: newTagScope,
       });
       
       setNewTagName('');
@@ -195,6 +204,15 @@ export function GlobalTagManager() {
                 }
               }}
             />
+            <Select value={newTagScope} onValueChange={(value: 'project' | 'global') => setNewTagScope(value)}>
+              <SelectTrigger className="w-28 h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="project">Project</SelectItem>
+                <SelectItem value="global">Global</SelectItem>
+              </SelectContent>
+            </Select>
             <div className="relative">
               <Button
                 size="sm"
@@ -246,6 +264,9 @@ export function GlobalTagManager() {
                       className="w-4 h-4 rounded-full border border-border flex-shrink-0"
                       style={{ backgroundColor: tag.color }}
                     />
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                      {tag.scope}
+                    </Badge>
                     
                     {editingTagId === tag.id ? (
                       <div className="flex-1 space-y-3">

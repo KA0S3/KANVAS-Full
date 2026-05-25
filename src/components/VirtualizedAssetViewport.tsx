@@ -201,9 +201,30 @@ export function VirtualizedAssetViewport({
   return (
     <div 
       ref={dragContainerRef}
-      className={`virtualized-viewport overflow-auto relative ${className} ${isDragging ? 'cursor-grabbing' : ''}`}
-      style={{ width: viewportWidth, height: viewportHeight }}
+      className={`virtualized-viewport overflow-auto relative glass ${className} ${isDragging ? 'cursor-grabbing' : ''}`}
+      style={{
+        width: viewportWidth,
+        height: viewportHeight,
+        backdropFilter: 'blur(30px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(30px) saturate(140%)',
+        backgroundColor: 'hsl(var(--glass-bg) / 0.04)',
+      }}
     >
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: `
+            radial-gradient(
+              ellipse at center,
+              rgba(255, 255, 255, 0.02) 0%,
+              rgba(255, 255, 255, 0.02) 42%,
+              rgba(255, 255, 255, 0.06) 70%,
+              rgba(255, 255, 255, 0.14) 100%
+            )
+          `,
+        }}
+      />
+
       {/* Loading indicator */}
       {isLoading && (
         <div className="absolute top-4 right-4 bg-blue-500 text-white px-3 py-1 rounded z-50">

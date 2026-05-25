@@ -9,8 +9,8 @@ import { GlobalTagManager } from '@/components/tags/GlobalTagManager';
 import { cn } from '@/lib/utils';
 import { AssetCreationModal } from '@/components/asset/AssetCreationModal';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
-import { AccountModal } from '@/components/account/AccountModal';
 import { calculateViewportCenterPosition } from '@/utils/coordinateUtils';
+import { openPublicAssetUrl } from '@/utils/appUrls';
 import type { Asset } from '@/types/Asset';
 import {
   DndContext,
@@ -31,18 +31,19 @@ import {
 } from '@dnd-kit/sortable';
 
 // Root Asset Component
-function RootAsset({ isDragActive }: { isDragActive: boolean }) {
+function RootAsset({
+  isDragActive,
+  isAllExpanded,
+  onToggleAll,
+}: {
+  isDragActive: boolean;
+  isAllExpanded: boolean;
+  onToggleAll: () => void;
+}) {
   const { setNodeRef, isOver } = useDroppable({
     id: 'root-asset',
   });
-  // Tree expansion/collapse functionality simplified for V2 architecture
-  const [isAllExpanded, setIsAllExpanded] = useState(false);
-  
-  const handleToggleAll = () => {
-    // Tree expansion/collapse simplified for V2 architecture
-    setIsAllExpanded(!isAllExpanded);
-  };
-  
+
   return (
     <div
       ref={setNodeRef}
@@ -60,9 +61,11 @@ function RootAsset({ isDragActive }: { isDragActive: boolean }) {
       
       {/* Collapse/Expand All Button */}
       <button
-        onClick={handleToggleAll}
+        type="button"
+        onClick={onToggleAll}
         className="ml-auto p-1 hover:bg-sidebar-accent/50 rounded transition-colors"
         title={isAllExpanded ? "Collapse all" : "Expand all"}
+        aria-label={isAllExpanded ? "Collapse all assets" : "Expand all assets"}
       >
         {isAllExpanded ? (
           <ChevronDown className="w-3.5 h-3.5" />
@@ -91,7 +94,6 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   const [searchQuery, setSearchQuery] = useState('');
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
-  const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialData, setModalInitialData] = useState<any>(null);
   const [generatorImportData, setGeneratorImportData] = useState<any>(null);
@@ -100,6 +102,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   const [currentActiveId, setCurrentActiveId] = useState<string | null>(null);
   const [professionalMode, setProfessionalMode] = useState(false);
   const [isEditingBackground, setIsEditingBackground] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   
   // DnD sensors
   const sensors = useSensors(
@@ -252,7 +255,50 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   
   const rootAssets = Object.values(assets).filter(asset => !asset.parentId);
   const allAssets = Object.values(assets);
-  const expandedNodes = new Set<string>(); // Default to all collapsed
+  const expandableAssetIds = new Set(
+    allAssets
+      .filter(asset => allAssets.some(candidate => candidate.parentId === asset.id))
+      .map(asset => asset.id)
+  );
+  const isAllExpanded = expandableAssetIds.size > 0 && expandableAssetIds.size === expandedNodes.size;
+
+  useEffect(() => {
+    setExpandedNodes((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((assetId) => expandableAssetIds.has(assetId))
+      );
+
+      if (next.size === previous.size) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, [assets]);
+
+  const handleToggleExpand = useCallback((assetId: string) => {
+    setExpandedNodes((previous) => {
+      const next = new Set(previous);
+
+      if (next.has(assetId)) {
+        next.delete(assetId);
+      } else {
+        next.add(assetId);
+      }
+
+      return next;
+    });
+  }, []);
+
+  const handleToggleAll = useCallback(() => {
+    setExpandedNodes(() => {
+      if (isAllExpanded) {
+        return new Set();
+      }
+
+      return new Set(expandableAssetIds);
+    });
+  }, [expandableAssetIds, isAllExpanded]);
   
   const openCreateAssetModal = useCallback(() => {
     console.log('🎯 Opening create modal');
@@ -428,7 +474,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             className="whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border hover:text-accent-foreground py-2 h-10 flex-1 flex flex-col items-center justify-center gap-0.5 bg-sidebar-accent/20 border-sidebar-border hover:bg-sidebar-accent/40 px-1 fantasy-tab"
             onClick={() => {
               console.log('Characters button clicked');
-              window.open('/generators/character-generator.html', '_blank');
+              openPublicAssetUrl('generators/character-generator.html');
             }}
           >
             <Users className="w-4 h-4" />
@@ -439,7 +485,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             className="whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border hover:text-accent-foreground py-2 h-10 flex-1 flex flex-col items-center justify-center gap-0.5 bg-sidebar-accent/20 border-sidebar-border hover:bg-sidebar-accent/40 px-1 fantasy-tab"
             onClick={() => {
               console.log('Cities button clicked');
-              window.open('/generators/city-generator.html', '_blank');
+              openPublicAssetUrl('generators/city-generator.html');
             }}
           >
             <Building className="w-4 h-4" />
@@ -450,7 +496,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             className="whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border hover:text-accent-foreground py-2 h-10 flex-1 flex flex-col items-center justify-center gap-0.5 bg-sidebar-accent/20 border-sidebar-border hover:bg-sidebar-accent/40 px-1 fantasy-tab"
             onClick={() => {
               console.log('Gods button clicked');
-              window.open('/generators/god-generator.html', '_blank');
+              openPublicAssetUrl('generators/god-generator.html');
             }}
           >
             <Sparkles className="w-4 h-4" />
@@ -461,7 +507,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             className="whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border hover:text-accent-foreground py-2 h-10 flex-1 flex flex-col items-center justify-center gap-0.5 bg-sidebar-accent/20 border-sidebar-border hover:bg-sidebar-accent/40 px-1 fantasy-tab"
             onClick={() => {
               console.log('Battles button clicked');
-              window.open('/generators/battle-manager.html', '_blank');
+              openPublicAssetUrl('generators/battle-manager.html');
             }}
           >
             <Swords className="w-4 h-4" />
@@ -514,7 +560,11 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
           }}
         >
           {/* Root Asset */}
-          <RootAsset isDragActive={activeId !== null} />
+          <RootAsset
+            isDragActive={activeId !== null}
+            isAllExpanded={isAllExpanded}
+            onToggleAll={handleToggleAll}
+          />
           
           <div className="py-1">
             {rootAssets.map((asset) => (
@@ -529,6 +579,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
                 isDragActive={activeId !== null}
                 allAssets={allAssets}
                 expandedNodes={expandedNodes}
+                onToggleExpand={handleToggleExpand}
               />
             ))}
           </div>
@@ -555,12 +606,6 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
         <SettingsPanel
           isOpen={settingsPanelOpen}
           onClose={() => setSettingsPanelOpen(false)}
-        />
-
-        {/* Account Modal */}
-        <AccountModal
-          isOpen={accountModalOpen}
-          onClose={() => setAccountModalOpen(false)}
         />
 
         {/* Asset Creation Modal */}

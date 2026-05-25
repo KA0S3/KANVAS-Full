@@ -156,11 +156,6 @@ class PermissionMonitor {
 
     // Expected denial rates by action and plan type
     const expectedDenialRates = {
-      'export_zip': { free: 100, pro: 0, lifetime: 0 }, // Free users should always be denied
-      'import_zip': { free: 100, pro: 0, lifetime: 0 },
-      'export_json': { free: 100, pro: 0, lifetime: 0 },
-      'import_json': { free: 100, pro: 0, lifetime: 0 },
-      'bulk_export': { free: 100, pro: 0, lifetime: 0 },
       'create_book': { free: 0, pro: 0, lifetime: 0 }, // All should be allowed
     }
 

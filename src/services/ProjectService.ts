@@ -3,12 +3,15 @@
  * 
  * This service provides TypeScript wrappers for the Phase 2 RPC functions.
  * It handles the communication with Supabase for project and asset operations.
+ * 
+ * Updated to use TEXT-based IDs instead of UUIDs for better readability and user context
+ * New ID format: {prefix}_{userShortId}_{timestampBase36}_{randomChars}
  */
 
 import { supabase } from '@/lib/supabase';
 import { unifiedUploadService } from './UnifiedUploadService';
 import type { Asset } from '@/types/Asset';
-import { v4 as uuidv4 } from 'uuid';
+import { generateFileId } from '@/lib/idGenerator';
 
 // =====================================================
 // Type Definitions
@@ -549,12 +552,21 @@ export async function uploadFile(
   }
 
   // For successful uploads, use the result properties
-  const fileId = uuidv4(); // Generate file record ID
+  // Get user ID for ID generation
+  let userId = undefined;
+  try {
+    const authStore = require('@/stores/authStore').useAuthStore.getState();
+    userId = authStore.user?.id;
+  } catch (e) {
+    // Auth store not available, will use 'guest' prefix
+  }
+  
+  const fileId = generateFileId(userId); // Generate file record ID with new format
   const r2Url = result.url || '';
 
-  // Create file record in database
+  // Create file record in database (using files_v3 table)
   const { error: createError } = await supabase
-    .from('files')
+    .from('files_v3')
     .insert({
       id: fileId,
       project_id: projectId,

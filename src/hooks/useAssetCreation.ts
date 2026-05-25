@@ -2,7 +2,6 @@ import { useKanvasStore } from '@/stores/kanvasStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useAuthStore } from '@/stores/authStore';
 import { unifiedUploadService } from '@/services/UnifiedUploadService';
-import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import type { Asset } from '@/types/Asset';
 import { useState } from 'react';
 
@@ -16,7 +15,7 @@ interface UpgradeModalState {
 // Helper function to convert technical errors to user-friendly messages
 const getUserFriendlyErrorMessage = (technicalError: string): string => {
   if (technicalError.includes('quota') || technicalError.includes('Quota')) {
-    return 'Storage quota exceeded. Please upgrade your plan to continue uploading.';
+    return 'Upload failed. The local asset was kept.';
   }
   if (technicalError.includes('network') || technicalError.includes('connection')) {
     return 'Network connection failed. Please check your internet connection and try again.';
@@ -25,10 +24,10 @@ const getUserFriendlyErrorMessage = (technicalError: string): string => {
     return 'Upload timed out. Please try again with a smaller file or better connection.';
   }
   if (technicalError.includes('unauthorized') || technicalError.includes('auth')) {
-    return 'Authentication failed. Please sign in again.';
+    return 'Upload failed. The local asset was kept.';
   }
   if (technicalError.includes('file too large') || technicalError.includes('size')) {
-    return 'File is too large. Please choose a smaller file or upgrade your plan.';
+    return 'File is too large for this operation.';
   }
   if (technicalError.includes('invalid') || technicalError.includes('format')) {
     return 'Invalid file format. Please choose a supported file type.';
@@ -38,7 +37,7 @@ const getUserFriendlyErrorMessage = (technicalError: string): string => {
 
 export function useAssetCreation() {
   const { createAsset, updateAsset } = useKanvasStore();
-  const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
+  const { effectiveLimits } = useAuthStore();
   const [upgradeModal, setUpgradeModal] = useState<UpgradeModalState>({
     isOpen: false,
     currentUsage: 0,
@@ -64,29 +63,49 @@ export function useAssetCreation() {
       throw new Error('Asset title is required');
     }
     
-    console.log('Creating asset from modal');
-    
-    // Create local asset first (local-first principle)
-    const assetId = await createAsset(assetData);
-    
-    // Store file reference for later cloud sync during normal save cycle
-    if (options.file) {
-      // Store file in asset for later upload during sync cycle
-      await updateAsset(assetId, { 
-        content: {
-          ...assetData.content,
-          customFields: {
-            ...assetData.content.customFields,
-            file: options.file.name
-          }
-        }
-      });
+    // Ensure projectId is provided and valid
+    if (!assetData.projectId || typeof assetData.projectId !== 'string') {
+      throw new Error('Asset must have a valid projectId');
     }
     
-    // NOTE: Cloud upload will happen during normal sync cycle (40-60s debounce)
-    // This respects low IO principles and prevents immediate API calls
+    // Ensure layout is valid
+    if (!assetData.layout || typeof assetData.layout !== 'object') {
+      throw new Error('Asset must have valid layout data');
+    }
     
-    return assetId;
+    console.log('Creating asset from modal', { 
+      title: assetData.content.title,
+      projectId: assetData.projectId,
+      hasLayout: !!assetData.layout
+    });
+    
+    try {
+      // Create local asset first (local-first principle)
+      const assetId = await createAsset(assetData);
+      console.log('Asset created successfully:', assetId);
+      
+      // Store file reference for later cloud sync during normal save cycle
+      if (options.file) {
+        // Store file in asset for later upload during sync cycle
+        await updateAsset(assetId, { 
+          content: {
+            ...assetData.content,
+            customFields: {
+              ...assetData.content.customFields,
+              file: options.file.name
+            }
+          }
+        });
+      }
+      
+      // NOTE: Cloud upload will happen during normal sync cycle (40-60s debounce)
+      // This respects low IO principles and prevents immediate API calls
+      
+      return assetId;
+    } catch (error) {
+      console.error('Failed to create asset:', error);
+      throw error;
+    }
   };
 
   const uploadAssetToCloud = async (assetId: string, file: File, projectId?: string): Promise<void> => {
@@ -143,10 +162,10 @@ export function useAssetCreation() {
       } else {
         // Check if it's a quota error
         if (result.error?.includes('quota') || result.error?.includes('Quota')) {
-          const quotaLimit = (effectiveLimits as any)?.quotaBytes || 100000000; // Default 100MB
+          const quotaLimit = (effectiveLimits as any)?.quotaBytes || 0;
           
           setUpgradeModal({
-            isOpen: true,
+            isOpen: false,
             currentUsage: 0, // TODO: Get actual usage from auth store
             quotaLimit,
             requiredBytes: file.size
@@ -188,17 +207,7 @@ export function useAssetCreation() {
     await uploadAssetToCloud(assetId, file, projectId);
   };
 
-  const canUploadToCloud = async (file: File): Promise<boolean> => {
-    if (!isAuthenticated) {
-      return false;
-    }
-
-    // Quota check is now handled server-side by getUploadUrls Edge Function
-    // We do a client-side estimate based on current quota
-    const quotaLimit = (effectiveLimits as any)?.quotaBytes || 100000000; // Default 100MB
-    const currentUsage = 0; // TODO: Get actual usage from auth store
-    return (currentUsage + file.size) <= quotaLimit;
-  };
+  const canUploadToCloud = async (file: File): Promise<boolean> => true;
 
   const closeUpgradeModal = () => {
     setUpgradeModal(prev => ({ ...prev, isOpen: false }));

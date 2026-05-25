@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Save, Upload } from 'lucide-react';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { useKanvasStore } from '@/stores/kanvasStore';
+import { importAssetToCurrentProject } from '@/persistence/desktopProjectPersistence';
 import { db } from '@/storage/indexeddb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -181,13 +182,22 @@ export function BackgroundControls({ assetId, onSave, onClose, onChange, onToggl
     onClose?.();
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Reject files larger than 2MB to prevent base64 from breaking the app
-      const MAX_SIZE = 2 * 1024 * 1024; // 2MB
-      if (file.size > MAX_SIZE) {
-        alert('Background images must be under 2MB. Large images should be uploaded as assets instead.');
+      if (window.kanvasDesktop) {
+        try {
+          const importTargetId = assetId || `${currentProjectId || currentBook?.id || 'project'}_root_background`;
+          const { relativePath } = await importAssetToCurrentProject(file, importTargetId);
+          const updatedConfig = { ...localConfig, imageUrl: relativePath };
+          setLocalConfig(updatedConfig);
+          setHasUnsavedChanges(true);
+          saveConfig(updatedConfig);
+        } catch (error) {
+          console.error('Failed to import desktop background image:', error);
+        } finally {
+          event.target.value = '';
+        }
         return;
       }
 

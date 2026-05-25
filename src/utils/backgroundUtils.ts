@@ -29,7 +29,7 @@ export function getBackgroundColor(config: BackgroundConfig | null): string {
   if (!config) return "transparent";
   switch (config.mode) {
     case "glass":
-      return "transparent";
+      return "rgba(72, 72, 76, 0.74)";
     case "parchment":
       return config.color || "#eed4aa";
     case "color":

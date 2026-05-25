@@ -11,6 +11,7 @@ import { SyncQueueEntry, RuntimeSyncState } from '@/types/SyncTypes';
 import { db } from '@/storage/indexeddb';
 import { useSyncStore } from '@/stores/syncStore';
 import { supabaseStorage } from '@/storage/supabase';
+import { USE_SUPABASE } from '@/config/features';
 import { Asset } from '@/types/Asset';
 
 export class SyncQueue {
@@ -21,7 +22,11 @@ export class SyncQueue {
   private readonly BATCH_SIZE = 10;
 
   constructor() {
-    this.startBackgroundProcessor();
+    if (USE_SUPABASE) {
+      this.startBackgroundProcessor();
+    } else {
+      console.warn('Supabase disabled; sync queue background processor will not start');
+    }
   }
 
   /**
@@ -47,6 +52,10 @@ export class SyncQueue {
    * Process the sync queue (FIFO order)
    */
   private async processQueue(): Promise<void> {
+    if (!USE_SUPABASE) {
+      return;
+    }
+
     if (this.isProcessing) {
       return; // Already processing
     }
@@ -123,6 +132,11 @@ export class SyncQueue {
    * Process asset creation
    */
   private async processCreate(entry: SyncQueueEntry): Promise<void> {
+    if (!USE_SUPABASE) {
+      console.warn('Supabase disabled; skipping queued create');
+      return;
+    }
+
     if (!entry.assetData) {
       throw new Error('Create operation requires asset data');
     }
@@ -135,6 +149,11 @@ export class SyncQueue {
    * Process asset update
    */
   private async processUpdate(entry: SyncQueueEntry): Promise<void> {
+    if (!USE_SUPABASE) {
+      console.warn('Supabase disabled; skipping queued update');
+      return;
+    }
+
     if (!entry.assetData) {
       throw new Error('Update operation requires asset data');
     }
@@ -147,6 +166,11 @@ export class SyncQueue {
    * Process asset deletion
    */
   private async processDelete(entry: SyncQueueEntry): Promise<void> {
+    if (!USE_SUPABASE) {
+      console.warn('Supabase disabled; skipping queued delete');
+      return;
+    }
+
     await supabaseStorage.deleteAsset(entry.assetId, entry.projectId);
   }
 
@@ -186,6 +210,10 @@ export class SyncQueue {
    * Force immediate sync (for destructive operations)
    */
   async forceSync(): Promise<void> {
+    if (!USE_SUPABASE) {
+      return;
+    }
+
     if (this.isProcessing) {
       return;
     }

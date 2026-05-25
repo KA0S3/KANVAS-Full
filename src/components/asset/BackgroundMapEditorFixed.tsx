@@ -21,6 +21,7 @@ import type { Asset } from '@/components/AssetItem';
 import type { BackgroundConfig, BackgroundMode } from '@/types/background';
 import { isColorPickerVisible, getBackgroundColor, validateBackgroundConfig, shouldShowParchmentOverlay, shouldShowGlassEffect } from '@/utils/backgroundUtils';
 import { getAssetKeyWithBook } from '@/stores/backgroundStore';
+import { cssUrl } from '@/utils/cssUrl';
 
 interface BackgroundMapEditorProps {
   isOpen: boolean;
@@ -56,7 +57,7 @@ export function BackgroundMapEditorFixed({ isOpen, onClose, assetId, onSave }: B
   const currentBook = getCurrentBook();
   
   // Get background config using fixed autosave service
-  const backgroundConfig = fixedBackgroundAutosave.loadBackgroundConfig(assetId || 'root');
+  const backgroundConfig = fixedBackgroundAutosave.loadBackgroundConfig(assetId || 'root', currentBook?.id);
   const [localConfig, setLocalConfig] = useState<BackgroundConfig>(backgroundConfig);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -165,13 +166,6 @@ export function BackgroundMapEditorFixed({ isOpen, onClose, assetId, onSave }: B
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Reject files larger than 2MB to prevent base64 from breaking the app
-      const MAX_SIZE = 2 * 1024 * 1024; // 2MB
-      if (file.size > MAX_SIZE) {
-        alert('Background images must be under 2MB. Large images should be uploaded as assets instead.');
-        return;
-      }
-
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
@@ -194,7 +188,7 @@ export function BackgroundMapEditorFixed({ isOpen, onClose, assetId, onSave }: B
   // Fixed save function that uses the autosave service
   const saveConfig = (config: BackgroundConfig) => {
     const targetAssetId = assetId || 'root';
-    fixedBackgroundAutosave.saveBackgroundConfig(targetAssetId, config);
+    fixedBackgroundAutosave.saveBackgroundConfig(targetAssetId, config, currentBook?.id);
     setHasUnsavedChanges(false);
     
     // Only dispatch minimal events for UI updates
@@ -330,7 +324,7 @@ export function BackgroundMapEditorFixed({ isOpen, onClose, assetId, onSave }: B
             className={`absolute inset-0 cursor-move ${shouldShowGlassEffect(localConfig) ? 'glass cosmic-glow' : ''}`}
             style={{
               backgroundColor: getBackgroundColor(localConfig),
-              backgroundImage: localConfig.imageUrl ? `url(${localConfig.imageUrl})` : 'none',
+              backgroundImage: cssUrl(localConfig.imageUrl),
               backgroundRepeat: 'no-repeat',
               backgroundPosition: `${imageOffset.x}px ${imageOffset.y}px`,
               backgroundSize: (() => {

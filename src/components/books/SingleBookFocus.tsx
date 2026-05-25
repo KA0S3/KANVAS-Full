@@ -181,8 +181,8 @@ const SingleBookFocus: React.FC<SingleBookFocusProps> = ({
         <div className="perspective-1000">
           <div 
             onContextMenu={(e) => handleContextMenu(currentBook, e)}
-            className={`cursor-pointer group relative transform scale-110 transition-all duration-500 ease-out ${
-              isAnimating ? 'scale-95 opacity-0' : 'scale-110 opacity-100'
+            className={`cursor-pointer group relative origin-bottom transform scale-[1.28] transition-all duration-500 ease-out ${
+              isAnimating ? 'scale-95 opacity-0' : 'scale-[1.28] opacity-100'
             }`}
           >
             <BookCover 

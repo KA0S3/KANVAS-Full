@@ -7,7 +7,7 @@
  * 🔒 CRITICAL: This validation must pass before considering the rewrite complete
  */
 
-import { db } from '@/storage/indexeddb';
+import { db, verifyIndexedDBSchemaHealth } from '@/storage/indexeddb';
 import { useKanvasStore } from '@/stores/kanvasStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSyncStore } from '@/stores/syncStore';
@@ -86,6 +86,8 @@ export class ArchitectureValidator {
     const testResults: Record<string, boolean> = {};
 
     try {
+      await verifyIndexedDBSchemaHealth();
+
       // Test database connection
       testResults.dbConnection = true;
       

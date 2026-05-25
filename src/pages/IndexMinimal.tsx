@@ -6,9 +6,8 @@ import { Button } from "@/components/ui/button";
 import { useAssetStore } from "@/stores/assetStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { useThemeStore } from "@/stores/themeStore";
-import { useAuthStore } from "@/stores/authStore";
-import { useCanCreateBook } from "@/lib/limits";
 import type { Book } from "@/types/book";
+import { cssUrl } from "@/utils/cssUrl";
 
 const IndexMinimal = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -16,26 +15,6 @@ const IndexMinimal = () => {
   const { currentActiveId, loadWorldData } = useAssetStore();
   const { currentBookId, setCurrentBook, getAllBooks, createBook } = useBookStore();
   const { theme } = useThemeStore();
-  const { isAuthenticated, plan, effectiveLimits } = useAuthStore();
-  const { canCreate: canCreateNewBook, reason, upgradePrompt } = useCanCreateBook();
-
-  // Helper function to get max books display
-  const getMaxBooksDisplay = () => {
-    // Check effective limits first (owner keys, licenses, etc.)
-    if (effectiveLimits?.maxBooks !== undefined) {
-      return effectiveLimits.maxBooks === -1 ? '∞' : effectiveLimits.maxBooks;
-    }
-    
-    // Fallback to plan-based limits
-    const maxBooksByPlan = {
-      free: 2,
-      pro: -1, // Unlimited
-      lifetime: -1 // Unlimited
-    };
-    
-    const maxBooks = maxBooksByPlan[plan as keyof typeof maxBooksByPlan] || 2;
-    return maxBooks === -1 ? '∞' : maxBooks;
-  };
 
   useEffect(() => {
     document.documentElement.className = theme;
@@ -48,7 +27,7 @@ const IndexMinimal = () => {
   };
 
   const backgroundStyle = {
-    backgroundImage: `url(${theme === 'dark' ? cosmicBackground : lightBackground})`,
+    backgroundImage: cssUrl(theme === 'dark' ? cosmicBackground : lightBackground),
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
@@ -63,7 +42,7 @@ const IndexMinimal = () => {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">📚 World Library</h2>
               <span className="text-sm text-gray-300 bg-gray-800 px-3 py-1 rounded-md border border-gray-600">
-                Books: {getAllBooks().length} / {getMaxBooksDisplay()}
+                Books: {getAllBooks().length} / ∞
               </span>
             </div>
             
@@ -71,14 +50,8 @@ const IndexMinimal = () => {
               {getAllBooks().length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-lg text-white mb-4">No worlds yet. Create your first world!</p>
-                  <Button onClick={() => {
-                    if (!canCreateNewBook) {
-                      // TODO: Show upgrade prompt
-                      console.log('Book limit reached, show upgrade prompt');
-                      return;
-                    }
-                    
-                    const newBookId = createBook({
+                  <Button onClick={async () => {
+                    const newBookId = await createBook({
                       title: `World ${getAllBooks().length + 1}`,
                       description: 'A new world',
                       color: '#3b82f6',

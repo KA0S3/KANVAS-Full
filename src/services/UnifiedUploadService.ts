@@ -139,15 +139,6 @@ class UnifiedUploadService {
 
   // Private helper methods
   private validateFile(file: File): { valid: boolean; error?: string } {
-    // Check file size (50MB limit)
-    const maxSize = 50 * 1024 * 1024;
-    if (file.size > maxSize) {
-      return {
-        valid: false,
-        error: `File size exceeds limit of ${maxSize / 1024 / 1024}MB`
-      };
-    }
-
     // Check file type
     const allowedTypes = [
       'image/jpeg',

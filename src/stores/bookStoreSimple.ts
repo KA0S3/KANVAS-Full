@@ -7,11 +7,33 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { generateProjectId } from '@/lib/idGenerator';
+import { useProjectStore } from '@/stores/projectStore';
+import type { Project } from '@/storage/indexeddb';
+
+const sanitizePersistedBook = (book: any) => {
+  if (!book) {
+    return book;
+  }
+
+  const sanitizedBook = { ...book };
+  if (typeof sanitizedBook.coverImage === 'string' && sanitizedBook.coverImage.startsWith('data:image/')) {
+    delete sanitizedBook.coverImage;
+  }
+
+  return sanitizedBook;
+};
 
 interface BookStoreState {
   currentBookId: string | null;
   books: Record<string, any>;
-  leatherPresets: any[];
+  leatherPresets: Array<{
+    id: string;
+    name: string;
+    color: string;
+    darkVariant: string;
+    lightVariant: string;
+  }>;
   viewMode: string;
   
   // Actions
@@ -25,10 +47,56 @@ interface BookStoreState {
   updateWorldData: (bookId: string, worldData: any) => void;
   getWorldData: (bookId: string) => any;
   getCurrentBook: () => any;
-  createBook: (bookData: any) => string;
+  createBook: (bookData: any) => Promise<string>;
   updateBook: (bookId: string, bookData: any) => void;
   setViewMode: (mode: string) => void;
+  hydrateBooks: (projects: Project[]) => void;
 }
+
+const getProjectSettings = (bookData: any) => ({
+  color: bookData.color,
+  gradient: bookData.gradient,
+  leatherColor: bookData.leatherColor,
+  isLeatherMode: bookData.isLeatherMode,
+  coverPresetId: bookData.coverPresetId,
+  coverImage: bookData.coverImage,
+  coverImageStorageKey: bookData.coverImageStorageKey,
+  hasLocalCoverImage: bookData.hasLocalCoverImage,
+  coverPageSettings: bookData.coverPageSettings,
+  viewportOffset: bookData.worldData?.viewportOffset || { x: 0, y: 0 },
+  viewportScale: bookData.worldData?.viewportScale || 1,
+  rootBackgroundConfig: bookData.worldData?.rootBackgroundConfig || null,
+  globalCustomFields: bookData.worldData?.globalCustomFields || [],
+});
+
+const projectToBook = (project: Project) => {
+  const settings = project.settings || {};
+  return {
+    id: project.id,
+    title: project.name,
+    description: project.description,
+    subheading: settings.subheading,
+    color: settings.color || '#3b82f6',
+    gradient: settings.gradient,
+    leatherColor: settings.leatherColor,
+    isLeatherMode: settings.isLeatherMode,
+    coverPresetId: settings.coverPresetId,
+    coverImage: settings.coverImage,
+    coverImageStorageKey: settings.coverImageStorageKey,
+    hasLocalCoverImage: settings.hasLocalCoverImage,
+    coverPageSettings: settings.coverPageSettings,
+    createdAt: Date.parse(project.createdAt),
+    updatedAt: Date.parse(project.updatedAt),
+    worldData: {
+      assets: {},
+      tags: {},
+      globalCustomFields: settings.globalCustomFields || [],
+      viewportOffset: settings.viewportOffset || { x: 0, y: 0 },
+      viewportScale: settings.viewportScale || 1,
+      rootBackgroundConfig: settings.rootBackgroundConfig || null,
+    },
+  };
+};
 
 export const useBookStore = create<BookStoreState>()(
   persist(
@@ -37,12 +105,48 @@ export const useBookStore = create<BookStoreState>()(
       currentBookId: null,
       books: {},
       leatherPresets: [
-        { color: 'brown', name: 'Classic Brown' },
-        { color: 'black', name: 'Elegant Black' },
-        { color: 'blue', name: 'Royal Blue' },
-        { color: 'green', name: 'Forest Green' },
-        { color: 'red', name: 'Rich Red' },
-        { color: 'purple', name: 'Royal Purple' },
+        {
+          id: 'classic-brown',
+          name: 'Classic Brown',
+          color: '#8b4513',
+          darkVariant: '#654321',
+          lightVariant: '#a0522d',
+        },
+        {
+          id: 'elegant-black',
+          name: 'Elegant Black',
+          color: '#1a1a1a',
+          darkVariant: '#0d0d0d',
+          lightVariant: '#2d2d2d',
+        },
+        {
+          id: 'royal-blue',
+          name: 'Royal Blue',
+          color: '#1e3a8a',
+          darkVariant: '#1e2f5a',
+          lightVariant: '#2563eb',
+        },
+        {
+          id: 'forest-green',
+          name: 'Forest Green',
+          color: '#2d5016',
+          darkVariant: '#1f3a0f',
+          lightVariant: '#3a6b1e',
+        },
+        {
+          id: 'royal-purple',
+          name: 'Royal Purple',
+          color: '#6b46c1',
+          darkVariant: '#553c9a',
+          lightVariant: '#8b5cf6',
+        },
+        {
+          id: 'arctic-white',
+          name: 'Arctic White',
+          color: '#f5f5f0',
+          darkVariant: '#e8e8e0',
+          lightVariant: '#fafaf5',
+        },
       ],
       viewMode: 'grid',
 
@@ -106,6 +210,7 @@ export const useBookStore = create<BookStoreState>()(
       // Delete book (alias for removeBook)
       deleteBook: (bookId: string) => {
         get().removeBook(bookId);
+        void useProjectStore.getState().deleteProject(bookId);
       },
 
       // Update world data for a book
@@ -115,12 +220,22 @@ export const useBookStore = create<BookStoreState>()(
           if (books[bookId]) {
             books[bookId] = {
               ...books[bookId],
-              ...worldData,
+              worldData: {
+                ...(books[bookId].worldData || {}),
+                ...worldData,
+              },
               updatedAt: new Date().toISOString()
             };
           }
           return { books };
         });
+
+        const book = get().books[bookId];
+        if (book) {
+          void useProjectStore.getState().updateProject(bookId, {
+            settings: getProjectSettings(book),
+          });
+        }
       },
 
       // Get world data for a book
@@ -139,8 +254,17 @@ export const useBookStore = create<BookStoreState>()(
       },
 
       // Create a new book
-      createBook: (bookData: any) => {
-        const id = `book_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      createBook: async (bookData: any) => {
+        // Get user ID from auth store for ID generation
+        let userId = undefined;
+        try {
+          const authStore = require('@/stores/authStore').useAuthStore.getState();
+          userId = authStore.user?.id;
+        } catch (e) {
+          // Auth store not available, will use 'guest' prefix
+        }
+        
+        const id = generateProjectId(userId);
         const newBook = {
           ...bookData,
           id,
@@ -148,6 +272,14 @@ export const useBookStore = create<BookStoreState>()(
           updatedAt: new Date().toISOString(),
         };
         
+        await useProjectStore.getState().createProject({
+          id,
+          userId: userId || 'guest',
+          name: bookData.title || 'Untitled World',
+          description: bookData.description,
+          settings: getProjectSettings(bookData),
+        });
+
         set(state => ({
           books: {
             ...state.books,
@@ -171,18 +303,32 @@ export const useBookStore = create<BookStoreState>()(
           }
           return { books };
         });
+
+        const currentBook = get().books[bookId];
+        if (currentBook) {
+          void useProjectStore.getState().updateProject(bookId, {
+            name: currentBook.title,
+            description: currentBook.description,
+            settings: getProjectSettings(currentBook),
+          });
+        }
       },
 
       // Set view mode
       setViewMode: (mode: string) => {
         set({ viewMode: mode });
-      }
+      },
+
+      hydrateBooks: (projects: Project[]) => {
+        const books = Object.fromEntries(projects.map(project => [project.id, projectToBook(project)]));
+        set({ books });
+      },
     }),
     {
       name: 'book-store-simple',
       partialize: (state) => ({
         currentBookId: state.currentBookId,
-        books: state.books
+        viewMode: state.viewMode,
       })
     }
   )

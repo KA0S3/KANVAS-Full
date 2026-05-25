@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, Calendar, Tag, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Book } from '@/types/book';
 import { useThemeStore } from '@/stores/themeStore';
-import { useTagStore } from '@/stores/tagStore';
+import { useBookWorldStats } from '@/hooks/useBookWorldStats';
+import { useResolvedBookCover } from '@/hooks/useResolvedBookCover';
+import { cssUrl } from '@/utils/cssUrl';
 
 // Import book cover images
 import BlackBook from '@/assets/Book-Covers/Black_book.png';
@@ -39,11 +41,12 @@ const BookCover: React.FC<BookCoverProps> = ({
 
   try {
     const { theme } = useThemeStore();
-    const { tags } = useTagStore();
     const [isHovered, setIsHovered] = useState(false);
     const [isFlipped, setIsFlipped] = useState(false);
     const [showStats, setShowStats] = useState(false);
     const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const resolvedCoverImage = useResolvedBookCover(book);
+    const worldStats = useBookWorldStats(book);
 
     const handleBookClick = (e: React.MouseEvent) => {
       // Clear any existing timeout
@@ -82,48 +85,8 @@ const BookCover: React.FC<BookCoverProps> = ({
       large: 'w-48 h-72 text-lg'
     };
 
-    // Calculate world statistics
-    const worldStats = useMemo(() => {
-      if (!book.worldData) {
-        return {
-          assetCount: 0,
-          tagCount: 0,
-          estimatedSize: '0 B',
-          storageLocation: 'Local Storage',
-          lastModified: book.updatedAt ? new Date(book.updatedAt).toLocaleDateString() : 'Unknown'
-        };
-      }
-
-      const assets = book.worldData.assets || {};
-      const assetCount = Object.keys(assets).length;
-      const tagCount = Object.keys(tags).length;
-      
-      // Calculate estimated storage size (rough approximation)
-      const estimatedSize = JSON.stringify({
-        assets,
-        tags,
-        globalCustomFields: book.worldData?.globalCustomFields || [],
-        viewportOffset: book.worldData?.viewportOffset || { x: 0, y: 0 },
-        viewportScale: book.worldData?.viewportScale || 1
-      }).length;
-      
-      const formatSize = (bytes: number) => {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-      };
-
-      return {
-        assetCount,
-        tagCount,
-        estimatedSize: formatSize(estimatedSize),
-        storageLocation: 'Local Storage', // Could be enhanced to detect Google Drive
-        lastModified: book.updatedAt ? new Date(book.updatedAt).toLocaleDateString() : 'Unknown'
-      };
-    }, [book.worldData, book.updatedAt]);
-
     const getLeatherStyle = () => {
-      if (!book.isLeatherMode || book.coverImage) return null;
+      if (!book.isLeatherMode || resolvedCoverImage) return null;
       
       // Map leather colors to book cover images based on preset names
       const getBookCoverImage = (leatherColor: string) => {
@@ -156,7 +119,7 @@ const BookCover: React.FC<BookCoverProps> = ({
       const coverImage = getBookCoverImage(book.leatherColor || '#8B4513');
       
       return {
-        background: `url(${coverImage}) center/cover no-repeat`,
+        background: `${cssUrl(coverImage)} center/cover no-repeat`,
         border: '2px solid rgba(0,0,0,0.2)',
         boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
         position: 'relative' as const
@@ -165,9 +128,9 @@ const BookCover: React.FC<BookCoverProps> = ({
 
     const getCoverStyle = () => {
       // Custom cover image has highest priority
-      if (book.coverImage && !showBack) {
+      if (resolvedCoverImage && !showBack) {
         return {
-          backgroundImage: `url(${book.coverImage})`,
+          backgroundImage: cssUrl(resolvedCoverImage),
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat'
@@ -339,7 +302,7 @@ const BookCover: React.FC<BookCoverProps> = ({
         );
       }
 
-      if (book.coverImage) {
+      if (resolvedCoverImage) {
         if (isHovered) {
           // Show description overlay on hover for image covers
           return (
@@ -394,7 +357,7 @@ const BookCover: React.FC<BookCoverProps> = ({
           ${sizeClasses[size]} 
           rounded-md flex items-center justify-center 
           transition-all duration-300 ease-in-out
-          ${book.isLeatherMode && !book.coverImage ? 'leather-texture' : ''}
+          ${book.isLeatherMode && !resolvedCoverImage ? 'leather-texture' : ''}
           ${className}
           relative overflow-hidden
         `}
@@ -422,7 +385,7 @@ const BookCover: React.FC<BookCoverProps> = ({
                 style={{
                   background: coverStyle.background || 
                            ('backgroundImage' in coverStyle && coverStyle.backgroundImage ? 
-                            `url(${coverStyle.backgroundImage}) center/cover no-repeat` : 
+                            `${coverStyle.backgroundImage} center/cover no-repeat` :
                             coverStyle.background),
                   transform: 'scaleX(-1)'
                 }}

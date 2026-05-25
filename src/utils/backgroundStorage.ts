@@ -8,6 +8,7 @@ import { useBackgroundStore } from '@/stores/backgroundStore';
 
 const STORAGE_PREFIX = 'background:';
 const METADATA_PREFIX = 'bgmeta:';
+const IMAGE_PREFIX = 'bgimg:';
 
 // Defer background storage initialization to prevent startup logs
 // This will be initialized when first accessed
@@ -62,10 +63,23 @@ export function getStorageKey(assetId: string): string {
   return `${METADATA_PREFIX}${assetId}`;
 }
 
-export async function getBackgroundAsync(assetId: string): Promise<BackgroundConfig> {
+export function getScopedBackgroundKey(assetId: string, projectId?: string | null): string {
+  return projectId ? `${projectId}:${assetId}` : assetId;
+}
+
+export function getBackgroundImageKey(assetId: string, projectId?: string | null): string {
+  return `${IMAGE_PREFIX}${getScopedBackgroundKey(assetId, projectId)}`;
+}
+
+export function getBackgroundMetadataKey(assetId: string, projectId?: string | null): string {
+  return `${METADATA_PREFIX}${getScopedBackgroundKey(assetId, projectId)}`;
+}
+
+export async function getBackgroundAsync(assetId: string, projectId?: string | null): Promise<BackgroundConfig> {
   try {
-    const storageKey = getStorageKey(assetId);
-    const stored = localStorage.getItem(storageKey);
+    const storageKey = getBackgroundMetadataKey(assetId, projectId);
+    const legacyStorageKey = getStorageKey(assetId);
+    const stored = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
     
     let config: BackgroundConfig;
     if (stored) {
@@ -75,7 +89,8 @@ export async function getBackgroundAsync(assetId: string): Promise<BackgroundCon
     }
     
     // If IndexedDB has the image, restore it to the config
-    const imageUrl = await indexedDBStorage.getImage(assetId);
+    const imageUrl = await indexedDBStorage.getImage(getBackgroundImageKey(assetId, projectId))
+      || (projectId ? await indexedDBStorage.getImage(getBackgroundImageKey(assetId)) : null);
     if (imageUrl) {
       config.imageUrl = imageUrl;
     }
@@ -92,9 +107,9 @@ export async function getBackgroundAsync(assetId: string): Promise<BackgroundCon
 
 
 // Async version that stores images in IndexedDB
-export async function setBackgroundAsync(assetId: string, config: BackgroundConfig): Promise<void> {
+export async function setBackgroundAsync(assetId: string, config: BackgroundConfig, projectId?: string | null): Promise<void> {
   try {
-    const storageKey = getStorageKey(assetId);
+    const storageKey = getBackgroundMetadataKey(assetId, projectId);
     
     // Deep clone config
     const configToStore = JSON.parse(JSON.stringify(config));
@@ -104,8 +119,9 @@ export async function setBackgroundAsync(assetId: string, config: BackgroundConf
       try {
         const response = await fetch(configToStore.imageUrl);
         const blob = await response.blob();
-        const file = new File([blob], `background-${assetId}.jpg`, { type: blob.type });
-        const result = await indexedDBStorage.storeImage(assetId, file);
+        const storageId = getBackgroundImageKey(assetId, projectId);
+        const file = new File([blob], `background-${getScopedBackgroundKey(assetId, projectId)}.jpg`, { type: blob.type });
+        const result = await indexedDBStorage.storeImage(storageId, file);
         
         if (result.success) {
           // Store metadata only, remove large base64 from localStorage
@@ -175,11 +191,13 @@ export async function loadAllBackgroundsAsync(): Promise<Record<string, Backgrou
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith(METADATA_PREFIX)) {
-        const assetId = key.substring(METADATA_PREFIX.length);
-        if (!processedIds.has(assetId)) {
-          processedIds.add(assetId);
-          const config = await getBackgroundAsync(assetId);
-          configs[assetId] = config;
+        const scopedId = key.substring(METADATA_PREFIX.length);
+        if (!processedIds.has(scopedId)) {
+          processedIds.add(scopedId);
+          const [projectId, ...assetParts] = scopedId.includes(':') ? scopedId.split(':') : [null, scopedId];
+          const assetId = assetParts.join(':');
+          const config = await getBackgroundAsync(assetId, projectId);
+          configs[scopedId] = config;
         }
       }
     }
@@ -205,10 +223,10 @@ export async function loadAllBackgroundsAsync(): Promise<Record<string, Backgrou
 
 // Sync load function removed - using async loadAllBackgroundsAsync only
 
-export function removeBackground(assetId: string): void {
+export function removeBackground(assetId: string, projectId?: string | null): void {
   try {
     // Remove from IndexedDB only
-    indexedDBStorage.removeImage(assetId);
+    indexedDBStorage.removeImage(getBackgroundImageKey(assetId, projectId));
   } catch (error) {
     console.error(`Error removing background config for ${assetId}:`, error);
   }

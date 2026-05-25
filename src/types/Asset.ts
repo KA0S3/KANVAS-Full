@@ -9,10 +9,14 @@
  * - Behavior via Configuration: Rendering derives ONLY from behavior.renderMode
  * - Unified Persistence: Single serialization format - NO branching
  * - State Separation: Runtime state NEVER mixes with canonical data
+ * 
+ * Updated to use TEXT-based IDs instead of UUIDs for better readability and user context
+ * New ID format: {prefix}_{userShortId}_{timestampBase36}_{randomChars}
  */
 
 import { z } from 'zod';
 import { createId } from '@/utils/id';
+import { generateAssetId } from '@/lib/idGenerator';
 
 // Core identity (Immutable)
 export interface AssetIdentity {
@@ -95,11 +99,13 @@ export interface Asset {
   metadata: AssetMetadata;
 }
 
-// Zod schema for runtime validation
+// Zod schema for runtime validation (updated for TEXT-based IDs)
+// Note: Frontend accepts any non-empty string for IDs to support both legacy and new formats
+// New assets are generated with the proper format, but old IDs are still accepted for compatibility
 export const AssetIdentitySchema = z.object({
-  id: z.string().uuid(),
-  projectId: z.string().min(1, "Project ID is required"),
-  parentId: z.string().optional(),
+  id: z.string().min(1, "Asset ID cannot be empty"),
+  projectId: z.string().min(1, "Project ID cannot be empty"),
+  parentId: z.string().min(1, "Parent ID cannot be empty").optional().or(z.literal(null)),
 });
 
 export const AssetLayoutSchema = z.object({
@@ -115,7 +121,7 @@ export const AssetLayoutSchema = z.object({
 export const AssetContentSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
-  imageUrl: z.string().url().optional(),
+  imageUrl: z.string().optional(),
   text: z.string().optional(),
   customFields: z.record(z.any()).optional(),
 });
@@ -146,9 +152,9 @@ export const AssetMetadataSchema = z.object({
 });
 
 export const AssetSchema = z.object({
-  id: z.string().uuid(),
-  projectId: z.string().min(1, "Project ID is required"),
-  parentId: z.string().optional(),
+  id: z.string().min(1, "Asset ID cannot be empty"),
+  projectId: z.string().min(1, "Project ID cannot be empty"),
+  parentId: z.string().min(1, "Parent ID cannot be empty").optional().or(z.literal(null)),
   layout: AssetLayoutSchema,
   content: AssetContentSchema,
   style: AssetStyleSchema,
@@ -161,18 +167,38 @@ export function isValidAsset(obj: any): obj is Asset {
   return AssetSchema.safeParse(obj).success;
 }
 
-// Helper function to create a new asset with proper defaults
+// Helper function to create a new asset with proper defaults (updated for TEXT-based IDs)
 export function createCanonicalAsset(
   projectId: string,
   overrides: Partial<Asset> = {}
 ): Asset {
   const now = new Date().toISOString();
-  const id = createId();
+  
+  // Ensure projectId is always a valid non-empty string
+  const finalProjectId = projectId || 'default';
+  if (!finalProjectId || typeof finalProjectId !== 'string') {
+    throw new Error(`Invalid projectId: ${projectId}`);
+  }
+  
+  // Get user ID for ID generation
+  let userId = undefined;
+  try {
+    const authStore = require('@/stores/authStore').useAuthStore.getState();
+    userId = authStore.user?.id;
+  } catch (e) {
+    // Auth store not available, will use 'guest' prefix
+  }
+  
+  // Always generate a valid ID if not provided
+  const finalId = overrides.id || generateAssetId(userId);
+  if (!finalId || typeof finalId !== 'string' || finalId.trim().length === 0) {
+    throw new Error(`Invalid or empty asset ID: ${finalId}`);
+  }
 
   const defaultAsset: Asset = {
     // Core Identity
-    id,
-    projectId,
+    id: finalId,
+    projectId: finalProjectId,
 
     // Layout & Position
     layout: {
@@ -203,26 +229,34 @@ export function createCanonicalAsset(
     },
   };
 
-  // Deep merge overrides with defaults
+  // Deep merge overrides with defaults - ensure identity fields are never overridden with empty values
   const mergedAsset: Asset = {
-    id: overrides.id || defaultAsset.id,
-    projectId: overrides.projectId || defaultAsset.projectId,
-    parentId: overrides.parentId,
-    layout: { ...defaultAsset.layout, ...overrides.layout },
-    content: { ...defaultAsset.content, ...overrides.content },
-    style: { ...defaultAsset.style, ...overrides.style },
-    behavior: { ...defaultAsset.behavior, ...overrides.behavior },
+    id: finalId,
+    projectId: finalProjectId,
+    parentId: overrides.parentId || undefined,
+    layout: { ...defaultAsset.layout, ...(overrides.layout || {}) },
+    content: { ...defaultAsset.content, ...(overrides.content || {}) },
+    style: { ...defaultAsset.style, ...(overrides.style || {}) },
+    behavior: { ...defaultAsset.behavior, ...(overrides.behavior || {}) },
     metadata: { 
       ...defaultAsset.metadata, 
-      ...overrides.metadata,
-      version: overrides.metadata?.version ?? defaultAsset.metadata.version 
+      ...(overrides.metadata || {}),
+      createdAt: (overrides.metadata?.createdAt) || now,
+      updatedAt: now,
+      version: (overrides.metadata?.version) ?? 1
     },
   };
 
   // Validate the merged asset
   const validation = AssetSchema.safeParse(mergedAsset);
   if (!validation.success) {
-    throw new Error(`Invalid asset structure: ${validation.error.message}`);
+    // Provide detailed error for debugging
+    const errors = validation.error.flatten();
+    console.error('Asset validation failed:', {
+      asset: mergedAsset,
+      errors: errors,
+    });
+    throw new Error(`Invalid asset structure: ${JSON.stringify(errors.fieldErrors)}`);
   }
 
   return validation.data as Asset;

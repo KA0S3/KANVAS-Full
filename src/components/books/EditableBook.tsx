@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Book } from '@/types/book';
 import LeatherColorPicker from './LeatherColorPicker';
-import { uploadFile } from '@/services/ProjectService';
-import { useAuthStore } from '@/stores/authStore';
+import { removeBookCover, saveBookCover } from '@/utils/bookCoverStorage';
+import { useResolvedBookCover } from '@/hooks/useResolvedBookCover';
+import { cssUrl } from '@/utils/cssUrl';
 
 interface BookCoverSettings {
   scale: number;
@@ -32,7 +33,9 @@ const EditableBook: React.FC<EditableBookProps> = ({
   });
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [localCoverPreview, setLocalCoverPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resolvedCoverImage = useResolvedBookCover(book, localCoverPreview);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -52,38 +55,34 @@ const EditableBook: React.FC<EditableBookProps> = ({
     localStorage.setItem(`book-cover-${book.id}`, JSON.stringify(coverSettings));
   }, [coverSettings, book.id]);
 
+  useEffect(() => {
+    setLocalCoverPreview(null);
+  }, [book.id, book.coverImage, book.coverImageStorageKey, book.hasLocalCoverImage]);
+
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setIsUploadingCover(true);
       try {
-        const authStore = useAuthStore.getState();
-        if (!authStore.user || !authStore.isAuthenticated) {
-          throw new Error('User not authenticated');
-        }
-
-        // Upload to Cloudflare R2 via ProjectService
-        const { r2Url } = await uploadFile(book.id, `cover-${book.id}`, file);
+        const imageUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || '');
+          reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(file);
+        });
+        setLocalCoverPreview(imageUrl);
+        const { storageKey } = await saveBookCover(book.id, file);
         const updatedBook = {
           ...book,
-          coverImage: r2Url,
+          coverImage: undefined,
+          coverImageStorageKey: storageKey,
+          hasLocalCoverImage: true,
           updatedAt: Date.now()
         };
         onUpdate?.(updatedBook);
       } catch (error) {
-        console.error('Failed to upload cover image:', error);
-        // Fallback to base64 if upload fails
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const imageUrl = e.target?.result as string;
-          const updatedBook = {
-            ...book,
-            coverImage: imageUrl,
-            updatedAt: Date.now()
-          };
-          onUpdate?.(updatedBook);
-        };
-        reader.readAsDataURL(file);
+        console.error('Failed to save cover image locally:', error);
+        setLocalCoverPreview(null);
       } finally {
         setIsUploadingCover(false);
       }
@@ -115,25 +114,31 @@ const EditableBook: React.FC<EditableBookProps> = ({
       leatherColor: preset.color,
       isLeatherMode: true,
       coverImage: undefined,
+      coverImageStorageKey: undefined,
+      hasLocalCoverImage: false,
       updatedAt: Date.now()
     };
     onUpdate?.(updatedBook);
     setShowColorPicker(false);
   };
 
-  const removeCoverImage = () => {
+  const removeCoverImage = async () => {
+    setLocalCoverPreview(null);
+    await removeBookCover(book.coverImageStorageKey || book.id);
     const updatedBook = {
       ...book,
       coverImage: undefined,
+      coverImageStorageKey: undefined,
+      hasLocalCoverImage: false,
       updatedAt: Date.now()
     };
     onUpdate?.(updatedBook);
   };
 
   const getCoverStyle = () => {
-    if (book.coverImage) {
+    if (resolvedCoverImage) {
       return {
-        backgroundImage: `url(${book.coverImage})`,
+        backgroundImage: cssUrl(resolvedCoverImage),
         backgroundSize: `${coverSettings.scale * 100}%`,
         backgroundPosition: `${50 + coverSettings.offsetX}% ${50 + coverSettings.offsetY}%`,
         backgroundRepeat: 'no-repeat'
@@ -198,11 +203,11 @@ const EditableBook: React.FC<EditableBookProps> = ({
             >
               Upload Image
             </button>
-            {book.coverImage && (
-              <button
-                onClick={removeCoverImage}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-              >
+            {resolvedCoverImage && (
+            <button
+              onClick={removeCoverImage}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+            >
                 Remove Image
               </button>
             )}
@@ -210,7 +215,7 @@ const EditableBook: React.FC<EditableBookProps> = ({
         </div>
 
         {/* Image Controls (only show when image is present) */}
-        {book.coverImage && (
+        {resolvedCoverImage && (
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -299,7 +304,7 @@ const EditableBook: React.FC<EditableBookProps> = ({
       >
         {/* Book Content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-          {!book.coverImage && (
+          {!resolvedCoverImage && (
             <>
               <div className="font-bold text-white text-lg mb-2 drop-shadow-lg">
                 {title}

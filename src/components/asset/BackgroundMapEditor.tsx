@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { X, Save, Upload, Maximize2 } from 'lucide-react';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { useKanvasStore } from '@/stores/kanvasStore';
+import { importAssetToCurrentProject } from '@/persistence/desktopProjectPersistence';
 import { db } from '@/storage/indexeddb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { DEFAULT_BACKGROUND_CONFIG, type BackgroundConfig, type BackgroundMode } from '@/types/background';
 import { isColorPickerVisible, getBackgroundColor, validateBackgroundConfig, shouldShowParchmentOverlay, shouldShowGlassEffect } from '@/utils/backgroundUtils';
+import { cssUrl } from '@/utils/cssUrl';
 
 interface BackgroundMapEditorProps {
   isOpen: boolean;
@@ -144,13 +146,22 @@ export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _v
     onClose();
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Reject files larger than 2MB to prevent base64 from breaking the app
-      const MAX_SIZE = 2 * 1024 * 1024; // 2MB
-      if (file.size > MAX_SIZE) {
-        alert('Background images must be under 2MB. Large images should be uploaded as assets instead.');
+      if (window.kanvasDesktop) {
+        try {
+          const importTargetId = assetId || `${currentProjectId || currentBook?.id || 'project'}_root_background`;
+          const { relativePath } = await importAssetToCurrentProject(file, importTargetId);
+          const updatedConfig = { ...localConfig, imageUrl: relativePath };
+          setLocalConfig(updatedConfig);
+          setHasUnsavedChanges(true);
+          saveConfig(updatedConfig);
+        } catch (error) {
+          console.error('Failed to import desktop background image:', error);
+        } finally {
+          event.target.value = '';
+        }
         return;
       }
 
@@ -335,7 +346,7 @@ export function BackgroundMapEditor({ isOpen, onClose, assetId, viewportSize: _v
             className={`absolute inset-0 cursor-move ${shouldShowGlassEffect(localConfig) ? 'glass cosmic-glow' : ''}`}
             style={{
               backgroundColor: getBackgroundColor(localConfig),
-              backgroundImage: localConfig.imageUrl ? `url(${localConfig.imageUrl})` : 'none',
+              backgroundImage: cssUrl(localConfig.imageUrl),
               backgroundRepeat: 'no-repeat',
               backgroundPosition: `${imageOffset.x}px ${imageOffset.y}px`,
               backgroundSize: (() => {

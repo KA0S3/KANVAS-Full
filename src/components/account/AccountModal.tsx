@@ -34,6 +34,7 @@ import { useCloudStore } from '@/stores/cloudStore';
 import { formatBytes } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from "@/lib/supabase";
+import { resolveAppRouteUrl } from '@/utils/appUrls';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -1031,7 +1032,7 @@ export function AccountModal({ isOpen, onClose }: AccountModalProps) {
             
             {/* Bottom row - 3 columns with links */}
             <a
-              href="/terms-of-service"
+              href={resolveAppRouteUrl('/terms-of-service')}
               target="_blank"
               rel="noopener noreferrer"
               className="text-center text-muted-foreground hover:text-foreground transition-colors"
@@ -1039,7 +1040,7 @@ export function AccountModal({ isOpen, onClose }: AccountModalProps) {
               Terms of Service
             </a>
             <a
-              href="/privacy-policy"
+              href={resolveAppRouteUrl('/privacy-policy')}
               target="_blank"
               rel="noopener noreferrer"
               className="text-center text-muted-foreground hover:text-foreground transition-colors"
@@ -1047,7 +1048,7 @@ export function AccountModal({ isOpen, onClose }: AccountModalProps) {
               Privacy Policy
             </a>
             <a
-              href="/refund-policy"
+              href={resolveAppRouteUrl('/refund-policy')}
               target="_blank"
               rel="noopener noreferrer"
               className="text-center text-muted-foreground hover:text-foreground transition-colors"

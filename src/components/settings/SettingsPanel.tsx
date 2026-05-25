@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Settings as SettingsIcon, Volume2, Trash2, AlertTriangle, Download, ExternalLink, Star, Mail } from 'lucide-react';
+import { X, Settings as SettingsIcon, Volume2, Trash2, AlertTriangle, ExternalLink, Star, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -32,8 +32,6 @@ import { audioEngine } from '@/services/AudioEngine';
 import { toast } from 'sonner';
 import type { Book } from '@/types/book';
 import { supabase } from '@/lib/supabase';
-import DataManager from '@/components/DataManager';
-import { PricingModal } from '@/components/PricingModal';
 import { ContactSheet } from '@/components/ContactSheet';
 import { useNavigate } from 'react-router-dom';
 
@@ -101,7 +99,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState('general');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteUnlocked, setDeleteUnlocked] = useState(false);
-  const [showPricingModal, setShowPricingModal] = useState(false);
   const [showContactSheet, setShowContactSheet] = useState(false);
   
   const allBooks = getAllBooks();
@@ -427,19 +424,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     <div className="text-sm text-muted-foreground">Fields</div>
                   </div>
                 </div>
-                
-                <div className="pt-4 border-t border-glass-border/30">
-                  <DataManager>
-                    <Button
-                      variant="default"
-                      className="w-full"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Import / Export Data
-                    </Button>
-                  </DataManager>
-                </div>
-                
+
                 <div className="pt-4 border-t border-glass-border/30">
                   <Button
                     variant="destructive"
@@ -493,21 +478,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                         meets imagination, and where your ideas can truly take shape in the most intuitive 
                         and visually appealing way possible.
                       </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="border-t border-glass-border/30 pt-4">
-                  <div className="text-sm space-y-2">
-                    <div className="font-semibold text-foreground">Unlock Your Full Potential</div>
-                    <div className="text-muted-foreground">
-                      Get access to more features with a Pro account. 
-                      <button 
-                        onClick={() => setShowPricingModal(true)}
-                        className="text-primary hover:underline ml-1"
-                      >
-                        See pricing information here
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -648,12 +618,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        
-        {/* Pricing Modal */}
-        <PricingModal 
-          isOpen={showPricingModal} 
-          onClose={() => setShowPricingModal(false)} 
-        />
         
         {/* Contact Sheet */}
         <ContactSheet 

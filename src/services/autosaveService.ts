@@ -5,6 +5,8 @@
  * This is a simplified version for compatibility
  */
 
+import { autosaveProject, loadProject } from '@/persistence';
+
 interface AutosaveConfig {
   interval: number; // in milliseconds
   enabled: boolean;
@@ -197,7 +199,7 @@ class AutosaveService {
         // Update success state
         this.state.lastSave = new Date().toISOString();
         this.state.saveCount++;
-        console.log(`Autosave completed (${this.state.saveCount} saves)`);
+        console.log(`Autosave backup completed (${this.state.saveCount} backups); this is localStorage backup only, not IndexedDB durability confirmation.`);
       }
 
     } catch (error) {
@@ -215,13 +217,7 @@ class AutosaveService {
       const projectId = localStorage.getItem('currentProjectId');
       if (!projectId) return null;
 
-      // Import persistence modules dynamically
-      const { projectPersistence } = await import('@/persistence/projects');
-      const { assetPersistence } = await import('@/persistence/assets');
-
-      // Get project and assets
-      const project = await projectPersistence.get(projectId);
-      const assets = await assetPersistence.getProjectAssets(projectId);
+      const { project, assets } = await loadProject(projectId);
 
       return {
         project,
@@ -236,12 +232,10 @@ class AutosaveService {
   }
 
   private async saveProjectData(data: any): Promise<void> {
-    // In a real implementation, this would save to cloud storage
-    // For now, just simulate saving
+    // This is only an emergency localStorage backup. Durable local-first saves must go through IndexedDB.
     await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Save to localStorage as backup
-    localStorage.setItem('autosave-backup', JSON.stringify(data));
+
+    await autosaveProject(data);
   }
 
   private notifyListeners(): void {

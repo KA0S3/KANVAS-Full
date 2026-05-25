@@ -1,6 +1,6 @@
  import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, ArrowLeft, Plus, PanelRight, BookOpen, User, AlertTriangle } from "lucide-react";
+import { Sparkles, ArrowLeft, Plus, PanelRight, BookOpen } from "lucide-react";
 import { AssetItem } from "./AssetItem";
 import type { Asset } from '@/types/Asset';
 import { AssetCreationModalImproved } from "./asset/AssetCreationModalImproved";
@@ -8,15 +8,11 @@ import { AssetEditModalImproved } from "./asset/AssetEditModalImproved";
 import { EmptySpaceContextMenu } from "./EmptySpaceContextMenu";
 import { useKanvasStore } from '@/stores/kanvasStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useAuthStore } from "@/stores/authStore";
 import { useSyncStore } from "@/stores/syncStore";
-import { useCloudStore } from "@/stores/cloudStore";
 import { useBookStore } from "@/stores/bookStoreSimple";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { BackgroundControls } from "@/components/asset/BackgroundControls";
 import { BackgroundMigrationDialog } from "@/components/BackgroundMigrationDialog";
-import { EnhancedAccountModal } from "@/components/account/EnhancedAccountModal";
-import { LocalStorageWarning } from "@/components/LocalStorageWarning";
 import { Button } from "@/components/ui/button";
 import { useSampleData } from "@/hooks/useSampleData";
 import { AutosaveIndicator } from "@/components/autosave/AutosaveIndicator";
@@ -66,7 +62,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const [showSettings, setShowSettings] = useState(false);
   const [showBackgroundControls, setShowBackgroundControls] = useState(false);
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialData, setModalInitialData] = useState<any>(null);
   const [generatorImportData, setGeneratorImportData] = useState<any>(null);
@@ -135,8 +130,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   } = useKanvasStore();
   
   const assets = currentProjectId ? getProjectAssets(currentProjectId) : [];
-  const { isAuthenticated, user, plan, effectiveLimits } = useAuthStore();
-  const { quotaUsed, quotaLimit } = useCloudStore();
   const {
     getCurrentBook,
     getWorldData,
@@ -146,6 +139,8 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const navigate = useNavigate();
   
   // Load background config for current asset/book
+  const resolvedProjectId = currentProjectId || currentBookId;
+
   useEffect(() => {
     const loadBackgroundConfig = async () => {
       try {
@@ -157,8 +152,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
             ? { ...config, ...asset.style.background }
             : config;
         } else {
-          const projectId = useKanvasStore.getState().currentProjectId || currentBookId;
-          const project = projectId ? await db.getProject(projectId) : null;
+          const project = resolvedProjectId ? await db.getProject(resolvedProjectId) : null;
           config = project?.settings?.backgrounds?.root
             ? { ...config, ...project.settings.backgrounds.root }
             : config;
@@ -172,7 +166,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
     };
     
     loadBackgroundConfig();
-  }, [enteredAssetId, backgroundRefreshKey, currentBookId]);
+  }, [enteredAssetId, backgroundRefreshKey, resolvedProjectId]);
 
   // Initialize sample data
   useSampleData();
@@ -263,9 +257,8 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
       return;
     }
 
-    const projectId = currentProjectId || currentBookId;
-    if (projectId) {
-      db.getProject(projectId).then(project => {
+    if (resolvedProjectId) {
+      db.getProject(resolvedProjectId).then(project => {
         if (!project) return;
         return db.updateProject({
           ...project,
@@ -283,7 +276,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         console.error('Failed to save root background:', error);
       });
     }
-  }, [enteredAssetId, getAsset, updateAsset, currentProjectId, currentBookId]);
+  }, [enteredAssetId, getAsset, updateAsset, resolvedProjectId]);
 
   useEffect(() => {
     const handleOpenBackgroundPanel = () => {
@@ -365,20 +358,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
 
   const handleCreateAssetClick = (e: React.MouseEvent) => {
     openCreateAssetModal();
-  };
-
-  const handleAccountClick = () => {
-    // Check if user is authenticated and is an owner
-    if (isAuthenticated && user && plan) {
-      const ownerEmail = import.meta.env.VITE_OWNER_EMAIL;
-      const isOwner = user.email === ownerEmail && plan === 'owner';
-      
-      // Always open account modal for all users including owners
-      setShowAccountModal(true);
-    } else {
-      // Open account modal for non-authenticated users
-      setShowAccountModal(true);
-    }
   };
 
   const handleDeleteAsset = useCallback((id: string) => {
@@ -675,9 +654,9 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   };
 
    return (
-    <div className="glass-strong cosmic-glow rounded-2xl w-full h-full flex flex-col mx-auto my-auto min-h-0">
+    <div className="glass-strong cosmic-glow rounded-lg w-[calc(100%_-_5px)] mx-[2.5px] h-full flex flex-col min-h-0 overflow-hidden bg-sidebar/85 border border-sidebar-border/40 shadow-[0_0_0_1px_hsl(var(--sidebar-border)/0.25),0_18px_40px_rgba(0,0,0,0.16)] backdrop-blur-2xl">
        {/* Header */}
-      <div className="flex items-center justify-between p-1 md:p-2 border-b border-glass-border/20 flex-wrap gap-2">
+      <div className="flex items-center justify-between p-1 md:p-2 border-b border-sidebar-border/40 flex-wrap gap-2 bg-sidebar/85 text-white">
         <div className="flex items-center gap-1 md:gap-2 flex-wrap">
           {currentWorldTitle && onOpenWorldLibrary && (
             <Button
@@ -688,10 +667,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
               onClick={onOpenWorldLibrary}
             >
               <ArrowLeft className="w-3 h-3 md:w-4 md:h-4" />
-              <div className="flex flex-col leading-tight">
-                <span className="text-xs">Back to</span>
-                <span className="text-xs font-medium">Library</span>
-              </div>
+              <span className="text-xs">Library</span>
             </Button>
           )}
           {/* Library Management Button for Asset Viewport */}
@@ -766,27 +742,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* LocalStorage Warning - only show when not authenticated */}
-          {!isAuthenticated && (
-            <LocalStorageWarning onOpenAccountModal={() => setShowAccountModal(true)} />
-          )}
-          
-          {/* Account Button */}
-          <Button
-            id="account-sync-button"
-            variant={effectiveLimits && quotaUsed >= effectiveLimits.maxStorage ? "destructive" : "outline"}
-            size="sm"
-            onClick={() => setShowAccountModal(true)}
-            className="gap-1 md:gap-2 self-center text-xs md:text-sm relative"
-            title={isAuthenticated ? "Account" : "Sign In"}
-          >
-            {effectiveLimits && quotaUsed >= effectiveLimits.maxStorage && (
-              <AlertTriangle className="w-3 h-3 md:w-4 md:h-4 absolute -top-1 -right-1 animate-pulse" />
-            )}
-            <User className="w-3 h-3 md:w-4 md:h-4" />
-            <span className="hidden sm:inline">{isAuthenticated ? 'Account' : 'Sign In'}</span>
-          </Button>
-
           {onToggleSidebar && (
             <button
               id="sidebar-toggle-button"
@@ -808,9 +763,14 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         onDoubleClick={handleContainerDoubleClick}
         onContextMenu={handleContainerContextMenu}
         onMouseDown={handleBackgroundMouseDown}
-        className={`flex-1 relative overflow-hidden ${
+        className={`flex-1 relative overflow-hidden glass cosmic-glow border-t border-glass-border/20 ${
           isEditingBackground && backgroundConfig?.imageUrl ? 'cursor-move' : 'cursor-crosshair'
         }`}
+        style={{
+          backdropFilter: 'blur(30px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(30px) saturate(140%)',
+          backgroundColor: 'hsl(var(--glass-bg) / 0.04)',
+        }}
       >
         {/* Autosave Indicator - Bottom Left */}
         <div className="absolute bottom-4 left-4 z-10">
@@ -819,9 +779,30 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         <div
           className={`absolute inset-0 ${shouldShowGlassEffect(backgroundConfig) ? 'glass cosmic-glow' : ''}`}
           style={{
-            backgroundColor: getBackgroundColor(backgroundConfig),
+            backgroundColor: shouldShowGlassEffect(backgroundConfig)
+              ? 'color-mix(in srgb, hsl(var(--glass-bg) / 0.04) 90%, rgba(128, 128, 128, 0.10))'
+              : getBackgroundColor(backgroundConfig),
+            backdropFilter: shouldShowGlassEffect(backgroundConfig) ? 'blur(30px) saturate(140%)' : undefined,
+            WebkitBackdropFilter: shouldShowGlassEffect(backgroundConfig) ? 'blur(30px) saturate(140%)' : undefined,
           }}
         >
+          {shouldShowGlassEffect(backgroundConfig) && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: `
+                  radial-gradient(
+                    ellipse at center,
+                    rgba(255, 255, 255, 0.02) 0%,
+                    rgba(255, 255, 255, 0.02) 42%,
+                    rgba(255, 255, 255, 0.06) 70%,
+                    rgba(255, 255, 255, 0.14) 100%
+                  )
+                `,
+              }}
+            />
+          )}
+
           {/* Parchment Texture Overlay */}
           {shouldShowParchmentOverlay(backgroundConfig) && (
             <div 
@@ -1029,12 +1010,6 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         }}
         assetId={editingAssetId}
         viewportSize={viewportSize}
-      />
-
-      {/* Account Modal */}
-      <EnhancedAccountModal
-        isOpen={showAccountModal}
-        onClose={() => setShowAccountModal(false)}
       />
 
       {/* Background Migration Dialog */}

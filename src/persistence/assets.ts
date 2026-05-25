@@ -70,7 +70,7 @@ export class AssetPersistence {
     validateAssetStrict(updatedAsset);
 
     // Persist to IndexedDB
-    await db.updateAsset(id, updates);
+    await db.updateAsset(id, updatedAsset);
   }
 
   /**
@@ -92,6 +92,22 @@ export class AssetPersistence {
         const updatedAsset: Asset = {
           ...currentAsset,
           ...changes,
+          layout: {
+            ...currentAsset.layout,
+            ...changes.layout,
+          },
+          content: {
+            ...currentAsset.content,
+            ...changes.content,
+          },
+          style: {
+            ...currentAsset.style,
+            ...changes.style,
+          },
+          behavior: {
+            ...currentAsset.behavior,
+            ...changes.behavior,
+          },
           metadata: {
             ...currentAsset.metadata,
             ...changes.metadata,
@@ -101,7 +117,7 @@ export class AssetPersistence {
         };
 
         validateAssetStrict(updatedAsset);
-        await db.updateAsset(id, changes);
+        await db.updateAsset(id, updatedAsset);
       }
     });
   }

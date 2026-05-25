@@ -3,6 +3,7 @@ import { X, CreditCard, Loader2, AlertCircle, ChevronDown, ChevronUp, Tag, Exter
 import { PAYSTACK_PRODUCTS, type PaystackProduct } from '@/lib/paystack';
 import { paymentsService, type PaymentSession } from '@/services/payments/payments-service';
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 import { useAuthStore } from '@/stores/authStore';
 import {
   Dialog,
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
+import { openHashRouteUrl } from '@/utils/appUrls';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -42,6 +44,11 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
   const handlePayment = async () => {
     if (!user) {
       setError('You must be signed in to make a purchase');
+      return;
+    }
+
+    if (!USE_SUPABASE) {
+      setError('Purchases are disabled when USE_SUPABASE=false');
       return;
     }
 
@@ -140,6 +147,11 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !user) return;
 
+    if (!USE_SUPABASE) {
+      setError('Promo codes are disabled when USE_SUPABASE=false');
+      return;
+    }
+
     setIsApplyingPromo(true);
     setError(null);
 
@@ -186,6 +198,10 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
   const applyPromoCode = async () => {
     if (!appliedPromo || !user) {
       return { success: false, error: 'No promo code applied' };
+    }
+
+    if (!USE_SUPABASE) {
+      return { success: false, error: 'Promo codes are disabled when USE_SUPABASE=false' };
     }
 
     try {
@@ -356,7 +372,7 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => window.open('/terms-of-service', '_blank')}
+                  onClick={() => openHashRouteUrl('/terms-of-service')}
                   className="text-xs text-muted-foreground hover:text-foreground p-0 h-auto"
                 >
                   <ExternalLink className="w-3 h-3 mr-1" />
@@ -366,7 +382,7 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => window.open('/privacy-policy', '_blank')}
+                  onClick={() => openHashRouteUrl('/privacy-policy')}
                   className="text-xs text-muted-foreground hover:text-foreground p-0 h-auto"
                 >
                   <ExternalLink className="w-3 h-3 mr-1" />
@@ -376,7 +392,7 @@ export function PaymentModal({ isOpen, onClose, productKey, onSuccess }: Payment
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => window.open('/refund-policy', '_blank')}
+                  onClick={() => openHashRouteUrl('/refund-policy')}
                   className="text-xs text-muted-foreground hover:text-foreground p-0 h-auto"
                 >
                   <ExternalLink className="w-3 h-3 mr-1" />

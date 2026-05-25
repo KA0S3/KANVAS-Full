@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { openHashRouteUrl } from '@/utils/appUrls';
 
 interface WhatIsKanvasModalProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ const WhatIsKanvasModal = ({ isOpen, onClose }: WhatIsKanvasModalProps) => {
 
   const handleLinkClick = (e: React.MouseEvent, href: string) => {
     e.stopPropagation();
-    window.open(href, '_blank');
+    openHashRouteUrl(href);
   };
 
   return (

@@ -8,13 +8,11 @@
  */
 
 import { create } from 'zustand';
+import { loadProject as loadProjectBundle } from '@/persistence';
 import { Asset, createCanonicalAsset, validateAssetStrict } from '@/types/Asset';
-import { FORBIDDEN_ASSET_FIELDS } from '@/types/Safeguards';
-import { SyncQueueEntry } from '@/types/SyncTypes';
+import { generateAssetId } from '@/lib/idGenerator';
 import { db } from '@/storage/indexeddb';
-import { useSyncStore } from '@/stores/syncStore';
 import { timedAssetSaver } from '@/services/TimedAssetSaver';
-import { createId } from '@/utils/id';
 
 // Store interface for canonical asset data
 export interface KanvasStore {
@@ -29,6 +27,13 @@ export interface KanvasStore {
   createAsset: (assetData: Omit<Asset, 'id' | 'metadata'> & { id?: string; metadata?: Partial<Asset['metadata']> }) => Promise<string>;
   updateAsset: (id: string, updates: Partial<Asset>) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
+  
+  // Runtime-only helpers
+  setAssets: (assets: Asset[]) => void;
+  addAsset: (asset: Asset) => void;
+  replaceAsset: (asset: Asset) => void;
+  removeAsset: (id: string) => void;
+  setCurrentProjectId: (projectId: string | null) => void;
   
   // Project operations
   loadProject: (projectId: string) => Promise<void>;
@@ -50,39 +55,33 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     return Array.from(get().assets.values()).filter(asset => asset.projectId === projectId);
   },
 
-  // Asset creation with immediate UI update and timed persistence
+  // Asset creation with immediate UI update
   createAsset: async (assetData) => {
-    const id = assetData.id || createId();
-    const now = new Date().toISOString();
-    
-    const asset: Asset = createCanonicalAsset(assetData.projectId, {
-      ...assetData,
-      id,
-      metadata: {
-        ...assetData.metadata,
-        createdAt: now,
-        updatedAt: now,
-        version: 1,
-      },
-    });
+    // Ensure we have required data
+    const finalProjectId = assetData.projectId || get().currentProjectId || 'default';
+    if (!finalProjectId) {
+      throw new Error('Cannot create asset: no project ID available');
+    }
 
-    // Validate against anti-patterns
+    const asset: Asset = createCanonicalAsset(finalProjectId, assetData);
+    const id = asset.id;
+
+    // Final validation before storing
     validateAssetStrict(asset);
 
-    // Update state immediately (UI updates)
+    // Store in UI state immediately
+    await timedAssetSaver.forceSave(asset);
+
     set(state => {
       const newAssets = new Map(state.assets);
       newAssets.set(id, asset);
       return { assets: newAssets };
     });
 
-    // Queue for timed persistence (non-blocking)
-    timedAssetSaver.queueAssetUpdate(asset, 'create');
-
     return id;
   },
 
-  // Asset update with immediate UI update and timed persistence
+  // Asset update with immediate UI update
   updateAsset: async (id: string, updates: Partial<Asset>) => {
     const currentAsset = get().assets.get(id);
     if (!currentAsset) {
@@ -116,17 +115,14 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
       },
     };
 
-    // Validate against anti-patterns
     validateAssetStrict(updatedAsset);
 
-    // Update state immediately (UI updates)
     set(state => {
       const newAssets = new Map(state.assets);
       newAssets.set(id, updatedAsset);
       return { assets: newAssets };
     });
 
-    // Queue for timed persistence (non-blocking)
     timedAssetSaver.queueAssetUpdate(updatedAsset, 'update');
   },
 
@@ -137,28 +133,56 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
       throw new Error(`Asset ${id} not found`);
     }
 
-    // Update state immediately (UI updates)
+    await timedAssetSaver.flushAll();
+    await db.deleteAsset(id, asset.projectId);
+
     set(state => {
       const newAssets = new Map(state.assets);
       newAssets.delete(id);
       return { assets: newAssets };
     });
-
-    // Persist to IndexedDB asynchronously
-    try {
-      await db.deleteAsset(id, asset.projectId);
-    } catch (error) {
-      console.error('Failed to delete asset:', error);
-      // TODO: Handle persistence failure
-    }
   },
 
-  // Load project assets from IndexedDB
+  // Runtime-only helpers
+  setAssets: (assets: Asset[]) => {
+    const assetMap = new Map(assets.map(asset => [asset.id, asset]));
+    set({ assets: assetMap });
+  },
+
+  addAsset: (asset: Asset) => {
+    set(state => {
+      const newAssets = new Map(state.assets);
+      newAssets.set(asset.id, asset);
+      return { assets: newAssets };
+    });
+  },
+
+  replaceAsset: (asset: Asset) => {
+    set(state => {
+      const newAssets = new Map(state.assets);
+      newAssets.set(asset.id, asset);
+      return { assets: newAssets };
+    });
+  },
+
+  removeAsset: (id: string) => {
+    set(state => {
+      const newAssets = new Map(state.assets);
+      newAssets.delete(id);
+      return { assets: newAssets };
+    });
+  },
+
+  setCurrentProjectId: (projectId: string | null) => {
+    set({ currentProjectId: projectId });
+  },
+
+  // Load project assets from persistence layer only
   loadProject: async (projectId: string) => {
     try {
-      const assets = await db.getProjectAssets(projectId);
-      const assetMap = new Map(assets.map(asset => [asset.id, asset]));
-      
+      const bundle = await loadProjectBundle(projectId);
+      const assetMap = new Map(bundle.assets.map(asset => [asset.id, asset]));
+
       set({
         assets: assetMap,
         currentProjectId: projectId,
@@ -182,7 +206,6 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
     const currentAssets = get().assets;
     const updatedAssets = new Map(currentAssets);
 
-    // Apply all updates to local state immediately
     for (const { id, changes } of updates) {
       const currentAsset = currentAssets.get(id);
       if (!currentAsset) continue;
@@ -190,6 +213,22 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
       const updatedAsset: Asset = {
         ...currentAsset,
         ...changes,
+        layout: {
+          ...currentAsset.layout,
+          ...changes.layout,
+        },
+        content: {
+          ...currentAsset.content,
+          ...changes.content,
+        },
+        style: {
+          ...currentAsset.style,
+          ...changes.style,
+        },
+        behavior: {
+          ...currentAsset.behavior,
+          ...changes.behavior,
+        },
         metadata: {
           ...currentAsset.metadata,
           ...changes.metadata,
@@ -202,23 +241,12 @@ export const useKanvasStore = create<KanvasStore>((set, get) => ({
       updatedAssets.set(id, updatedAsset);
     }
 
-    // Update state once (batch UI update)
     set({ assets: updatedAssets });
 
-    // Persist all changes asynchronously
-    try {
-      await db.transaction('rw', db.assets, async () => {
-        for (const { id, changes } of updates) {
-          await db.updateAsset(id, changes);
-          const asset = updatedAssets.get(id);
-          if (asset) {
-            useSyncStore.getState().markForSync(id, 'update', asset.projectId, asset);
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Failed to bulk update assets:', error);
-      // TODO: Handle persistence failure
+    for (const [id, asset] of updatedAssets.entries()) {
+      if (currentAssets.get(id) !== asset) {
+        timedAssetSaver.queueAssetUpdate(asset, 'update');
+      }
     }
   },
 }));

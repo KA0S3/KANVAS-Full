@@ -10,7 +10,7 @@
 import { create } from 'zustand';
 import { RuntimeSyncState, SyncStoreState, createRuntimeSyncState, SyncQueueEntry } from '@/types/SyncTypes';
 import { db } from '@/storage/indexeddb';
-import { createId } from '@/utils/id';
+import { USE_SUPABASE } from '@/config/features';
 
 export interface SyncStore extends SyncStoreState {
   // Sync queue operations
@@ -57,7 +57,11 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
       return { syncQueue: newQueue };
     });
 
-    // Add to IndexedDB sync queue
+    if (!USE_SUPABASE) {
+      return;
+    }
+
+    // Add to IndexedDB sync queue only when cloud sync is enabled.
     const syncEntry: Omit<SyncQueueEntry, 'id'> = {
       assetId,
       operation,

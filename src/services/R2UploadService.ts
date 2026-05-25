@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { documentMutationService } from './DocumentMutationService';
 import { useAuthStore } from '@/stores/authStore';
+import { USE_SUPABASE } from '@/config/features';
 
 export interface UploadResult {
   success: boolean;
@@ -127,6 +128,14 @@ class R2UploadService {
     projectId: string,
     onProgress?: (progress: UploadProgress) => void
   ): Promise<UploadResult> {
+    if (!USE_SUPABASE) {
+      console.info('[R2Upload] Skipped: USE_SUPABASE=false');
+      return {
+        success: false,
+        error: 'Cloud uploads are disabled when USE_SUPABASE=false',
+      };
+    }
+
     try {
       // Validate authentication
       const authStore = useAuthStore.getState();
@@ -210,6 +219,10 @@ class R2UploadService {
     projectId: string,
     accessToken: string
   ): Promise<{ signedUrl: string; path: string } | null> {
+    if (!USE_SUPABASE) {
+      return null;
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke<UploadUrlResponse>('getUploadUrls', {
         body: {

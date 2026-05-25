@@ -11,6 +11,7 @@ import { FileBlob } from '@/storage/indexeddb';
 import { db } from '@/storage/indexeddb';
 import { FileUploadState, createFileUploadState } from '@/types/SyncTypes';
 import { supabaseStorage } from './supabase';
+import { USE_SUPABASE } from '@/config/features';
 import { createId } from '@/utils/id';
 
 export interface BlobStorageConfig {
@@ -222,6 +223,10 @@ export class BlobStorage {
     // Store locally first
     await db.storeFile(fileBlob);
 
+    if (!USE_SUPABASE) {
+      return fileBlob.storageKey;
+    }
+
     // Upload to cloud in background
     try {
       const file = new File([processed.blob], fileBlob.storageKey, {
@@ -278,23 +283,25 @@ export class BlobStorage {
       console.warn(`${failures.length} files failed to process:`, failures);
     }
 
-    // Batch upload to cloud
-    const uploadPayload = successes.map(({ processedFile }) => ({
-      file: new File([processedFile.blob], processedFile.objectUrl.split('/').pop() || 'file', {
-        type: processedFile.mimeType,
-      }),
-      storageKey: this.generateStorageKey(processedFile),
-    }));
+    if (USE_SUPABASE) {
+      // Batch upload to cloud
+      const uploadPayload = successes.map(({ processedFile }) => ({
+        file: new File([processedFile.blob], processedFile.objectUrl.split('/').pop() || 'file', {
+          type: processedFile.mimeType,
+        }),
+        storageKey: this.generateStorageKey(processedFile),
+      }));
 
-    try {
-      const cloudResults = await supabaseStorage.uploadFilesBatch(uploadPayload);
-      
-      // Update local records with cloud URLs
-      for (let i = 0; i < successes.length && i < cloudResults.length; i++) {
-        successes[i].cloudUrl = cloudResults[i].url;
+      try {
+        const cloudResults = await supabaseStorage.uploadFilesBatch(uploadPayload);
+        
+        // Update local records with cloud URLs
+        for (let i = 0; i < successes.length && i < cloudResults.length; i++) {
+          successes[i].cloudUrl = cloudResults[i].url;
+        }
+      } catch (error) {
+        console.warn('Batch cloud upload failed, files remain local:', error);
       }
-    } catch (error) {
-      console.warn('Batch cloud upload failed, files remain local:', error);
     }
 
     return successes;
@@ -319,28 +326,34 @@ export class BlobStorage {
       const uploaded: string[] = [];
       const failed: string[] = [];
 
+      if (!USE_SUPABASE) {
+        return { uploaded, failed, deleted: [] };
+      }
+
       // Upload pending files
       for (const file of localFiles) {
-        if (file.blob) {
-          try {
-            const uploadFile = new File([file.blob], file.storageKey, {
-              type: file.mimeType,
-            });
-            
-            const cloudUrl = await supabaseStorage.uploadFile(uploadFile, file.storageKey);
-            
-            // Update local record
-            await db.files.update(file.id, {
-              cloudUrl,
-              cloudUploaded: true,
-              blob: undefined, // Remove local blob after successful upload
-            });
-            
-            uploaded.push(file.id);
-          } catch (error) {
-            console.error(`Failed to upload file ${file.id}:`, error);
-            failed.push(file.id);
-          }
+        if (!file.blob) {
+          continue;
+        }
+
+        try {
+          const uploadFile = new File([file.blob], file.storageKey, {
+            type: file.mimeType,
+          });
+          
+          const cloudUrl = await supabaseStorage.uploadFile(uploadFile, file.storageKey);
+          
+          // Update local record
+          await db.files.update(file.id, {
+            cloudUrl,
+            cloudUploaded: true,
+            blob: undefined, // Remove local blob after successful upload
+          });
+          
+          uploaded.push(file.id);
+        } catch (error) {
+          console.error(`Failed to upload file ${file.id}:`, error);
+          failed.push(file.id);
         }
       }
 

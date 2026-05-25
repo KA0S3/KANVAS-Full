@@ -28,7 +28,6 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { CustomFieldsManager } from './CustomFieldsManager';
 import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager';
-import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import { calculateViewportCenterPosition, calculateChildAssetCenterPosition } from '@/utils/coordinateUtils';
 import type { Asset } from '@/types/Asset';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
@@ -57,7 +56,7 @@ interface AssetCreationModalProps {
 }
 
 export function AssetCreationModalImproved({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
-  const { createNewAsset, upgradeModal, closeUpgradeModal, canUploadToCloud, isOverQuota } = useAssetCreation();
+  const { createNewAsset, canUploadToCloud } = useAssetCreation();
   const { tags } = useTagStore();
   const { isAuthenticated, plan } = useAuthStore();
   const { getProjectAssets } = useKanvasStore();
@@ -144,8 +143,28 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
     setIsCreating(true);
     
     try {
+      // Validate required fields
+      if (!formData.name || !formData.name.trim()) {
+        console.error('Asset name is required');
+        return;
+      }
+      
+      if (!projectId) {
+        console.error('No project ID available for asset creation');
+        return;
+      }
+
+      console.log('Creating asset with:', {
+        name: formData.name,
+        projectId,
+        x: formData.x,
+        y: formData.y,
+        width: formData.width,
+        height: formData.height,
+      });
+
       const assetId = await createNewAsset({
-        projectId: projectId || '',
+        projectId: projectId,  // Ensure projectId is passed correctly
         parentId: parentId,
         layout: {
           x: formData.x,
@@ -181,12 +200,16 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
         skipCloud: uploadStatus === 'denied'
       });
 
-      console.log('Asset created with ID:', assetId);
+      console.log('Asset created successfully with ID:', assetId);
       
       // Close modal after successful creation
       onClose();
     } catch (error) {
       console.error('Error creating asset:', error);
+      // Don't silently fail - ensure error is visible
+      if (error instanceof Error) {
+        alert(`Failed to create asset: ${error.message}`);
+      }
     } finally {
       setIsCreating(false);
     }
@@ -609,23 +632,6 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Upgrade Modal */}
-      <UpgradePromptModal
-        isOpen={upgradeModal.isOpen}
-        onClose={closeUpgradeModal}
-        title={isOverQuota ? "Storage Quota Exceeded" : "Approaching Storage Limit"}
-        message={isOverQuota 
-          ? `You've exceeded your storage quota. Upgrade to continue uploading files.`
-          : `You're approaching your storage limit. Upgrade to get more space.`
-        }
-        action="Upgrade Now"
-        type="plan_limit"
-        onAction={() => {
-          // TODO: Navigate to upgrade page or open payment flow
-          console.log('Navigate to upgrade flow');
-        }}
-      />
     </>
   );
 }

@@ -8,6 +8,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+const MEDIA_STORE_KEY = 'media-store';
+
 interface MediaFile {
   id: string;
   name: string;
@@ -18,19 +20,24 @@ interface MediaFile {
   projectId: string;
 }
 
+export type AppPhase = 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW';
+
 interface MediaStoreState {
   mediaFiles: Record<string, MediaFile>;
   uploadProgress: Record<string, number>;
   
   // Media settings (persisted)
+  audioEnabled: boolean;
   videosEnabled: boolean;
   videoSoundsEnabled: boolean;
   audioVolume: number;
+  hasCompletedIntroExperience: boolean;
+  hasCompletedBookEntryExperience: boolean;
   
   // UI state (not persisted)
   transitioning: boolean;
   currentView: 'splash' | 'intro' | 'library' | 'book';
-  appPhase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW';
+  appPhase: AppPhase;
   
   // Actions
   addMediaFile: (mediaFile: MediaFile) => void;
@@ -43,9 +50,12 @@ interface MediaStoreState {
   getAllMediaFiles: () => MediaFile[];
   
   // Media settings actions
+  setAudioEnabled: (enabled: boolean) => void;
   setVideosEnabled: (enabled: boolean) => void;
   setVideoSoundsEnabled: (enabled: boolean) => void;
   setAudioVolume: (volume: number) => void;
+  markIntroExperienceComplete: () => void;
+  markBookEntryExperienceComplete: () => void;
   
   // Navigation actions
   startIntro: (launchMode?: 'professional' | 'full') => void;
@@ -54,9 +64,30 @@ interface MediaStoreState {
   setTransitioning: (transitioning: boolean) => void;
   
   // App phase management
-  setAppPhase: (phase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW') => void;
+  setAppPhase: (phase: AppPhase) => void;
   initializeFromSplash: () => void;
+  completeReturningSplash: (phase?: Exclude<AppPhase, 'SPLASH' | 'INTRO_VIDEO'>) => void;
 }
+
+const readPersistedMediaStore = (): Partial<MediaStoreState> | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = localStorage.getItem(MEDIA_STORE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed?.state ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const persistedMediaState = readPersistedMediaStore();
 
 export const useMediaStore = create<MediaStoreState>()(
   persist(
@@ -64,9 +95,12 @@ export const useMediaStore = create<MediaStoreState>()(
       // Initial state
       mediaFiles: {},
       uploadProgress: {},
-      videosEnabled: true,
-      videoSoundsEnabled: true,
-      audioVolume: 0.1,
+      audioEnabled: persistedMediaState?.audioEnabled ?? true,
+      videosEnabled: persistedMediaState?.videosEnabled ?? true,
+      videoSoundsEnabled: persistedMediaState?.videoSoundsEnabled ?? true,
+      audioVolume: persistedMediaState?.audioVolume ?? 0.1,
+      hasCompletedIntroExperience: persistedMediaState?.hasCompletedIntroExperience ?? false,
+      hasCompletedBookEntryExperience: persistedMediaState?.hasCompletedBookEntryExperience ?? false,
       transitioning: false,
       currentView: 'splash',
       appPhase: 'SPLASH',
@@ -146,6 +180,10 @@ export const useMediaStore = create<MediaStoreState>()(
       },
 
       // Media settings actions
+      setAudioEnabled: (enabled: boolean) => {
+        set({ audioEnabled: enabled });
+      },
+
       setVideosEnabled: (enabled: boolean) => {
         set({ videosEnabled: enabled });
       },
@@ -156,6 +194,24 @@ export const useMediaStore = create<MediaStoreState>()(
 
       setAudioVolume: (volume: number) => {
         set({ audioVolume: Math.max(0, Math.min(1, volume)) });
+      },
+
+      markIntroExperienceComplete: () => {
+        set({
+          hasCompletedIntroExperience: true,
+          currentView: 'library',
+          appPhase: 'LIBRARY',
+          transitioning: false,
+        });
+      },
+
+      markBookEntryExperienceComplete: () => {
+        set({
+          hasCompletedBookEntryExperience: true,
+          currentView: 'book',
+          appPhase: 'BOOK_VIEW',
+          transitioning: false,
+        });
       },
 
       // Navigation actions
@@ -192,7 +248,7 @@ export const useMediaStore = create<MediaStoreState>()(
       },
 
       // App phase management
-      setAppPhase: (phase: 'SPLASH' | 'INTRO_VIDEO' | 'LIBRARY' | 'BOOK_VIEW') => {
+      setAppPhase: (phase: AppPhase) => {
         set({ appPhase: phase });
       },
 
@@ -202,15 +258,26 @@ export const useMediaStore = create<MediaStoreState>()(
           currentView: 'splash',
           transitioning: false 
         });
-      }
+      },
+
+      completeReturningSplash: (phase = 'LIBRARY') => {
+        set({
+          appPhase: phase,
+          currentView: phase === 'BOOK_VIEW' ? 'book' : 'library',
+          transitioning: false,
+        });
+      },
     }),
     {
       name: 'media-store',
       partialize: (state) => ({
         mediaFiles: state.mediaFiles,
+        audioEnabled: state.audioEnabled,
         videosEnabled: state.videosEnabled,
         videoSoundsEnabled: state.videoSoundsEnabled,
-        audioVolume: state.audioVolume
+        audioVolume: state.audioVolume,
+        hasCompletedIntroExperience: state.hasCompletedIntroExperience,
+        hasCompletedBookEntryExperience: state.hasCompletedBookEntryExperience
         // Don't persist UI state as it's temporary
       })
     }

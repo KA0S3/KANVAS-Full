@@ -19,7 +19,6 @@ class IndexedDBStorage {
   private readonly DB_NAME = 'KanvasBackgrounds';
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = 'images';
-  private readonly MAX_IMAGE_SIZE_MB = 10; // 10MB per image
   private readonly COMPRESSION_QUALITY = 0.8;
 
   static getInstance(): IndexedDBStorage {
@@ -58,14 +57,6 @@ class IndexedDBStorage {
   async storeImage(assetId: string, file: File): Promise<{ success: boolean; compressedSize?: number; error?: string }> {
     try {
       await this.initDB();
-
-      // Check file size limits
-      if (file.size > this.MAX_IMAGE_SIZE_MB * 1024 * 1024) {
-        return { 
-          success: false, 
-          error: `Image too large. Maximum size is ${this.MAX_IMAGE_SIZE_MB}MB` 
-        };
-      }
 
       // Compress if it's an image
       let processedBlob: Blob;

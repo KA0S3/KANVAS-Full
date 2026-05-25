@@ -10,6 +10,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { USE_SUPABASE } from '@/config/features';
 import { createFile } from './ProjectService';
 
 // =====================================================
@@ -53,6 +54,10 @@ export async function uploadFile(
   file: File,
   options: UploadOptions
 ): Promise<UploadResult> {
+  if (!USE_SUPABASE) {
+    throw new Error('Cloud file uploads are disabled when USE_SUPABASE=false');
+  }
+
   const { projectId, assetId, expiresIn = 3600, bucket = 'files' } = options;
 
   // 1. Generate unique storage key
@@ -137,6 +142,10 @@ export async function getSignedUrl(
   expiresIn: number = 3600,
   bucket: string = 'files'
 ): Promise<string> {
+  if (!USE_SUPABASE) {
+    throw new Error('Signed URLs are disabled when USE_SUPABASE=false');
+  }
+
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(storageKey, expiresIn);
@@ -163,6 +172,10 @@ export function getPublicUrl(
   storageKey: string,
   bucket: string = 'files'
 ): string {
+  if (!USE_SUPABASE) {
+    return '';
+  }
+
   const { data } = supabase.storage
     .from(bucket)
     .getPublicUrl(storageKey);
@@ -189,6 +202,10 @@ export async function deleteFileFromStorage(
   storageKey: string,
   bucket: string = 'files'
 ): Promise<void> {
+  if (!USE_SUPABASE) {
+    return;
+  }
+
   const { error } = await supabase.storage
     .from(bucket)
     .remove([storageKey]);
@@ -215,6 +232,10 @@ export async function deleteFile(
   projectId: string,
   bucket: string = 'files'
 ): Promise<void> {
+  if (!USE_SUPABASE) {
+    return;
+  }
+
   // Delete from storage
   await deleteFileFromStorage(storageKey, bucket);
 
@@ -243,6 +264,10 @@ export async function listProjectFiles(
   projectId: string,
   bucket: string = 'files'
 ): Promise<any[]> {
+  if (!USE_SUPABASE) {
+    return [];
+  }
+
   const { data, error } = await supabase.storage
     .from(bucket)
     .list(projectId);
@@ -273,6 +298,10 @@ export async function uploadFilesBatch(
   files: File[],
   options: UploadOptions
 ): Promise<UploadResult[]> {
+  if (!USE_SUPABASE) {
+    return [];
+  }
+
   const uploadPromises = files.map(file => uploadFile(file, options));
   
   try {

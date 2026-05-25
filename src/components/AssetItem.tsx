@@ -81,16 +81,20 @@ export const AssetItemFixed: React.FC<AssetItemProps> = ({
   const renderMode = asset.behavior.renderMode || 'other';
   
   // Get tag store for tag colors
-  const { getAllTags } = useTagStore();
-  const allTags = getAllTags();
+  const tagsById = useTagStore(state => state.tags);
   
   // Extract asset tags from metadata tags array
-  const assetTags = (tags || []).map(tagName => {
-    const tag = Object.values(allTags).find(t => t.name === tagName);
-    return tag || { id: tagName, name: tagName, color: '#888888' };
+  const assetTags = (tags || []).map(tagId => {
+    const tag = tagsById[tagId] || Object.values(tagsById).find(t => t.name === tagId);
+    return tag || { id: tagId, name: tagId, color: '#888888' };
   });
   const hasTags = assetTags && assetTags.length > 0;
+  const borderTagId = asset.style.border?.tagId;
+  const borderTagColor = borderTagId
+    ? assetTags.find(tag => tag.id === borderTagId)?.color || null
+    : null;
   const firstTagColor = hasTags ? assetTags[0]?.color : null;
+  const activeTagBorderColor = borderTagColor || firstTagColor;
   
   // Get viewport display settings from custom fields
   const displaySettings = asset.content.customFields?.viewportDisplaySettings || {
@@ -479,7 +483,7 @@ export const AssetItemFixed: React.FC<AssetItemProps> = ({
                   style={{ filter: `blur(${displaySettings.portraitBlur * 8}px)` }}
                 />
               </div>
-              {!isAssetTooSmall && (
+              {!isAssetTooSmall && displayedCustomFields.length > 0 && (
                 <>
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent pointer-events-none" />
                   <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
@@ -506,24 +510,26 @@ export const AssetItemFixed: React.FC<AssetItemProps> = ({
           ) : (
             /* Layout when thumbnail hidden, no portrait, or asset is too small */
             <>
-              <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
-                <div className="h-full overflow-y-auto p-3 relative">
-                  <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/20 via-transparent to-black/20 z-10" />
-                  {displaySettings.description && description && (
-                    <div className="text-xs text-muted-foreground line-clamp-2 mb-3">{description}</div>
-                  )}
-                  {displayedCustomFields.length > 0 && displayedCustomFields.map((field, index) => (
-                    <div key={index} className="text-xs relative mb-2">
-                      <div className="font-medium text-foreground/80">{field.label}:</div>
-                      {field.type === 'image' && field.value ? (
-                        <img src={field.value} alt={field.label} className="w-full h-16 object-cover rounded border border-glass-border/30 mt-1" />
-                      ) : (
-                        <div className="text-muted-foreground">{field.value}</div>
-                      )}
-                    </div>
-                  ))}
+              {displayedCustomFields.length > 0 && (
+                <div className="absolute bottom-0 left-0 right-0 top-1/2 z-10 pointer-events-auto">
+                  <div className="h-full overflow-y-auto p-3 relative">
+                    <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/20 via-transparent to-black/20 z-10" />
+                    {displaySettings.description && description && (
+                      <div className="text-xs text-muted-foreground line-clamp-2 mb-3">{description}</div>
+                    )}
+                    {displayedCustomFields.map((field, index) => (
+                      <div key={index} className="text-xs relative mb-2">
+                        <div className="font-medium text-foreground/80">{field.label}:</div>
+                        {field.type === 'image' && field.value ? (
+                          <img src={field.value} alt={field.label} className="w-full h-16 object-cover rounded border border-glass-border/30 mt-1" />
+                        ) : (
+                          <div className="text-muted-foreground">{field.value}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
         </div>
@@ -559,13 +565,13 @@ export const AssetItemFixed: React.FC<AssetItemProps> = ({
           transform: isSelected ? "scale(1.05)" : "scale(1)",
           overflow: 'visible',
           zIndex: isSelected ? dynamicZIndex + 100 : dynamicZIndex,
-          ...(hasTags && firstTagColor && showTagBorder && {
+          ...(hasTags && activeTagBorderColor && showTagBorder && {
             boxShadow: `
-              inset 0 0 8px ${getColorWithOpacity(firstTagColor, 0.8)},
-              inset 0 0 16px ${getColorWithOpacity(firstTagColor, 0.6)},
-              0 0 4px ${getColorWithOpacity(firstTagColor, 0.7)},
-              0 0 8px ${getColorWithOpacity(firstTagColor, 0.5)},
-              0 0 12px ${getColorWithOpacity(firstTagColor, 0.3)}
+              inset 0 0 8px ${getColorWithOpacity(activeTagBorderColor, 0.8)},
+              inset 0 0 16px ${getColorWithOpacity(activeTagBorderColor, 0.6)},
+              0 0 4px ${getColorWithOpacity(activeTagBorderColor, 0.7)},
+              0 0 8px ${getColorWithOpacity(activeTagBorderColor, 0.5)},
+              0 0 12px ${getColorWithOpacity(activeTagBorderColor, 0.3)}
             `.trim()
           }),
           /* Remove glass blur for all assets */

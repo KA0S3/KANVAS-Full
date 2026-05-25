@@ -214,7 +214,13 @@ export class StorageQuotaMonitor {
           const book = parsed.state.books[bookId];
           
           // Remove large cover images
-          if (book.coverImage && book.coverImage.startsWith('data:image/') && book.coverImage.length > 50000) {
+          if (
+            book.coverImage &&
+            book.coverImage.startsWith('data:image/') &&
+            book.coverImage.length > 50000 &&
+            !book.hasLocalCoverImage &&
+            !book.coverImageStorageKey
+          ) {
             console.log(`[StorageQuotaMonitor] Removing large cover image for book: ${bookId}`);
             delete book.coverImage;
             modified = true;

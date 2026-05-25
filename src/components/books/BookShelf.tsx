@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, User, Users, Building, Sparkles, Swords, Wand2 } from 'lucide-react';
+import { Settings, Users, Building, Sparkles, Swords, Wand2 } from 'lucide-react';
 import { useBookStore } from '@/stores/bookStoreSimple';
 import { useThemeStore } from '@/stores/themeStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useMediaStore } from '@/stores/mediaStore';
 import { Button } from '@/components/ui/button';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
-import { AccountModal } from '@/components/account/AccountModal';
-import { LocalStorageWarning } from '@/components/LocalStorageWarning';
 import { AutosaveIndicator } from '@/components/autosave/AutosaveIndicator';
 import type { Book } from '@/types/book';
+import pedestalDark from '@/assets/pedestal-dark.png';
+import pedestalLight from '@/assets/pedestal-light.png';
+import { openPublicAssetUrl, resolveAppRouteUrl } from '@/utils/appUrls';
+import { cssUrl } from '@/utils/cssUrl';
 import SingleBookFocus from './SingleBookFocus';
 import BookSpineView from './BookSpineView';
 import ViewModeSelector from './ViewModeSelector';
@@ -35,17 +37,16 @@ const BookShelf: React.FC<BookShelfProps> = ({
 }) => {
   const { viewMode, setViewMode, getAllBooks, currentBookId, setCurrentBook, getCurrentBook } = useBookStore();
   const { theme } = useThemeStore();
-  const { user, plan, isAuthenticated, effectiveLimits } = useAuthStore();
+  const { plan, effectiveLimits } = useAuthStore();
   const { professionalMode } = useMediaStore();
   const navigate = useNavigate();
   const books = getAllBooks();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [generatorsOpen, setGeneratorsOpen] = useState(false);
 
   const openGenerator = (generator: string) => {
-    window.open(`/generators/${generator}.html`, '_blank', 'noopener,noreferrer');
+    openPublicAssetUrl(`generators/${generator}.html`, '_blank', 'noopener,noreferrer');
   };
 
   // Close dropdown when clicking outside
@@ -94,20 +95,6 @@ const BookShelf: React.FC<BookShelfProps> = ({
 
   const handleViewModeChange = (newMode: 'single' | 'spine') => {
     setViewMode(newMode);
-  };
-
-  const handleAccountClick = () => {
-    // Check if user is authenticated and is an owner
-    if (isAuthenticated && user && plan) {
-      const ownerEmail = import.meta.env.VITE_OWNER_EMAIL;
-      const isOwner = user.email === ownerEmail && plan === 'owner';
-      
-      // Always open account modal for all users including owners
-      setIsAccountModalOpen(true);
-    } else {
-      // Open account modal for non-authenticated users
-      setIsAccountModalOpen(true);
-    }
   };
 
   const handleEditBook = () => {
@@ -162,8 +149,8 @@ const BookShelf: React.FC<BookShelfProps> = ({
     <div 
       className={`relative h-full ${className}`}
       style={{
-        backgroundImage: `url(${theme === 'dark' ? '/pedestal-dark.png' : '/pedestal-light.png'})`,
-        backgroundSize: '150%',
+        backgroundImage: cssUrl(theme === 'dark' ? pedestalDark : pedestalLight),
+        backgroundSize: '110%',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat'
       }}
@@ -186,26 +173,6 @@ const BookShelf: React.FC<BookShelfProps> = ({
           </div>
           
           <div className="flex items-center gap-2">
-            {/* LocalStorage Warning - only show when not authenticated */}
-            {!isAuthenticated && (
-              <LocalStorageWarning onOpenAccountModal={handleAccountClick} />
-            )}
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAccountClick}
-              className={`${
-                theme === 'dark' 
-                  ? 'border-white/20 text-white hover:bg-white/10' 
-                  : 'border-border text-foreground hover:bg-accent'
-              }`}
-              title={isAuthenticated ? "Account" : "Sign In"}
-            >
-              <User className="w-4 h-4" />
-              <span className="hidden sm:inline">{isAuthenticated ? 'Account' : 'Sign In'}</span>
-            </Button>
-            
             <Button
               variant="outline"
               size="sm"
@@ -295,7 +262,7 @@ const BookShelf: React.FC<BookShelfProps> = ({
       </div>
 
       {/* View Mode Selector - Centered below header */}
-      <div className="absolute top-20 left-0 right-0 z-10 flex justify-center">
+      <div className="absolute top-12 left-0 right-0 z-10 flex justify-center">
         <ViewModeSelector
           currentMode={viewMode}
           onModeChange={handleViewModeChange}
@@ -343,12 +310,6 @@ const BookShelf: React.FC<BookShelfProps> = ({
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      {/* Account Modal */}
-      <AccountModal
-        isOpen={isAccountModalOpen}
-        onClose={() => setIsAccountModalOpen(false)}
-      />
-
       {/* Terms and Conditions Notice */}
       <div className="absolute bottom-2 left-0 right-0 text-center z-10">
         <p className={`text-xs ${
@@ -356,7 +317,7 @@ const BookShelf: React.FC<BookShelfProps> = ({
         }`}>
           By using this app you confirm you have read and understood the{' '}
           <a 
-            href="/terms-of-service" 
+            href={resolveAppRouteUrl('/terms-of-service')}
             className={`underline hover:opacity-100 ${
               theme === 'dark' ? 'text-white/60' : 'text-muted-foreground'
             }`}
@@ -365,7 +326,7 @@ const BookShelf: React.FC<BookShelfProps> = ({
           </a>
           {' '}and{' '}
           <a 
-            href="/privacy-policy" 
+            href={resolveAppRouteUrl('/privacy-policy')}
             className={`underline hover:opacity-100 ${
               theme === 'dark' ? 'text-white/60' : 'text-muted-foreground'
             }`}

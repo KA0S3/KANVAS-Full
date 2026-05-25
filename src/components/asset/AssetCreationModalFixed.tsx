@@ -29,7 +29,6 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { CustomFieldsManager } from './CustomFieldsManager';
 import { ViewportDisplaySettingsManager } from './ViewportDisplaySettingsManager';
-import { UpgradePromptModal } from '@/components/UpgradePromptModal';
 import { calculateViewportCenterPosition, calculateChildAssetCenterPosition } from '@/utils/coordinateUtils';
 import type { Asset } from '@/components/AssetItem';
 import type { CustomField, CustomFieldValue, ViewportDisplaySettings } from '@/types/extendedAsset';
@@ -58,7 +57,7 @@ interface AssetCreationModalProps {
 }
 
 export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
-  const { createNewAsset, upgradeModal, closeUpgradeModal, canUploadToCloud, isOverQuota } = useAssetCreation();
+  const { createNewAsset, canUploadToCloud } = useAssetCreation();
   const { tags } = useTagStore();
   const { syncEnabled } = useCloudStore();
   const { isAuthenticated, plan } = useAuthStore();
@@ -551,23 +550,6 @@ export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Upgrade Modal */}
-      <UpgradePromptModal
-        isOpen={upgradeModal.isOpen}
-        onClose={closeUpgradeModal}
-        title={isOverQuota ? "Storage Quota Exceeded" : "Approaching Storage Limit"}
-        message={isOverQuota 
-          ? `You've exceeded your storage quota. Upgrade to continue uploading files.`
-          : `You're approaching your storage limit. Upgrade to get more space.`
-        }
-        action="Upgrade Now"
-        type="plan_limit"
-        onAction={() => {
-          // TODO: Navigate to upgrade page or open payment flow
-          console.log('Navigate to upgrade flow');
-        }}
-      />
     </>
   );
 }

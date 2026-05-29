@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download } from "lucide-react";
+import { CheckCircle2, Clock3, Download, ShieldCheck, Sparkles } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
 import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
 import { fetchEntitlement } from "../lib/entitlements";
@@ -14,6 +14,10 @@ type DownloadLinks = {
     beta?: string;
   };
 };
+
+function DownloadLogo() {
+  return <img className="download-logo" src="/KANVAS-LOGO-F3.png" alt="KANVAS logo" />;
+}
 
 export function DownloadPage() {
   const { user, session, loading, configured } = useAuth();
@@ -77,17 +81,18 @@ export function DownloadPage() {
   };
 
   if (loading || checking) {
-    return <main className="page narrow"><section className="panel">Checking download access...</section></main>;
+    return <main className="page narrow download-page"><section className="panel">Checking download access...</section></main>;
   }
 
   if (!configured) {
-    return <main className="page narrow"><section className="panel notice error">Supabase is not configured for download access.</section></main>;
+    return <main className="page narrow download-page"><section className="panel notice error">Supabase is not configured for download access.</section></main>;
   }
 
   if (!user) {
     return (
-      <main className="page narrow">
-        <section className="panel">
+      <main className="page narrow download-page">
+        <section className="panel download-access-panel">
+          <DownloadLogo />
           <h1>Log in to download</h1>
           <p className="muted">Installer links are visible only to accounts with an active entitlement.</p>
           <Link className="button primary" to="/login?next=/download">Log in or create account</Link>
@@ -98,10 +103,11 @@ export function DownloadPage() {
 
   if (!entitlement?.paid) {
     return (
-      <main className="page narrow">
-        <section className="panel">
+      <main className="page narrow download-page">
+        <section className="panel download-access-panel">
+          <DownloadLogo />
           <h1>Purchase required</h1>
-          <p className="muted">Download links are gated for paid users. The desktop app still enforces activation after download.</p>
+          <p className="muted">Purchase beta access to unlock the desktop installer. The desktop app still verifies your account during activation.</p>
           {error ? <div className="notice error">{error}</div> : null}
           <button className="button primary" type="button" onClick={openPurchase}>Purchase desktop app</button>
         </section>
@@ -113,39 +119,78 @@ export function DownloadPage() {
   const betaUrl = links?.channels?.beta || "";
   const canDownloadStable = entitlement.stableAccess;
   const canDownloadBeta = entitlement.betaAccess;
+  const activeChannels = [canDownloadBeta ? "Beta" : "", canDownloadStable ? "Stable" : ""].filter(Boolean).join(" + ");
 
   return (
-    <main className="page narrow">
-      <section className="panel">
-        <p className="eyebrow">Desktop installer</p>
-        <h1>Download KANVAS</h1>
-        <p className="muted">Request installer links from your account backend. Available channels follow your paid entitlement.</p>
-        {entitlement.stableUpgradeEligible && !entitlement.stableAccess ? (
-          <div className="notice">
-            Your beta purchase is eligible for the R100 stable upgrade.
-            <button className="link-button" type="button" onClick={openPurchase}>Open upgrade checkout</button>
+    <main className="page download-page">
+      <section className="download-hero-panel">
+        <div className="download-hero-copy">
+          <p className="eyebrow">Desktop installer</p>
+          <h1>Download KANVAS</h1>
+          <p>
+            KANVAS is currently in beta testing. Your valued support helps shape the app and qualifies your account for a discounted full release upgrade.
+          </p>
+        </div>
+        <DownloadLogo />
+      </section>
+
+      <section className="download-grid">
+        <article className="panel download-control-panel">
+          <div className="download-panel-heading">
+            <ShieldCheck size={20} />
+            <div>
+              <h2>Secure account links</h2>
+              <p className="muted">Generate secure download links for your account. Links expire quickly to protect paid access.</p>
+            </div>
           </div>
-        ) : null}
-        {error ? <div className="notice error">{error}</div> : null}
-        <button className="button primary full" type="button" onClick={requestLinks} disabled={requesting}>
-          {requesting ? "Requesting..." : links ? "Refresh download links" : "Request download links"}
-        </button>
-        {expiresAt ? <div className="notice success">Download links expire in {secondsLeft}s.</div> : null}
-        <div className="download-list">
+
+          <div className="download-status-row">
+            <span className="download-status-pill">
+              <CheckCircle2 size={15} />
+              {activeChannels || "Paid"}
+            </span>
+            {expiresAt ? (
+              <span className="download-status-pill muted-pill">
+                <Clock3 size={15} />
+                Expires in {secondsLeft}s
+              </span>
+            ) : null}
+          </div>
+
+          {entitlement.stableUpgradeEligible && !entitlement.stableAccess ? (
+            <div className="notice download-upgrade-note">
+              Your beta purchase is eligible for the R100 stable upgrade.
+              <button className="link-button" type="button" onClick={openPurchase}>Open upgrade checkout</button>
+            </div>
+          ) : null}
+          {error ? <div className="notice error">{error}</div> : null}
+          <button className="button primary full" type="button" onClick={requestLinks} disabled={requesting}>
+            {requesting ? "Generating..." : links ? "Refresh download links" : "Generate download links"}
+          </button>
+          {expiresAt ? <div className="notice success">Download links expire in {secondsLeft}s.</div> : null}
+          {links && !stableUrl && !betaUrl ? <div className="notice">Download URLs are not configured yet.</div> : null}
+        </article>
+
+        <div className="download-card-list">
           {canDownloadStable ? (
-            <a className={`button primary ${stableUrl ? "" : "disabled"}`} href={stableUrl || undefined} aria-disabled={!stableUrl}>
-              <Download size={16} />
-              Stable installer
+            <a className={`download-channel-card ${stableUrl ? "" : "disabled"}`} href={stableUrl || undefined} aria-disabled={!stableUrl}>
+              <span className="download-channel-icon"><Download size={20} /></span>
+              <span>
+                <strong>Stable installer</strong>
+                <small>{stableUrl ? "Ready to download" : "Generate links to unlock"}</small>
+              </span>
             </a>
           ) : null}
           {canDownloadBeta ? (
-            <a className={`button ${betaUrl ? "" : "disabled"}`} href={betaUrl || undefined} aria-disabled={!betaUrl}>
-              <Download size={16} />
-              Beta installer
+            <a className={`download-channel-card ${betaUrl ? "" : "disabled"}`} href={betaUrl || undefined} aria-disabled={!betaUrl}>
+              <span className="download-channel-icon beta"><Sparkles size={20} /></span>
+              <span>
+                <strong>Beta installer</strong>
+                <small>{betaUrl ? "Ready to download" : "Generate links to unlock"}</small>
+              </span>
             </a>
           ) : null}
         </div>
-        {links && !stableUrl && !betaUrl ? <div className="notice">Download URLs are not configured yet.</div> : null}
       </section>
     </main>
   );

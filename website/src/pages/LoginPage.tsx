@@ -2,6 +2,12 @@ import { FormEvent, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../components/AuthProvider";
 
+function isCredentialError(err: unknown) {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes("invalid login credentials") || message.includes("invalid credentials");
+}
+
 export function LoginPage() {
   const { signIn, signInWithGoogle, signUp, configured, user } = useAuth();
   const navigate = useNavigate();
@@ -13,23 +19,37 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const switchMode = (nextMode: "login" | "register") => {
+    setMode(nextMode);
+    setError(null);
+    setMessage(null);
+    setShowRegisterPrompt(false);
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     setMessage(null);
+    setShowRegisterPrompt(false);
     setLoading(true);
     try {
       if (mode === "login") {
         await signIn(email, password);
         navigate(nextPath);
       } else {
-        await signUp(email, password);
-        setMessage("Check your email if confirmation is enabled, then return to sign in.");
+        await signUp(email, password, nextPath);
+        setMessage("Check your email if confirmation is enabled, then continue to KANVAS.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
+      if (mode === "login" && isCredentialError(err)) {
+        setError("Invalid credentials.");
+        setShowRegisterPrompt(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Authentication failed.");
+      }
     } finally {
       setLoading(false);
     }
@@ -38,6 +58,7 @@ export function LoginPage() {
   const handleGoogle = async () => {
     setError(null);
     setMessage(null);
+    setShowRegisterPrompt(false);
     setLoading(true);
     try {
       await signInWithGoogle(nextPath);
@@ -70,7 +91,16 @@ export function LoginPage() {
 
         {!configured ? <div className="notice error">Supabase is not configured. Add website environment variables before using auth.</div> : null}
         {message ? <div className="notice success">{message}</div> : null}
-        {error ? <div className="notice error">{error}</div> : null}
+        {error ? (
+          <div className="notice error">
+            {error}{" "}
+            {showRegisterPrompt ? (
+              <button className="inline-link" type="button" onClick={() => switchMode("register")}>
+                Sign up instead?
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <button className="button primary full" type="button" onClick={handleGoogle} disabled={!configured || loading}>
           Continue with Google
@@ -96,7 +126,7 @@ export function LoginPage() {
           </label>
         </form>
 
-        <button className="link-button" type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+        <button className="link-button" type="button" onClick={() => switchMode(mode === "login" ? "register" : "login")}>
           {mode === "login" ? "Need an account? Register" : "Already have an account? Log in"}
         </button>
       </section>

@@ -1,6 +1,6 @@
 # KANVAS Website
 
-Standalone public website and account portal for `https://kanvas-it.com`.
+Standalone public website and account portal for `https://www.kanvas-it.com`.
 
 This app is intentionally separate from the Electron desktop app. It handles marketing, Supabase auth, entitlement display, download access contracts, desktop activation contracts, and a tiny local-only browser demo.
 
@@ -25,12 +25,12 @@ npm run dev
 Set the required `VITE_*` values in a local `.env` file or in your hosting provider's environment settings:
 
 ```text
-VITE_SITE_ORIGIN=https://kanvas-it.com
-VITE_SITE_URL=https://kanvas-it.com
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
-VITE_LICENSE_API_URL=https://<project-ref>.supabase.co/functions/v1
-VITE_KANVAS_ACTIVATION_URL=https://kanvas-it.com/desktop/activate
+VITE_SITE_ORIGIN=https://www.kanvas-it.com
+VITE_SITE_URL=https://www.kanvas-it.com
+VITE_SUPABASE_URL=https://hzngfqebklzhnwkcmgto.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon-public-key>
+VITE_LICENSE_API_URL=https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1
+VITE_KANVAS_ACTIVATION_URL=https://www.kanvas-it.com/desktop/activate
 ```
 
 Only public `VITE_*` values belong in this frontend. Never add Paystack secret keys, Supabase service-role keys, storage credentials, or license signing private keys to `website/`, Vercel frontend env vars, or any browser code.
@@ -42,10 +42,13 @@ Only public `VITE_*` values belong in this frontend. Never add Paystack secret k
    - Project URL into `VITE_SUPABASE_URL`
    - anon public key into `VITE_SUPABASE_ANON_KEY`
 3. In Supabase, go to **Authentication -> URL Configuration** and set:
-   - Site URL: `https://kanvas-it.com`
+   - Site URL: `https://www.kanvas-it.com`
    - Redirect URLs:
+     - `https://www.kanvas-it.com/**`
      - `https://kanvas-it.com/**`
-   - OAuth landing path used by this site: `https://kanvas-it.com/oauth/consent`
+     - `http://localhost:5173/**`
+     - `http://localhost:3000/**`
+   - Auth callback path used by this site: `https://www.kanvas-it.com/oauth/consent`
 4. In Supabase, go to **Authentication -> Providers -> Google**:
    - Enable Google.
    - Add the Google OAuth client ID and secret.
@@ -61,10 +64,11 @@ Only public `VITE_*` values belong in this frontend. Never add Paystack secret k
    - `BETA_DOWNLOAD_ASSET_NAME=KANVAS-Setup.exe`
    - optional `BETA_DOWNLOAD_URL` override if beta should not use GitHub prerelease lookup
 7. In Paystack, set the payment callback/return URL to:
-   - `https://kanvas-it.com/payment-success`
+   - `https://www.kanvas-it.com/payment-success`
    - webhook URL: `https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1/paystack-webhook`
-   - cancellation/failure should return users to `https://kanvas-it.com/payment/cancelled` if your Paystack flow supports it.
+   - the webhook function verifies Paystack's `x-paystack-signature` header using `PAYSTACK_SECRET_KEY`
+   - cancellation/failure should return users to `https://www.kanvas-it.com/payment/cancelled` if your Paystack flow supports it.
 8. The one-time Paystack product keys are `BETA_ACCESS`, `BETA_TO_STABLE_UPGRADE`, and `STABLE_FULL`. Do not configure Paystack subscriptions or plans for KANVAS.
 9. The website never stores download URLs in public frontend env vars. Installer links come from the Supabase download-access function after entitlement checks.
 
-For Vercel, set the same `VITE_*` values as project environment variables. Deploy only this `website/` folder as the website frontend.
+For Vercel, set the same `VITE_*` values as project environment variables. Deploy only this `website/` folder as the website frontend. Keep `website/vercel.json` in that deployment root so direct client routes such as `/login`, `/download`, `/account`, `/oauth/consent`, and `/desktop/activate` rewrite to `/index.html`.

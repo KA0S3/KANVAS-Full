@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../components/AuthProvider";
 import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
-import { fetchEntitlement } from "../lib/entitlements";
+import { fetchEntitlement, hasChannelAccess } from "../lib/entitlements";
 import { completeDesktopActivation, type ActivationParams } from "../lib/licenseApi";
 
 export function ActivationPage() {
@@ -37,7 +37,7 @@ export function ActivationPage() {
 
     try {
       const entitlement = await fetchEntitlement(user.id);
-      if (!entitlement.paid) {
+      if (!hasChannelAccess(entitlement, activationParams.channel)) {
         setStatus(null);
         openPurchase();
         return;

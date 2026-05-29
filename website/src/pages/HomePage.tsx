@@ -1,46 +1,63 @@
 import { Link } from "react-router-dom";
 import { MonitorDown, Play } from "lucide-react";
-import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
+import { useEffect, useState, type CSSProperties } from "react";
+
+const SPLASH_DURATION_MS = 3000;
 
 export function HomePage() {
-  const { openPurchase } = usePurchaseOutlet();
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let frameId = 0;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const nextProgress = Math.min(((now - start) / SPLASH_DURATION_MS) * 100, 100);
+      setProgress(nextProgress);
+      if (nextProgress < 100) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  const revealRadius = progress * 0.68;
+  const revealFeather = revealRadius + 10;
+  const titleOpacity = Math.min(1, Math.max(0, (progress - 8) / 20));
+  const colorLayerStyle = {
+    "--reveal-radius": `${revealRadius}vmax`,
+    "--reveal-glow": `${revealRadius + 4}vmax`,
+    "--reveal-feather": `${revealFeather}vmax`,
+    "--reveal-edge": `${revealFeather + 8}vmax`,
+  } as CSSProperties;
 
   return (
-    <main className="hero-page">
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">kanvas-it.com</p>
+    <main className="splash-page">
+      <div className="splash-bg splash-bg-mono" />
+      <div className="splash-bg splash-bg-color" style={colorLayerStyle} />
+      <div className="splash-bg splash-bg-halo" />
+      <section className="splash-hero" aria-label="KANVAS" style={{ opacity: titleOpacity }}>
+        <div className="splash-copy">
           <h1>KANVAS</h1>
-          <p className="hero-subtitle">A local-first visual campaign manager for the desktop, with a tiny browser demo for testing the feel.</p>
-          <div className="hero-actions">
-            <Link className="button primary large" to="/demo">
+          <p>FOR THE VISUAL</p>
+          <div className="splash-actions" style={{ opacity: titleOpacity, pointerEvents: titleOpacity > 0.85 ? "auto" : "none" }}>
+            <Link className="button primary large splash-button" to="/demo">
               <Play size={18} />
-              Test online demo
+              Test demo app
             </Link>
-            <button className="button large" type="button" onClick={openPurchase}>
+            <Link className="button large splash-button" to="/download">
               <MonitorDown size={18} />
-              Purchase desktop app
-            </button>
+              Download full app
+            </Link>
           </div>
         </div>
       </section>
-
-      <section className="content-band">
-        <div className="summary-grid">
-          <article>
-            <h2>Local-first desktop</h2>
-            <p>Projects, assets, editor state, and autosaves belong on the user’s machine in the desktop app.</p>
-          </article>
-          <article>
-            <h2>Website account portal</h2>
-            <p>Supabase handles login, entitlement display, device activation, and download access.</p>
-          </article>
-          <article>
-            <h2>Small online demo</h2>
-            <p>The browser demo stores only limited trial data in IndexedDB and never syncs project content to Supabase.</p>
-          </article>
-        </div>
-      </section>
+      <p className="splash-terms">
+        By interacting with this app you confirm you have read and understood the{" "}
+        <a href="/terms-of-service">Terms & Conditions</a> and <a href="/privacy-policy">Privacy Policy</a>
+      </p>
     </main>
   );
 }

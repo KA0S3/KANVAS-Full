@@ -1,5 +1,5 @@
 import { requireSupabase } from "./supabaseClient";
-import type { PaystackProductKey } from "./config";
+import { PAYSTACK_CALLBACK_URL, type PaystackProductKey } from "./config";
 
 export async function startPurchase(productKey: PaystackProductKey): Promise<void> {
   const supabase = requireSupabase();
@@ -15,10 +15,7 @@ export async function startPurchase(productKey: PaystackProductKey): Promise<voi
   const { data, error } = await supabase.functions.invoke("paystack-initialize", {
     body: {
       product_key: productKey,
-      user_id: user.id,
-      email: user.email,
-      callback_url: `${window.location.origin}/payment/success`,
-      cancel_url: `${window.location.origin}/payment/cancelled`,
+      callback_url: PAYSTACK_CALLBACK_URL,
     },
   });
 

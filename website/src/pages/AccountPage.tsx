@@ -64,8 +64,8 @@ export function AccountPage() {
           {!checking && entitlement?.paid ? (
             <>
               <div className="status paid">Paid</div>
-              <p>Plan: {entitlement.license?.plan}</p>
-              <p>Channels: {entitlement.license?.allowed_channels?.join(", ") || "stable"}</p>
+              <p>Access: {[entitlement.betaAccess ? "beta" : "", entitlement.stableAccess ? "stable" : ""].filter(Boolean).join(", ")}</p>
+              <p>Stable upgrade: {entitlement.stableUpgradeEligible ? "eligible" : "not eligible"}</p>
               <Link className="button primary" to="/download">Open downloads</Link>
             </>
           ) : null}

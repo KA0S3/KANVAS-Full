@@ -17,9 +17,10 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/demo" element={<DemoPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/oauth/consent" element={<LoginPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/download" element={<DownloadPage />} />
-          <Route path="/payment/success" element={<PaymentSuccessPage />} />
+          <Route path="/payment-success" element={<PaymentSuccessPage />} />
           <Route path="/payment/cancelled" element={<PaymentCancelledPage />} />
           <Route path="/desktop/activate" element={<ActivationPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -8,6 +8,8 @@ export type Entitlement = {
   status: LicenseStatus;
   plan: LicensePlan;
   allowed_channels: DownloadChannel[];
+  product_key: string | null;
+  stable_upgrade_eligible: boolean;
   expires_at: string | null;
   created_at: string;
 };
@@ -29,6 +31,9 @@ export type DeviceActivation = {
 export type DemoBook = {
   id: string;
   title: string;
+  backgroundFileId?: string;
+  backgroundMimeType?: string;
+  backgroundSizeBytes?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -36,11 +41,18 @@ export type DemoBook = {
 export type DemoAsset = {
   id: string;
   bookId: string;
+  parentId?: string;
   title: string;
+  x: number;
+  y: number;
+  backgroundFileId?: string;
+  backgroundMimeType?: string;
+  backgroundSizeBytes?: number;
   fileId?: string;
   mimeType?: string;
   sizeBytes?: number;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type DemoFile = {
@@ -55,6 +67,10 @@ export type DemoFile = {
 
 export type EntitlementState = {
   license: Entitlement | null;
+  licenses: Entitlement[];
   devices: DeviceActivation[];
   paid: boolean;
+  betaAccess: boolean;
+  stableAccess: boolean;
+  stableUpgradeEligible: boolean;
 };

@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../components/AuthProvider";
 
 export function LoginPage() {
-  const { signIn, signUp, configured, user } = useAuth();
+  const { signIn, signInWithGoogle, signUp, configured, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedNext = searchParams.get("next");
@@ -35,6 +35,18 @@ export function LoginPage() {
     }
   };
 
+  const handleGoogle = async () => {
+    setError(null);
+    setMessage(null);
+    setLoading(true);
+    try {
+      await signInWithGoogle(nextPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed.");
+      setLoading(false);
+    }
+  };
+
   if (user) {
     return (
       <main className="page narrow">
@@ -60,6 +72,12 @@ export function LoginPage() {
         {message ? <div className="notice success">{message}</div> : null}
         {error ? <div className="notice error">{error}</div> : null}
 
+        <button className="button primary full" type="button" onClick={handleGoogle} disabled={!configured || loading}>
+          Continue with Google
+        </button>
+
+        <div className="auth-divider">or use email</div>
+
         <form className="form" onSubmit={handleSubmit}>
           <label>
             Email
@@ -72,6 +90,10 @@ export function LoginPage() {
           <button className="button primary" type="submit" disabled={!configured || loading}>
             {loading ? "Working..." : mode === "login" ? "Log in" : "Create account"}
           </button>
+          <label className="checkbox-row">
+            <input type="checkbox" defaultChecked />
+            Keep me signed in
+          </label>
         </form>
 
         <button className="link-button" type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>

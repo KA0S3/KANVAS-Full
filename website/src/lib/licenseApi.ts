@@ -1,4 +1,4 @@
-import { BETA_DOWNLOAD_URL, LICENSE_API_URL, STABLE_DOWNLOAD_URL } from "./config";
+import { LICENSE_API_URL } from "./config";
 import type { DownloadChannel } from "../types/domain";
 
 export type ActivationParams = {
@@ -21,16 +21,6 @@ export async function fetchDownloadAccess(accessToken: string) {
   if (response.ok) {
     return response.json();
   }
-
-  if (response.status === 404 && (STABLE_DOWNLOAD_URL || BETA_DOWNLOAD_URL)) {
-    return {
-      channels: {
-        stable: STABLE_DOWNLOAD_URL,
-        beta: BETA_DOWNLOAD_URL,
-      },
-    };
-  }
-
   throw new Error(`Download access failed with ${response.status}`);
 }
 

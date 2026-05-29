@@ -8,6 +8,7 @@ type AuthContextValue = {
   loading: boolean;
   configured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (nextPath?: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -54,6 +55,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error("Supabase is not configured.");
         }
         const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          throw error;
+        }
+      },
+      signInWithGoogle: async (nextPath = "/account") => {
+        if (!supabase) {
+          throw new Error("Supabase is not configured.");
+        }
+        const safeNextPath = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/account";
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${window.location.origin}/oauth/consent?next=${encodeURIComponent(safeNextPath)}`,
+          },
+        });
         if (error) {
           throw error;
         }

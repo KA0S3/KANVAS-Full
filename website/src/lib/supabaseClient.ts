@@ -10,7 +10,13 @@ if (supabaseAnonKey?.includes("service_role")) {
 }
 
 export const supabase: SupabaseClient | null = hasSupabaseConfig
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  ? createClient(supabaseUrl!, supabaseAnonKey!, {
+      auth: {
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        persistSession: true,
+      },
+    })
   : null;
 
 export function requireSupabase(): SupabaseClient {

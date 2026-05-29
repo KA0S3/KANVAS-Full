@@ -11,18 +11,25 @@ export function isPaidLicense(license: Entitlement | null): boolean {
   return !license.expires_at || license.expires_at > nowIso();
 }
 
+export function hasChannelAccess(state: EntitlementState | null, channel: "beta" | "stable"): boolean {
+  if (!state?.paid) {
+    return false;
+  }
+
+  return state.licenses.some((license) => isPaidLicense(license) && license.allowed_channels.includes(channel));
+}
+
 export async function fetchEntitlement(userId: string): Promise<EntitlementState> {
   const supabase = requireSupabase();
 
-  const { data: license, error: licenseError } = await supabase
+  const { data: licenses, error: licenseError } = await supabase
     .from("entitlements")
     .select("*")
     .eq("user_id", userId)
     .eq("status", "active")
     .or(`expires_at.is.null,expires_at.gt.${nowIso()}`)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<Entitlement>();
+    .returns<Entitlement[]>();
 
   if (licenseError) {
     throw licenseError;
@@ -40,9 +47,17 @@ export async function fetchEntitlement(userId: string): Promise<EntitlementState
     throw devicesError;
   }
 
+  const activeLicenses = (licenses || []).filter(isPaidLicense);
+  const stableLicense = activeLicenses.find((license) => license.allowed_channels.includes("stable")) || null;
+  const betaLicense = activeLicenses.find((license) => license.allowed_channels.includes("beta")) || null;
+
   return {
-    license,
+    license: stableLicense || betaLicense || activeLicenses[0] || null,
+    licenses: activeLicenses,
     devices: devices || [],
-    paid: isPaidLicense(license),
+    paid: activeLicenses.length > 0,
+    betaAccess: Boolean(betaLicense),
+    stableAccess: Boolean(stableLicense),
+    stableUpgradeEligible: activeLicenses.some((license) => license.stable_upgrade_eligible),
   };
 }

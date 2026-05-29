@@ -2,7 +2,7 @@ import { MAX_DEMO_ASSETS, MAX_DEMO_BOOKS, MAX_DEMO_UPLOAD_BYTES } from "./config
 import type { DemoAsset, DemoBook, DemoFile } from "../types/domain";
 
 const DB_NAME = "kanvas-web-demo";
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 type StoreName = "books" | "assets" | "files";
 
@@ -19,7 +19,7 @@ function openDemoDb(): Promise<IDBDatabase> {
 
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       if (!db.objectStoreNames.contains("books")) {
         db.createObjectStore("books", { keyPath: "id" });
@@ -31,6 +31,25 @@ function openDemoDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("files")) {
         const files = db.createObjectStore("files", { keyPath: "id" });
         files.createIndex("assetId", "assetId", { unique: false });
+      }
+
+      if (event.oldVersion < 2 && db.objectStoreNames.contains("assets")) {
+        const assets = request.transaction?.objectStore("assets");
+        if (assets) {
+          const cursorRequest = assets.openCursor();
+          cursorRequest.onsuccess = (cursorEvent) => {
+            const cursor = (cursorEvent.target as IDBRequest<IDBCursorWithValue>).result;
+            if (!cursor) return;
+            const asset = cursor.value as Partial<DemoAsset>;
+            cursor.update({
+              ...asset,
+              x: typeof asset.x === "number" ? asset.x : 140 + Math.floor(Math.random() * 360),
+              y: typeof asset.y === "number" ? asset.y : 140 + Math.floor(Math.random() * 260),
+              updatedAt: asset.updatedAt || asset.createdAt || new Date().toISOString(),
+            });
+            cursor.continue();
+          };
+        }
       }
     };
 
@@ -92,7 +111,7 @@ export async function ensureDemoBook(): Promise<DemoBook> {
   const now = new Date().toISOString();
   const book: DemoBook = {
     id: createId("book"),
-    title: "Demo Book",
+    title: "My First World",
     createdAt: now,
     updatedAt: now,
   };
@@ -109,11 +128,11 @@ export async function updateDemoBookTitle(bookId: string, title: string): Promis
   }
 
   await withStore("books", "readwrite", (store) =>
-    requestToPromise(store.put({ ...book, title: title.trim() || "Demo Book", updatedAt: new Date().toISOString() }))
+    requestToPromise(store.put({ ...book, title: title.trim() || "My First World", updatedAt: new Date().toISOString() }))
   );
 }
 
-export async function addDemoAsset(bookId: string, input: { title: string; file?: File }): Promise<void> {
+export async function addDemoAsset(bookId: string, input: { title: string; file?: File; parentId?: string | null }): Promise<DemoAsset> {
   const assets = await readAll<DemoAsset>("assets");
   if (assets.length >= MAX_DEMO_ASSETS) {
     throw new Error("The online demo is limited to 100 assets.");
@@ -129,11 +148,15 @@ export async function addDemoAsset(bookId: string, input: { title: string; file?
   const asset: DemoAsset = {
     id: assetId,
     bookId,
+    parentId: input.parentId || undefined,
     title: input.title.trim() || input.file?.name || "Untitled asset",
+    x: 150 + (assets.filter((item) => (item.parentId || null) === (input.parentId || null)).length % 4) * 210,
+    y: 150 + (assets.filter((item) => (item.parentId || null) === (input.parentId || null)).length % 3) * 130,
     fileId,
     mimeType: input.file?.type,
     sizeBytes: input.file?.size,
     createdAt: now,
+    updatedAt: now,
   };
 
   const db = await openDemoDb();
@@ -163,15 +186,36 @@ export async function addDemoAsset(bookId: string, input: { title: string; file?
       reject(transaction.error || new Error("Unable to save the demo asset."));
     };
   });
+
+  return asset;
 }
 
 export async function deleteDemoAsset(asset: DemoAsset): Promise<void> {
+  const allAssets = await readAll<DemoAsset>("assets");
+  const idsToDelete = new Set<string>([asset.id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of allAssets) {
+      if (candidate.parentId && idsToDelete.has(candidate.parentId) && !idsToDelete.has(candidate.id)) {
+        idsToDelete.add(candidate.id);
+        changed = true;
+      }
+    }
+  }
+
   const db = await openDemoDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(["assets", "files"], "readwrite");
-    transaction.objectStore("assets").delete(asset.id);
-    if (asset.fileId) {
-      transaction.objectStore("files").delete(asset.fileId);
+    const assetStore = transaction.objectStore("assets");
+    const fileStore = transaction.objectStore("files");
+
+    for (const id of idsToDelete) {
+      const nextAsset = allAssets.find((item) => item.id === id);
+      assetStore.delete(id);
+      if (nextAsset?.fileId) {
+        fileStore.delete(nextAsset.fileId);
+      }
     }
 
     transaction.oncomplete = () => {
@@ -181,6 +225,115 @@ export async function deleteDemoAsset(asset: DemoAsset): Promise<void> {
     transaction.onerror = () => {
       db.close();
       reject(transaction.error || new Error("Unable to delete the demo asset."));
+    };
+  });
+}
+
+export async function updateDemoAsset(
+  assetId: string,
+  updates: Partial<Pick<DemoAsset, "title" | "x" | "y">>
+): Promise<void> {
+  const assets = await readAll<DemoAsset>("assets");
+  const asset = assets.find((item) => item.id === assetId);
+  if (!asset) {
+    throw new Error("Demo asset was not found.");
+  }
+
+  await withStore("assets", "readwrite", (store) =>
+    requestToPromise(
+      store.put({
+        ...asset,
+        ...updates,
+        title: updates.title === undefined ? asset.title : updates.title.trim() || "Untitled asset",
+        updatedAt: new Date().toISOString(),
+      })
+    )
+  );
+}
+
+export async function getDemoFile(asset: DemoAsset): Promise<DemoFile | null> {
+  if (!asset.fileId) return null;
+  return withStore("files", "readonly", (store) => requestToPromise<DemoFile | undefined>(store.get(asset.fileId!))).then(
+    (file) => file || null
+  );
+}
+
+export async function getDemoBackgroundFile(owner: DemoBook | DemoAsset): Promise<DemoFile | null> {
+  if (!owner.backgroundFileId) return null;
+  return withStore("files", "readonly", (store) =>
+    requestToPromise<DemoFile | undefined>(store.get(owner.backgroundFileId!))
+  ).then((file) => file || null);
+}
+
+export async function updateDemoViewportBackground(
+  owner: { type: "book"; id: string } | { type: "asset"; id: string },
+  file: File | null
+): Promise<void> {
+  if (file && file.size > MAX_DEMO_UPLOAD_BYTES) {
+    throw new Error("The online demo only accepts background files up to 2MB.");
+  }
+
+  const db = await openDemoDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(["books", "assets", "files"], "readwrite");
+    const ownerStore = transaction.objectStore(owner.type === "book" ? "books" : "assets");
+    const fileStore = transaction.objectStore("files");
+    const getRequest = ownerStore.get(owner.id);
+
+    getRequest.onsuccess = () => {
+      const record = getRequest.result as DemoBook | DemoAsset | undefined;
+      if (!record) {
+        transaction.abort();
+        reject(new Error(owner.type === "book" ? "Demo book was not found." : "Demo asset was not found."));
+        return;
+      }
+
+      if (record.backgroundFileId) {
+        fileStore.delete(record.backgroundFileId);
+      }
+
+      const now = new Date().toISOString();
+      if (!file) {
+        ownerStore.put({
+          ...record,
+          backgroundFileId: undefined,
+          backgroundMimeType: undefined,
+          backgroundSizeBytes: undefined,
+          updatedAt: now,
+        });
+        return;
+      }
+
+      const fileId = createId("background");
+      const fileRecord: DemoFile = {
+        id: fileId,
+        assetId: `${owner.type}:${owner.id}:background`,
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        blob: file,
+        createdAt: now,
+      };
+      fileStore.add(fileRecord);
+      ownerStore.put({
+        ...record,
+        backgroundFileId: fileId,
+        backgroundMimeType: fileRecord.mimeType,
+        backgroundSizeBytes: fileRecord.sizeBytes,
+        updatedAt: now,
+      });
+    };
+
+    getRequest.onerror = () => {
+      reject(getRequest.error || new Error("Unable to load background owner."));
+    };
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error || new Error("Unable to save the background image."));
     };
   });
 }

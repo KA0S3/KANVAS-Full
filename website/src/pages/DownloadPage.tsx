@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Clock3, Download, ShieldCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, Clock3, Download, LinkIcon, ShieldCheck, Ticket } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
 import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
 import { fetchEntitlement } from "../lib/entitlements";
-import { fetchDownloadAccess } from "../lib/licenseApi";
+import { fetchDownloadAccess, redeemAccessCode } from "../lib/licenseApi";
 import type { EntitlementState } from "../types/domain";
 
 type DownloadLinks = {
   expires_at?: string;
+  stable_available?: boolean;
   channels?: {
     stable?: string;
     beta?: string;
@@ -29,16 +30,27 @@ export function DownloadPage() {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
+
+  const refreshEntitlement = async () => {
+    if (!user) return;
+    setChecking(true);
+    setError(null);
+    try {
+      setEntitlement(await fetchEntitlement(user.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to check download access.");
+    } finally {
+      setChecking(false);
+    }
+  };
 
   useEffect(() => {
     if (!user || !session || !configured) return;
-
-    setChecking(true);
-    setError(null);
-    fetchEntitlement(user.id)
-      .then(setEntitlement)
-      .catch((err) => setError(err instanceof Error ? err.message : "Unable to check download access."))
-      .finally(() => setChecking(false));
+    void refreshEntitlement();
   }, [configured, session, user]);
 
   useEffect(() => {
@@ -80,6 +92,54 @@ export function DownloadPage() {
     }
   };
 
+  const redeemPromoCode = async () => {
+    if (!session || !promoCode.trim()) return;
+
+    setRedeeming(true);
+    setPromoError(null);
+    setPromoMessage(null);
+    try {
+      await redeemAccessCode(session.access_token, promoCode.trim());
+      setPromoCode("");
+      setPromoMessage("Promo code applied. Download access has been refreshed.");
+      await refreshEntitlement();
+    } catch (err) {
+      setPromoError(err instanceof Error ? err.message : "Unable to apply promo code.");
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  const promoRedeemPanel = (
+    <div className="notice promo-redeem-panel">
+      <div className="download-panel-heading">
+        <Ticket size={18} />
+        <div>
+          <h2>Have a promo code?</h2>
+          <p className="muted">Apply it to this account to unlock the matching desktop entitlement.</p>
+        </div>
+      </div>
+      <div className="actions-row">
+        <input
+          aria-label="Promo or access code"
+          placeholder="Promo or access code"
+          value={promoCode}
+          onChange={(event) => setPromoCode(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              void redeemPromoCode();
+            }
+          }}
+        />
+        <button className="button" type="button" onClick={redeemPromoCode} disabled={redeeming || !promoCode.trim()}>
+          {redeeming ? "Applying..." : "Apply code"}
+        </button>
+      </div>
+      {promoMessage ? <div className="notice success">{promoMessage}</div> : null}
+      {promoError ? <div className="notice error">{promoError}</div> : null}
+    </div>
+  );
+
   if (loading || checking) {
     return <main className="page narrow download-page"><section className="panel">Checking download access...</section></main>;
   }
@@ -109,6 +169,7 @@ export function DownloadPage() {
           <h1>Purchase required</h1>
           <p className="muted">Purchase beta access to unlock the desktop installer. The desktop app still verifies your account during activation.</p>
           {error ? <div className="notice error">{error}</div> : null}
+          {promoRedeemPanel}
           <button className="button primary" type="button" onClick={openPurchase}>Purchase desktop app</button>
         </section>
       </main>
@@ -120,6 +181,10 @@ export function DownloadPage() {
   const canDownloadStable = entitlement.stableAccess;
   const canDownloadBeta = entitlement.betaAccess;
   const activeChannels = [canDownloadBeta ? "Beta" : "", canDownloadStable ? "Stable" : ""].filter(Boolean).join(" + ");
+  const downloadUrl = stableUrl || betaUrl;
+  const downloadLabel = stableUrl ? "Stable installer" : "Beta installer";
+  const stableBuildAvailable = Boolean(links?.stable_available || stableUrl);
+  const visibleDownloadUrl = downloadUrl;
 
   return (
     <main className="page download-page">
@@ -140,7 +205,7 @@ export function DownloadPage() {
             <ShieldCheck size={20} />
             <div>
               <h2>Secure account links</h2>
-              <p className="muted">Generate secure download links for your account. Links expire quickly to protect paid access.</p>
+              <p className="muted">Request a fresh installer link for this account. It appears here and expires quickly to protect paid access.</p>
             </div>
           </div>
 
@@ -157,40 +222,39 @@ export function DownloadPage() {
             ) : null}
           </div>
 
-          {entitlement.stableUpgradeEligible && !entitlement.stableAccess ? (
+          {entitlement.stableUpgradeEligible && !entitlement.stableAccess && stableBuildAvailable ? (
             <div className="notice download-upgrade-note">
               Your beta purchase is eligible for the R100 stable upgrade.
               <button className="link-button" type="button" onClick={openPurchase}>Open upgrade checkout</button>
             </div>
           ) : null}
           {error ? <div className="notice error">{error}</div> : null}
+          {promoRedeemPanel}
           <button className="button primary full" type="button" onClick={requestLinks} disabled={requesting}>
-            {requesting ? "Generating..." : links ? "Refresh download links" : "Generate download links"}
+            {requesting ? "Generating..." : links ? "Request a fresh link" : "Request download link"}
           </button>
           {expiresAt ? <div className="notice success">Download links expire in {secondsLeft}s.</div> : null}
           {links && !stableUrl && !betaUrl ? <div className="notice">Download URLs are not configured yet.</div> : null}
         </article>
 
-        <div className="download-card-list">
-          {canDownloadStable ? (
-            <a className={`download-channel-card ${stableUrl ? "" : "disabled"}`} href={stableUrl || undefined} aria-disabled={!stableUrl}>
-              <span className="download-channel-icon"><Download size={20} /></span>
-              <span>
-                <strong>Stable installer</strong>
-                <small>{stableUrl ? "Ready to download" : "Generate links to unlock"}</small>
-              </span>
+        <aside className="download-link-panel" aria-live="polite">
+          <div className="download-link-icon">
+            {visibleDownloadUrl ? <Download size={22} /> : <LinkIcon size={22} />}
+          </div>
+          <div>
+            <h2>{visibleDownloadUrl ? "Your download link is ready" : "Your link will appear here"}</h2>
+            <p className="muted">
+              {visibleDownloadUrl
+                ? `${downloadLabel} requested for ${activeChannels || "your account"}.`
+                : "Request a link when you are ready to install. Old links are not kept on this page."}
+            </p>
+          </div>
+          {visibleDownloadUrl ? (
+            <a className="button primary full" href={visibleDownloadUrl}>
+              Download {downloadLabel}
             </a>
           ) : null}
-          {canDownloadBeta ? (
-            <a className={`download-channel-card ${betaUrl ? "" : "disabled"}`} href={betaUrl || undefined} aria-disabled={!betaUrl}>
-              <span className="download-channel-icon beta"><Sparkles size={20} /></span>
-              <span>
-                <strong>Beta installer</strong>
-                <small>{betaUrl ? "Ready to download" : "Generate links to unlock"}</small>
-              </span>
-            </a>
-          ) : null}
-        </div>
+        </aside>
       </section>
     </main>
   );

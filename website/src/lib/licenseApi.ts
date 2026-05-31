@@ -24,6 +24,25 @@ export async function fetchDownloadAccess(accessToken: string) {
   throw new Error(`Download access failed with ${response.status}`);
 }
 
+export async function redeemAccessCode(accessToken: string, code: string) {
+  const response = await fetch(`${LICENSE_API_URL}/redeem-key`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key: code }),
+  });
+
+  if (response.ok) {
+    return response.json();
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const message = typeof payload.error === "string" ? payload.error : `Promo code failed with ${response.status}`;
+  throw new Error(message.replace(/_/g, " "));
+}
+
 export async function completeDesktopActivation(accessToken: string, params: ActivationParams) {
   const response = await fetch(`${LICENSE_API_URL}/desktop/activation/start`, {
     method: "POST",

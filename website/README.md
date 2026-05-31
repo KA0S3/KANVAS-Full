@@ -55,20 +55,22 @@ Only public `VITE_*` values belong in this frontend. Never add Paystack secret k
    - In Google Cloud Console, add the Supabase callback URL shown by Supabase to the OAuth client's authorized redirect URIs.
 5. Deploy the Supabase Edge Functions used by the website:
    - `paystack-initialize`
+   - `redeem-key`
    - `desktop/download-access`
+   - `desktop/download`
    - `desktop/activation/start`
 6. Set Supabase Edge Function secrets:
    - `PAYSTACK_SECRET_KEY`
-   - `STABLE_DOWNLOAD_URL=https://github.com/KA0S3/KANVAS/releases/latest/download/KANVAS-Setup.exe`
-   - `GITHUB_RELEASE_REPO=KA0S3/KANVAS`
-   - `BETA_DOWNLOAD_ASSET_NAME=KANVAS-Setup.exe`
-   - optional `BETA_DOWNLOAD_URL` override if beta should not use GitHub prerelease lookup
+   - `DESKTOP_INSTALLER_BUCKET=desktop-installers`
+   - `DOWNLOAD_TOKEN_TTL_SECONDS=600`
+   - `STABLE_DESKTOP_AVAILABLE=false` until the stable feed exists
 7. In Paystack, set the payment callback/return URL to:
    - `https://www.kanvas-it.com/payment-success`
    - webhook URL: `https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1/paystack-webhook`
    - the webhook function verifies Paystack's `x-paystack-signature` header using `PAYSTACK_SECRET_KEY`
    - cancellation/failure should return users to `https://www.kanvas-it.com/payment/cancelled` if your Paystack flow supports it.
 8. The one-time Paystack product keys are `BETA_ACCESS`, `BETA_TO_STABLE_UPGRADE`, and `STABLE_FULL`. Do not configure Paystack subscriptions or plans for KANVAS.
+   Paystack checkout is charged in ZAR. The purchase modal may show an approximate local-currency reference converted in the browser from ZAR after an IP country lookup. If that lookup fails or resolves to South Africa, all modal pricing stays in ZAR.
 9. The website never stores download URLs in public frontend env vars. Installer links come from the Supabase download-access function after entitlement checks.
 
 For Vercel, set the same `VITE_*` values as project environment variables. Deploy only this `website/` folder as the website frontend. Keep `website/vercel.json` in that deployment root so direct client routes such as `/login`, `/download`, `/account`, `/oauth/consent`, and `/desktop/activate` rewrite to `/index.html`.

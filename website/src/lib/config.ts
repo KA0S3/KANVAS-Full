@@ -3,6 +3,8 @@ import { FALLBACK_PAYMENT_CURRENCY } from "./paystackProducts";
 export const SITE_ORIGIN = import.meta.env.VITE_SITE_ORIGIN || "https://www.kanvas-it.com";
 export const SITE_URL = import.meta.env.VITE_SITE_URL || SITE_ORIGIN;
 export const LICENSE_API_URL = import.meta.env.VITE_LICENSE_API_URL || "https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1";
+export const PAYSTACK_TEST_MODE = String(import.meta.env.VITE_PAYSTACK_TEST_MODE ?? "true").toLowerCase() === "true";
+export const DOWNLOAD_OWNER_CODE = import.meta.env.VITE_DOWNLOAD_OWNER_CODE || "kaos3";
 
 export const MAX_DEMO_BOOKS = 1;
 export const MAX_DEMO_ASSETS = 100;

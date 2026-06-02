@@ -102,6 +102,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
   const [currentActiveId, setCurrentActiveId] = useState<string | null>(null);
   const [professionalMode, setProfessionalMode] = useState(false);
   const [isEditingBackground, setIsEditingBackground] = useState(false);
+  const [generatorsOpen, setGeneratorsOpen] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   
   // DnD sensors
@@ -427,6 +428,33 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             size="sm"
             variant="ghost"
             className="h-6 w-6 p-0"
+            onClick={() => setSettingsPanelOpen(true)}
+            title="Settings"
+            id="settings-button-asset"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </Button>
+          {!professionalMode && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className={cn(
+                "h-6 w-6 p-0",
+                generatorsOpen && "bg-sidebar-accent/40 text-sidebar-accent-foreground"
+              )}
+              onClick={() => setGeneratorsOpen(open => !open)}
+              title={generatorsOpen ? "Hide Generators" : "Show Generators"}
+              id="generators-toggle-button"
+              aria-expanded={generatorsOpen}
+              aria-controls="generators-button"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0"
             onClick={() => {
               setIsEditingBackground(true);
               window.dispatchEvent(new CustomEvent('openViewportBackgroundSettings'));
@@ -438,16 +466,6 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
             id="background-editor-button"
           >
             <Image className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0"
-            onClick={() => setSettingsPanelOpen(true)}
-            title="Settings"
-            id="settings-button-asset"
-          >
-            <Settings className="w-3.5 h-3.5" />
           </Button>
           <div id="tag-manager-button">
             <GlobalTagManager />
@@ -467,7 +485,7 @@ export function AssetExplorer({ sidebarOpen, onToggleSidebar }: AssetExplorerPro
         </div>
         
         {/* Four main buttons - hidden in professional mode */}
-        {!professionalMode && (
+        {!professionalMode && generatorsOpen && (
         <div id="generators-button" className="flex gap-1">
           <button
             type="button"

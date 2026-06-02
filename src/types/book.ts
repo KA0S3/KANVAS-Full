@@ -76,6 +76,7 @@ export interface WorldData {
   globalCustomFields: any[];
   viewportOffset: { x: number; y: number };
   viewportScale: number;
+  viewportBackgroundOpacity?: number;
   rootBackgroundConfig?: any;
   backgrounds?: Record<string, any>; // Background configs stored with book
 }

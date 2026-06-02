@@ -51,8 +51,8 @@ export function validateReleaseConfig({
     if (publish.provider !== "generic") {
       errors.push(`electron-builder publish provider must be "generic", config has "${publish.provider}".`);
     }
-    if (publish.url && !String(publish.url).includes(`/desktop-updates/${expectedChannel}`)) {
-      errors.push(`Generic update URL must point at the ${expectedChannel} desktop-updates path.`);
+    if (publish.url && !String(publish.url).includes(`/${expectedChannel}`)) {
+      errors.push(`Generic update URL must include the ${expectedChannel} channel path.`);
     }
   }
 

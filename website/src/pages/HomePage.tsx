@@ -1,10 +1,13 @@
 import { Link } from "react-router-dom";
 import { MonitorDown, Play } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
+import { MobileDesktopGate } from "../components/MobileDesktopGate";
+import { useIsMobile } from "../components/useIsMobile";
 
 const SPLASH_DURATION_MS = 3000;
 
 export function HomePage() {
+  const isMobile = useIsMobile();
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -33,6 +36,10 @@ export function HomePage() {
     "--reveal-edge": `${revealFeather + 8}vmax`,
   } as CSSProperties;
 
+  if (isMobile) {
+    return <MobileDesktopGate />;
+  }
+
   return (
     <main className="splash-page">
       <div className="splash-bg splash-bg-mono" />
@@ -54,10 +61,6 @@ export function HomePage() {
           </div>
         </div>
       </section>
-      <p className="splash-terms">
-        By interacting with this app you confirm you have read and understood the{" "}
-        <a href="/terms-of-service">Terms & Conditions</a> and <a href="/privacy-policy">Privacy Policy</a>
-      </p>
     </main>
   );
 }

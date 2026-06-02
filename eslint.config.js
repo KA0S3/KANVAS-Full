@@ -8,7 +8,6 @@ export default [
     "node_modules", 
     "**/*.test.ts", 
     "**/*.test.tsx",
-    "supabase/**",
     "tailwind.config.ts",
     "vite.config.ts",
     "vitest.config.ts",

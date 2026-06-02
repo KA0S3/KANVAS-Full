@@ -49,13 +49,21 @@ class DesktopAutosaveService {
   }
 
   async flush(projectId = this.queuedProjectId): Promise<void> {
+    try {
+      await this.flushStrict(projectId);
+    } catch (error) {
+      console.warn('[DesktopAutosave] Failed to save project to disk:', error);
+    }
+  }
+
+  async flushStrict(projectId = this.queuedProjectId): Promise<void> {
     if (!this.isDesktop() || !projectId) {
       return;
     }
 
     if (this.isSaving) {
       this.schedule(projectId);
-      return;
+      throw new Error('Desktop autosave is already saving. Try installing the update again in a moment.');
     }
 
     if (this.timer) {
@@ -81,8 +89,6 @@ class DesktopAutosaveService {
         globalTags: bundle.globalTags,
         appVersion: import.meta.env.VITE_APP_VERSION || undefined,
       });
-    } catch (error) {
-      console.warn('[DesktopAutosave] Failed to save project to disk:', error);
     } finally {
       this.isSaving = false;
     }

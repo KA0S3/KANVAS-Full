@@ -539,50 +539,23 @@ export async function uploadFile(
   assetId: string,
   file: File
 ): Promise<{ fileId: string; r2Url: string }> {
-  // Use UnifiedUploadService to handle the upload
   const result = await unifiedUploadService.uploadFile(file, {
+    projectId,
+    assetId,
     metadata: {
       projectId,
-      assetId
-    }
+      assetId,
+    },
   });
 
   if (!result.success) {
     throw new Error(result.error || 'Upload failed');
   }
 
-  // For successful uploads, use the result properties
-  // Get user ID for ID generation
-  let userId = undefined;
-  try {
-    const authStore = require('@/stores/authStore').useAuthStore.getState();
-    userId = authStore.user?.id;
-  } catch (e) {
-    // Auth store not available, will use 'guest' prefix
-  }
-  
-  const fileId = generateFileId(userId); // Generate file record ID with new format
-  const r2Url = result.url || '';
-
-  // Create file record in database (using files_v3 table)
-  const { error: createError } = await supabase
-    .from('files_v3')
-    .insert({
-      id: fileId,
-      project_id: projectId,
-      asset_id: assetId,
-      storage_key: result.key || '',
-      mime_type: file.type,
-      size_bytes: result.size || 0,
-      created_at: new Date().toISOString()
-    });
-
-  if (createError) {
-    console.error('File record creation failed:', createError);
-    throw createError;
-  }
-
-  return { fileId, r2Url };
+  return {
+    fileId: result.metadata?.fileId || generateFileId(undefined),
+    r2Url: result.publicUrl || result.url || '',
+  };
 }
 
 /**
@@ -594,11 +567,5 @@ export async function uploadFile(
  * @returns Public URL for displaying the file
  */
 export async function getFileUrl(storageKey: string): Promise<string> {
-  const r2PublicUrl = import.meta.env.VITE_R2_PUBLIC_URL;
-
-  if (!r2PublicUrl) {
-    throw new Error('Missing VITE_R2_PUBLIC_URL environment variable.');
-  }
-
-  return `${r2PublicUrl}/${storageKey}`;
+  return unifiedUploadService.getPublicUrl(storageKey);
 }

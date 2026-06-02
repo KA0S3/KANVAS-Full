@@ -329,7 +329,7 @@
     align-items: stretch;
     pointer-events: none;
     z-index: 20;
-    padding: 1rem;
+    padding: 0;
   }
 
   .fantasy-overlay.no-ads {
@@ -339,12 +339,6 @@
   @media (max-width: 767px) {
     .fantasy-overlay {
       right: 0;
-    }
-  }
-
-  @media (min-width: 768px) {
-    .fantasy-overlay {
-      padding: 1.5rem;
     }
   }
 
@@ -374,7 +368,12 @@
     position: relative;
     padding: 1.5rem;
     height: 100%;
+    border-radius: 0;
     overflow-y: auto;
+  }
+
+  .asset-viewport-shell .fantasy-sidebar {
+    border-radius: 13px;
   }
 
   /* Remove old metal piece highlights since using images */

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { SITE_ORIGIN } from "../lib/config";
 import { hasSupabaseConfig, supabase } from "../lib/supabaseClient";
 
 type AuthContextValue = {
@@ -14,6 +15,11 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function authRedirectUrl(nextPath: string): string {
+  const origin = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? window.location.origin : SITE_ORIGIN;
+  return `${origin}/oauth/consent?next=${encodeURIComponent(nextPath)}`;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -67,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { error } = await supabase.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: `${window.location.origin}/oauth/consent?next=${encodeURIComponent(safeNextPath)}`,
+            redirectTo: authRedirectUrl(safeNextPath),
           },
         });
         if (error) {
@@ -83,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/oauth/consent?next=${encodeURIComponent(safeNextPath)}`,
+            emailRedirectTo: authRedirectUrl(safeNextPath),
           },
         });
         if (error) {

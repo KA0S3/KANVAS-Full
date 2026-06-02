@@ -316,65 +316,8 @@ export class BlobStorage {
     deleted: string[];
   }> {
     try {
-      // Get local files that need sync
-      const localFiles = await db.files
-        .where('projectId')
-        .equals(projectId)
-        .and(file => !file.cloudUploaded || Boolean(file.blob))
-        .toArray();
-
-      const uploaded: string[] = [];
-      const failed: string[] = [];
-
-      if (!USE_SUPABASE) {
-        return { uploaded, failed, deleted: [] };
-      }
-
-      // Upload pending files
-      for (const file of localFiles) {
-        if (!file.blob) {
-          continue;
-        }
-
-        try {
-          const uploadFile = new File([file.blob], file.storageKey, {
-            type: file.mimeType,
-          });
-          
-          const cloudUrl = await supabaseStorage.uploadFile(uploadFile, file.storageKey);
-          
-          // Update local record
-          await db.files.update(file.id, {
-            cloudUrl,
-            cloudUploaded: true,
-            blob: undefined, // Remove local blob after successful upload
-          });
-          
-          uploaded.push(file.id);
-        } catch (error) {
-          console.error(`Failed to upload file ${file.id}:`, error);
-          failed.push(file.id);
-        }
-      }
-
-      // Clean up orphaned local files
-      const cloudFiles = await supabaseStorage.getFilesMetadataBatch(
-        localFiles.map(f => f.storageKey)
-      );
-      
-      const deleted: string[] = [];
-      for (let i = 0; i < localFiles.length; i++) {
-        const localFile = localFiles[i];
-        const cloudFile = cloudFiles[i];
-        
-        if (!cloudFile && localFile.cloudUploaded) {
-          // File exists locally but not in cloud - mark for deletion
-          await db.deleteFile(localFile.id);
-          deleted.push(localFile.id);
-        }
-      }
-
-      return { uploaded, failed, deleted };
+      console.log(`[BlobStorage] Local-only mode active, skipping remote file sync for ${projectId}`);
+      return { uploaded: [], failed: [], deleted: [] };
     } catch (error) {
       console.error('File sync failed:', error);
       throw error;

@@ -31,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { MAX_DEMO_ASSETS, MAX_DEMO_BOOKS, MAX_DEMO_UPLOAD_BYTES } from "../lib/config";
+import { MobileDesktopGate } from "../components/MobileDesktopGate";
 import {
   addDemoAsset,
   deleteDemoAsset,
@@ -44,6 +45,7 @@ import {
 } from "../lib/demoDb";
 import type { DemoAsset, DemoBook } from "../types/domain";
 import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
+import { useIsMobile } from "../components/useIsMobile";
 
 const mbLabel = `${MAX_DEMO_UPLOAD_BYTES / 1024 / 1024}MB`;
 
@@ -79,6 +81,7 @@ function includeMatchesWithAncestors(assets: DemoAsset[], query: string): DemoAs
 }
 
 export function DemoPage() {
+  const isMobile = useIsMobile();
   const { openPurchase } = usePurchaseOutlet();
   const [book, setBook] = useState<DemoBook | null>(null);
   const [assets, setAssets] = useState<DemoAsset[]>([]);
@@ -337,12 +340,24 @@ export function DemoPage() {
     });
   };
 
+  if (isMobile) {
+    return (
+      <MobileDesktopGate
+        title="KANVAS demo is desktop-only"
+        description="The web demo is not available on mobile. If you need to complete a purchase, sign in, or access your installer links, continue straight to downloads. KANVAS itself still installs and runs on desktop only."
+      />
+    );
+  }
+
   return (
     <main className="kanvas-app-demo h-screen bg-background text-foreground relative overflow-hidden flex flex-col">
       <div className="absolute inset-0 w-full h-full transition-opacity duration-2000 opacity-100 app-background-layer" />
 
       <div className="demo-top-banner">
-        <span>This app is a demo and does NOT represent the full app.</span>
+        <span className="demo-top-banner-message">
+          <img className="demo-top-banner-logo" src="/KANVAS-LOGO-F3.png" alt="" aria-hidden="true" />
+          <span>This app is a demo and does NOT represent the full app.</span>
+        </span>
         <Link className="demo-top-banner-button" to="/download">Download full app</Link>
       </div>
 
@@ -474,11 +489,8 @@ function DemoBookShelf({
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-xl font-bold drop-shadow-lg text-white">World Library</h1>
-                <span className="autosave-pill">Local</span>
+                <span className="autosave-pill">Demo</span>
               </div>
-                <p className="text-sm drop-shadow text-white/80">
-                {MAX_DEMO_BOOKS} book available / {assets.length} of {MAX_DEMO_ASSETS} assets / {mbLabel} uploads
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <button className="app-button app-button-outline" type="button" onClick={onLockedFeature}>

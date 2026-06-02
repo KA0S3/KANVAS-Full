@@ -1,0 +1,19 @@
+{
+  "name": "kanvas-admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node api/dev.mjs",
+    "build": "vite build",
+    "start": "node api/index.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "@supabase/supabase-js": "^2.106.2",
+    "vite": "^7.3.2",
+    "typescript": "^5.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {}
+}

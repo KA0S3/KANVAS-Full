@@ -6,6 +6,7 @@ import { ActivationPage } from "./pages/ActivationPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { DemoPage } from "./pages/DemoPage";
 import { DownloadPage } from "./pages/DownloadPage";
+import { PrivacyPolicyPage, RefundPolicyPage, TermsOfServicePage } from "./pages/LegalPages";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { PaymentCancelledPage, PaymentSuccessPage } from "./pages/PaymentPages";
@@ -21,6 +22,9 @@ export default function App() {
           <Route path="/oauth/consent" element={<AuthCallbackPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/download" element={<DownloadPage />} />
+          <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+          <Route path="/refund-policy" element={<RefundPolicyPage />} />
           <Route path="/payment-success" element={<PaymentSuccessPage />} />
           <Route path="/payment/cancelled" element={<PaymentCancelledPage />} />
           <Route path="/desktop/activate" element={<ActivationPage />} />

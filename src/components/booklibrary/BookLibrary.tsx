@@ -18,7 +18,7 @@ import { AutosaveIndicator } from '@/components/autosave/AutosaveIndicator';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { ZipBackupManager } from '@/components/ZipBackupManager';
 import type { Book } from '@/types/book';
-import { openPublicAssetUrl, resolveAppRouteUrl } from '@/utils/appUrls';
+import { openPublicAssetUrl } from '@/utils/appUrls';
 
 interface BookLibraryProps {
   isOpen: boolean;
@@ -217,31 +217,6 @@ export function BookLibrary({ isOpen, onClose, onBookSelect }: BookLibraryProps)
             </div>
           </div>
 
-          {/* Terms and Conditions Notice */}
-          <div className="text-center pt-2 border-t border-glass-border/20">
-            <p className="text-xs text-muted-foreground opacity-60">
-              By interacting with this app you confirm you have read and understood the{' '}
-              <a 
-                href={resolveAppRouteUrl('/terms-of-service')}
-                className="underline hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                Terms & Conditions
-              </a>
-              {' '}and{' '}
-              <a 
-                href={resolveAppRouteUrl('/privacy-policy')}
-                className="underline hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                Privacy Policy
-              </a>
-            </p>
-          </div>
         </DialogContent>
       </Dialog>
 

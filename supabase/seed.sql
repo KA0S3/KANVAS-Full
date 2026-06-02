@@ -1,0 +1,7 @@
+-- Optional local development seed.
+-- Add a test auth user through Supabase Studio, then insert that user's UUID here
+-- as an admin if you need to exercise license-admin locally.
+--
+-- insert into public.admin_users (user_id, role)
+-- values ('00000000-0000-0000-0000-000000000000', 'owner')
+-- on conflict (user_id) do update set role = excluded.role;

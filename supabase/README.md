@@ -53,16 +53,20 @@ npm exec supabase -- secrets set KANVAS_LICENSE_PUBLIC_KEY_PEM='<public-key-pem>
 npm exec supabase -- secrets set SITE_URL=https://www.kanvas-it.com
 npm exec supabase -- secrets set APP_DEEP_LINK_SCHEME=kanvas://activate
 npm exec supabase -- secrets set ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000,https://www.kanvas-it.com,https://kanvas-it.com
-npm exec supabase -- secrets set DESKTOP_INSTALLER_BUCKET=desktop-installers
-npm exec supabase -- secrets set DOWNLOAD_TOKEN_TTL_SECONDS=600
+npm exec supabase -- secrets set R2_ACCOUNT_ID=<cloudflare-account-id>
+npm exec supabase -- secrets set R2_ACCESS_KEY_ID=<r2-access-key-id>
+npm exec supabase -- secrets set R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
+npm exec supabase -- secrets set R2_BUCKET_NAME=kanvas-desktop-releases
+npm exec supabase -- secrets set DOWNLOAD_LINK_TTL_SECONDS=900
+npm exec supabase -- secrets set UPDATE_LINK_TTL_SECONDS=900
 npm exec supabase -- secrets set STABLE_DESKTOP_AVAILABLE=false
 ```
 
-Only the public key goes to Electron. Never place `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, or `KANVAS_LICENSE_PRIVATE_JWK` in the website or Electron app.
+Only public values go to Electron or the website. Never place `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, `KANVAS_LICENSE_PRIVATE_JWK`, or R2 credentials in the website frontend or Electron renderer.
 
 Paystack must use one-time transaction initialize only. The callback URL is `https://www.kanvas-it.com/payment-success`; do not configure KANVAS as a Paystack subscription or plan. Checkout is charged in ZAR.
 
-The `desktop/download-access` function reads `latest-installer.json` from the private `desktop-installers` bucket and returns short-lived token URLs. Release uploads are handled by `npm run release:beta` and `npm run release:stable` from the repo root.
+The `desktop/download-access` function reads `manifests/<channel>/latest-installer.json` from private Cloudflare R2 and returns short-lived token URLs. Desktop update checks return temporary update feed URLs that redirect through the same Edge Function to signed R2 artifact URLs. Release uploads are handled by `npm run release:beta` and `npm run release:stable` from the repo root.
 
 ## Website Environment
 
@@ -72,7 +76,6 @@ VITE_SUPABASE_ANON_KEY=<anon-key>
 VITE_SITE_URL=https://www.kanvas-it.com
 VITE_SITE_ORIGIN=https://www.kanvas-it.com
 VITE_LICENSE_API_URL=https://<project-ref>.supabase.co/functions/v1
-VITE_KANVAS_ACTIVATION_URL=https://www.kanvas-it.com/desktop/activate
 ```
 
 ## Electron Environment

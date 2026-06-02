@@ -17,17 +17,14 @@ export function Layout() {
     <>
       {showWebsiteChrome ? (
         <div className="demo-warning">
-          <span>KANVAS website demo: account, licensing, and a small browser trial only. Full projects stay in the desktop app.</span>
-          <button className="warning-button" type="button" onClick={() => setPurchaseOpen(true)}>
-            Purchase desktop
-          </button>
+          <span>KANVAS is currently in beta. Beta supporters get a 30% discount on the full app.</span>
         </div>
       ) : null}
 
       {showWebsiteChrome ? (
         <header className="site-header">
           <Link to="/" className="brand" aria-label="KANVAS home">
-            <span className="brand-mark">K</span>
+            <img className="brand-mark" src="/KANVAS-LOGO-F3.png" alt="" aria-hidden="true" />
             <span>KANVAS</span>
           </Link>
           <nav aria-label="Primary navigation">
@@ -46,6 +43,14 @@ export function Layout() {
       ) : null}
 
       <Outlet context={{ openPurchase: () => setPurchaseOpen(true) }} />
+      <footer className="legal-banner" aria-label="Legal notices">
+        <p>
+          By using KANVAS or starting checkout, you agree to the{" "}
+          <Link to="/terms-of-service">Terms & Conditions</Link>,{" "}
+          <Link to="/privacy-policy">Privacy Policy</Link>, and{" "}
+          <Link to="/refund-policy">Refund Policy</Link>.
+        </p>
+      </footer>
       <PurchaseModal open={purchaseOpen} onClose={() => setPurchaseOpen(false)} />
     </>
   );

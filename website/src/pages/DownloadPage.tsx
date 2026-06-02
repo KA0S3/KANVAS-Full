@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { CheckCircle2, Clock3, Download, LinkIcon, ShieldCheck, Ticket } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
 import { usePurchaseOutlet } from "../components/usePurchaseOutlet";
+import { DOWNLOAD_OWNER_CODE, PAYSTACK_TEST_MODE } from "../lib/config";
 import { fetchEntitlement } from "../lib/entitlements";
 import { fetchDownloadAccess, redeemAccessCode } from "../lib/licenseApi";
 import type { EntitlementState } from "../types/domain";
@@ -30,6 +31,9 @@ export function DownloadPage() {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [ownerCode, setOwnerCode] = useState("");
+  const [ownerCodeUnlocked, setOwnerCodeUnlocked] = useState(false);
+  const [ownerCodeError, setOwnerCodeError] = useState<string | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -92,6 +96,17 @@ export function DownloadPage() {
     }
   };
 
+  const unlockOwnerDownload = () => {
+    if (ownerCode.trim() === DOWNLOAD_OWNER_CODE) {
+      setOwnerCodeUnlocked(true);
+      setOwnerCodeError(null);
+      return;
+    }
+
+    setOwnerCodeUnlocked(false);
+    setOwnerCodeError("Owner code is incorrect.");
+  };
+
   const redeemPromoCode = async () => {
     if (!session || !promoCode.trim()) return;
 
@@ -139,7 +154,6 @@ export function DownloadPage() {
       {promoError ? <div className="notice error">{promoError}</div> : null}
     </div>
   );
-
   if (loading || checking) {
     return <main className="page narrow download-page"><section className="panel">Checking download access...</section></main>;
   }
@@ -184,7 +198,8 @@ export function DownloadPage() {
   const downloadUrl = stableUrl || betaUrl;
   const downloadLabel = stableUrl ? "Stable installer" : "Beta installer";
   const stableBuildAvailable = Boolean(links?.stable_available || stableUrl);
-  const visibleDownloadUrl = downloadUrl;
+  const downloadRestricted = PAYSTACK_TEST_MODE && !ownerCodeUnlocked;
+  const visibleDownloadUrl = downloadRestricted ? "" : downloadUrl;
 
   return (
     <main className="page download-page">
@@ -229,6 +244,32 @@ export function DownloadPage() {
             </div>
           ) : null}
           {error ? <div className="notice error">{error}</div> : null}
+          {PAYSTACK_TEST_MODE ? (
+            <div className="notice">
+              <p>Downloads are restricted while payments are in test mode.</p>
+              {!ownerCodeUnlocked ? (
+                <div className="actions-row">
+                  <input
+                    aria-label="Owner code"
+                    placeholder="Owner code"
+                    value={ownerCode}
+                    onChange={(event) => setOwnerCode(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        unlockOwnerDownload();
+                      }
+                    }}
+                  />
+                  <button className="button" type="button" onClick={unlockOwnerDownload}>
+                    Reveal download
+                  </button>
+                </div>
+              ) : (
+                <div className="notice success">Owner download access enabled for this browser session.</div>
+              )}
+              {ownerCodeError ? <div className="notice error">{ownerCodeError}</div> : null}
+            </div>
+          ) : null}
           {promoRedeemPanel}
           <button className="button primary full" type="button" onClick={requestLinks} disabled={requesting}>
             {requesting ? "Generating..." : links ? "Request a fresh link" : "Request download link"}
@@ -246,6 +287,8 @@ export function DownloadPage() {
             <p className="muted">
               {visibleDownloadUrl
                 ? `${downloadLabel} requested for ${activeChannels || "your account"}.`
+                : downloadUrl && downloadRestricted
+                  ? "Enter the owner code to reveal the installer link during Paystack test mode."
                 : "Request a link when you are ready to install. Old links are not kept on this page."}
             </p>
           </div>

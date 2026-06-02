@@ -34,6 +34,7 @@ import type { Book } from '@/types/book';
 import { supabase } from '@/lib/supabase';
 import { ContactSheet } from '@/components/ContactSheet';
 import { useNavigate } from 'react-router-dom';
+import { UpdateSettingsSection } from './UpdateSettingsSection';
 
 // Error boundary component
 class AudioErrorBoundary extends React.Component<
@@ -95,6 +96,11 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const bookWorldData = currentBook ? getWorldData(currentBook.id) : null;
   const viewportOffset = bookWorldData?.viewportOffset || { x: -45, y: -20 };
   const viewportScale = bookWorldData?.viewportScale || 1;
+  const viewportBackgroundOpacity =
+    bookWorldData?.worldData?.viewportBackgroundOpacity ??
+    bookWorldData?.viewportBackgroundOpacity ??
+    0.9;
+  const clampedViewportBackgroundOpacity = Math.max(0, Math.min(1, viewportBackgroundOpacity));
   
   const [activeTab, setActiveTab] = useState('general');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -122,6 +128,14 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     
     updateWorldData(currentBook.id, {
       viewportScale: scale,
+    });
+  };
+
+  const handleViewportBackgroundOpacityChange = (value: number[]) => {
+    if (!currentBook) return;
+
+    updateWorldData(currentBook.id, {
+      viewportBackgroundOpacity: value[0] / 100,
     });
   };
 
@@ -269,10 +283,28 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               <TabsContent value="general" className="space-y-4">
                 <Card className="glass cosmic-glow border-glass-border/40">
               <CardHeader>
-                <CardTitle className="text-lg">Display Settings</CardTitle>
+                <CardTitle className="text-lg">Viewport Settings</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="pt-4 border-t border-glass-border/30">
+                  <div className="space-y-2 mb-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="viewport-background-opacity">Glassy Panel Opacity</Label>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {Math.round(clampedViewportBackgroundOpacity * 100)}%
+                      </span>
+                    </div>
+                    <Slider
+                      id="viewport-background-opacity"
+                      value={[Math.round(clampedViewportBackgroundOpacity * 100)]}
+                      onValueChange={handleViewportBackgroundOpacityChange}
+                      min={0}
+                      max={100}
+                      step={5}
+                      className="w-full"
+                      disabled={!currentBook}
+                    />
+                  </div>
                   <div className="text-sm font-medium text-foreground mb-3">Viewport Position & Scale</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
@@ -456,6 +488,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     Version V3.8.9.2
                   </div>
                 </div>
+                
+                <UpdateSettingsSection />
                 
                 <div className="border-t border-glass-border/30 pt-4">
                   <div className="text-sm space-y-3">

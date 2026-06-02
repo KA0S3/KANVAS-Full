@@ -1,16 +1,6 @@
 import { useKanvasStore } from '@/stores/kanvasStore';
-import { useCloudStore } from '@/stores/cloudStore';
-import { useAuthStore } from '@/stores/authStore';
 import { unifiedUploadService } from '@/services/UnifiedUploadService';
 import type { Asset } from '@/types/Asset';
-import { useState } from 'react';
-
-interface UpgradeModalState {
-  isOpen: boolean;
-  currentUsage: number;
-  quotaLimit: number;
-  requiredBytes: number;
-}
 
 // Helper function to convert technical errors to user-friendly messages
 const getUserFriendlyErrorMessage = (technicalError: string): string => {
@@ -37,20 +27,12 @@ const getUserFriendlyErrorMessage = (technicalError: string): string => {
 
 export function useAssetCreation() {
   const { createAsset, updateAsset } = useKanvasStore();
-  const { effectiveLimits } = useAuthStore();
-  const [upgradeModal, setUpgradeModal] = useState<UpgradeModalState>({
-    isOpen: false,
-    currentUsage: 0,
-    quotaLimit: 0,
-    requiredBytes: 0
-  });
 
   const createNewAsset = async (
     assetData: Omit<Asset, 'id' | 'metadata'> & { metadata?: Partial<Asset['metadata']> }, 
     options?: { 
       fromUserClick?: boolean;
       file?: File;
-      skipCloud?: boolean;
     }
   ): Promise<string> => {
     // SAFEGUARD: Only allow creation if explicitly triggered by user click
@@ -84,23 +66,35 @@ export function useAssetCreation() {
       const assetId = await createAsset(assetData);
       console.log('Asset created successfully:', assetId);
       
-      // Store file reference for later cloud sync during normal save cycle
       if (options.file) {
-        // Store file in asset for later upload during sync cycle
+        const result = await unifiedUploadService.uploadFile(options.file, {
+          assetId,
+          projectId: assetData.projectId,
+          metadata: {
+            assetId,
+            projectId: assetData.projectId,
+          },
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to store file locally');
+        }
+
         await updateAsset(assetId, { 
           content: {
             ...assetData.content,
             customFields: {
               ...assetData.content.customFields,
-              file: options.file.name
+              fileName: options.file.name,
+              fileKey: result.key,
+              fileSize: options.file.size,
+              fileMimeType: options.file.type,
+              fileStoredAt: result.metadata?.fileStoredAt,
             }
           }
         });
       }
-      
-      // NOTE: Cloud upload will happen during normal sync cycle (40-60s debounce)
-      // This respects low IO principles and prevents immediate API calls
-      
+
       return assetId;
     } catch (error) {
       console.error('Failed to create asset:', error);
@@ -109,97 +103,64 @@ export function useAssetCreation() {
   };
 
   const uploadAssetToCloud = async (assetId: string, file: File, projectId?: string): Promise<void> => {
-    if (!isAuthenticated || !user) {
-      console.log('User not authenticated, skipping upload');
-      return;
-    }
-
     if (!projectId) {
-      console.warn('No project ID provided, skipping cloud upload');
+      console.warn('No project ID provided, skipping local file storage');
       return;
     }
 
     try {
-      // Store upload status in custom fields since cloud_status doesn't exist in V2 Asset interface
-      await updateAsset(assetId, {
-        content: {
-          customFields: {
-            uploadStatus: 'uploading',
-            uploadError: undefined
-          }
-        }
-      });
-
-      // Upload using UnifiedUploadService
       const result = await unifiedUploadService.uploadFile(
         file,
         {
-          metadata: {
-            assetId,
-            projectId
-          },
+          assetId,
+          projectId,
           onProgress: (progress) => {
             console.log(`[useAssetCreation] Upload: ${progress.percentage}%`);
-          }
+          },
         }
       );
 
       if (result.success) {
-        // Update asset with cloud metadata in custom fields
         await updateAsset(assetId, {
           content: {
+            title: useKanvasStore.getState().getAsset(assetId)?.content.title || '',
             customFields: {
-              uploadStatus: 'synced',
-              cloudPath: result.key,
-              cloudSize: file.size,
-              cloudUpdatedAt: new Date().toISOString(),
-              uploadError: undefined
-            }
-          }
+              ...(useKanvasStore.getState().getAsset(assetId)?.content.customFields || {}),
+              fileName: file.name,
+              fileKey: result.key,
+              fileSize: file.size,
+              fileMimeType: file.type,
+              fileStoredAt: result.metadata?.fileStoredAt,
+            },
+          },
         });
-        
-        console.log('Asset successfully uploaded to cloud:', result.key);
       } else {
-        // Check if it's a quota error
-        if (result.error?.includes('quota') || result.error?.includes('Quota')) {
-          const quotaLimit = (effectiveLimits as any)?.quotaBytes || 0;
-          
-          setUpgradeModal({
-            isOpen: false,
-            currentUsage: 0, // TODO: Get actual usage from auth store
-            quotaLimit,
-            requiredBytes: file.size
-          });
-        }
-        
-        // Handle upload failure but keep local asset
         const userFriendlyError = getUserFriendlyErrorMessage(result.error || 'Unknown upload error');
         await updateAsset(assetId, {
           content: {
             customFields: {
-              uploadStatus: 'failed',
+              ...(useKanvasStore.getState().getAsset(assetId)?.content.customFields || {}),
               uploadError: userFriendlyError
             }
           }
         });
-        
-        console.error('Cloud upload failed:', result.error);
+
+        console.error('Local file storage failed:', result.error);
       }
     } catch (error) {
-      // Handle unexpected errors but preserve local asset
       const errorMessage = error instanceof Error ? error.message : 'Unexpected error';
       const userFriendlyMessage = getUserFriendlyErrorMessage(errorMessage);
       
       await updateAsset(assetId, {
         content: {
           customFields: {
-            uploadStatus: 'failed',
+            ...(useKanvasStore.getState().getAsset(assetId)?.content.customFields || {}),
             uploadError: userFriendlyMessage
           }
         }
       });
       
-      console.error('Unexpected error during cloud upload:', error);
+      console.error('Unexpected error during local file storage:', error);
     }
   };
 
@@ -207,22 +168,15 @@ export function useAssetCreation() {
     await uploadAssetToCloud(assetId, file, projectId);
   };
 
-  const canUploadToCloud = async (file: File): Promise<boolean> => true;
-
-  const closeUpgradeModal = () => {
-    setUpgradeModal(prev => ({ ...prev, isOpen: false }));
-  };
-
-  // Check if user is over quota to determine modal type
-  const isOverQuota = false; // TODO: Implement proper quota checking when auth store has quota data
+  const canUploadToCloud = async (_file: File): Promise<boolean> => true;
 
   return { 
     createNewAsset,
     uploadAssetToCloud,
     retryCloudUpload,
     canUploadToCloud,
-    upgradeModal,
-    closeUpgradeModal,
-    isOverQuota
+    upgradeModal: { isOpen: false, currentUsage: 0, quotaLimit: 0, requiredBytes: 0 },
+    closeUpgradeModal: () => {},
+    isOverQuota: false
   };
 }

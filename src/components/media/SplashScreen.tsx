@@ -3,7 +3,6 @@ import splashImage from '@/assets/Splash-i.png';
 import { useMediaStore } from '@/stores/mediaStore';
 import { Button } from '@/components/ui/button';
 import { Volume2, VolumeX } from 'lucide-react';
-import { resolveAppRouteUrl } from '@/utils/appUrls';
 import { cssUrl } from '@/utils/cssUrl';
 
 interface SplashScreenProps {
@@ -230,27 +229,6 @@ const SplashScreen = ({
         </p>
       </div>
 
-      <div
-        className="absolute bottom-[clamp(1rem,3vh,2rem)] left-0 right-0 z-10 text-center"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="px-4 text-[clamp(0.6rem,1.5vw,0.8rem)] text-white/60">
-          By interacting with this app you confirm you have read and understood the{' '}
-          <a
-            href={resolveAppRouteUrl('/terms-of-service')}
-            className="text-white underline hover:opacity-100"
-          >
-            Terms & Conditions
-          </a>
-          {' '}and{' '}
-          <a
-            href={resolveAppRouteUrl('/privacy-policy')}
-            className="text-white underline hover:opacity-100"
-          >
-            Privacy Policy
-          </a>
-        </p>
-      </div>
     </div>
   );
 };

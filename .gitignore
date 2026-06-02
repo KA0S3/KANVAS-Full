@@ -8,11 +8,27 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+**/node_modules/
 dist
+**/dist/
 dist-ssr
+**/dist-ssr/
 out
+**/out/
 release
+**/release/
 release-fixed
+**/release-fixed/
+admin-release
+**/admin-release/
+.tmp-asar-check/
+**/.tmp-asar-check/
+supabase/.temp/
+**/supabase/.temp/
+*.asar
+*.exe
+*.dmg
+*.AppImage
 *.local
 
 # Environment Variables (NEVER commit these)
@@ -21,7 +37,7 @@ release-fixed
 .env.development.local
 .env.test.local
 .env.production.local
-.env.example
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -37,6 +53,7 @@ release-fixed
 # Development documentation and implementation files
 *.md
 !README.md
+!docs/electron-updates.md
 
 # Test files and scripts
 test-*.js
@@ -48,6 +65,10 @@ server/
 
 # GitHub workflows (require special permissions)
 .github/workflows/
+!.github/
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/electron-release.yml
 
 # Additional security exclusions
 *.pem

@@ -1,191 +1,112 @@
-import React from 'react';
-import { ArrowLeft, Shield } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Shield } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { useNavigate } from "react-router-dom";
+
+const lastUpdated = "May 29, 2026";
 
 const PrivacyPolicy = () => {
   const navigate = useNavigate();
 
-  const handleBack = () => {
-    navigate(-1);
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background/95 to-background/90 p-4">
-      <div className="max-w-4xl mx-auto h-screen flex flex-col">
-        {/* Header */}
-        <div className="mb-6 flex-shrink-0">
-          <Button
-            variant="ghost"
-            onClick={handleBack}
-            className="mb-4 glass cosmic-glow border-glass-border/40 hover:bg-glass/20"
+    <div className="min-h-screen bg-background p-4 md:p-6">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col gap-6">
+        <div className="flex items-start justify-between gap-4">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 rounded-md border border-glass-border/40 bg-glass/20 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass/30 hover:text-foreground"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
+            <ArrowLeft className="h-4 w-4" />
             Back
-          </Button>
-          
-          <div className="text-center space-y-2">
-            <div className="flex items-center justify-center gap-2">
-              <Shield className="w-8 h-8 text-primary" />
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                KANVAS Privacy Policy
-              </h1>
-            </div>
-            <p className="text-muted-foreground">Effective Date: March 2026</p>
+          </button>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Shield className="h-6 w-6 text-primary" />
+            <span className="text-sm font-semibold uppercase tracking-[0.2em]">Privacy</span>
           </div>
         </div>
 
-        {/* Privacy Policy Content */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-glass-border/40 scrollbar-track-transparent hover:scrollbar-thumb-glass-border/60">
-          <Card className="glass cosmic-glow border-glass-border/40">
-            <CardContent className="p-8 space-y-8">
-            {/* Introduction */}
-            <section className="space-y-4">
-              <p className="text-muted-foreground leading-relaxed">
-                This Privacy Policy describes how KANVAS collects, uses, and protects your information. 
-                By using our Service, you consent to the data practices described in this policy.
+        <Card className="glass cosmic-glow border-glass-border/40">
+          <CardContent className="space-y-8 p-6 md:p-8">
+            <header className="space-y-2">
+              <h1 className="text-3xl font-bold text-foreground md:text-4xl">KANVAS Privacy Policy</h1>
+              <p className="text-sm text-muted-foreground">Effective date: {lastUpdated}</p>
+            </header>
+
+            <section className="space-y-3">
+              <p className="leading-relaxed text-muted-foreground">
+                This policy explains what KANVAS collects, why we collect it, and how it is used across the desktop
+                app, website, purchase flow, and activation flow.
               </p>
             </section>
 
-            {/* Section 1 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">1. Information Collection</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                We collect several types of information to provide and improve our Service:
-              </p>
-              
-              <div className="space-y-3 ml-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Personal Identification:</h3>
-                  <p className="text-muted-foreground">
-                    Name, email address, and account registration details.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Financial Information:</h3>
-                  <p className="text-muted-foreground">
-                    Payment details are collected directly by Paystack. We do not store your full credit card information on our servers.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Usage Data:</h3>
-                  <p className="text-muted-foreground">
-                    We collect information on how you interact with the Service, including session duration, device type, IP address, and browser type.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Creative Data:</h3>
-                  <p className="text-muted-foreground">
-                    The novels and world-building data you input are stored on our secure cloud servers.
-                  </p>
-                </div>
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">1. Information we collect</h2>
+              <div className="space-y-2 pl-4 text-muted-foreground">
+                <p>Account details such as name, email address, and login identifiers.</p>
+                <p>Payment and entitlement metadata, while payment card details are handled by Paystack.</p>
+                <p>Activation and device data needed to confirm licensed desktop access.</p>
+                <p>Basic usage and diagnostic data that help us support and improve the service.</p>
+                <p>Local project and asset files you create or store on your own device.</p>
               </div>
             </section>
 
-            {/* Section 2 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">2. How We Use Your Information</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                Your data is used to:
-              </p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground ml-4">
-                <li>Operate and maintain the KANVAS platform.</li>
-                <li>Process your payments and manage your subscriptions via Paystack.</li>
-                <li>Improve app functionality and develop new visual tracking features.</li>
-                <li>Serve advertisements to users on the Free Tier. These ads may be personalized based on your usage patterns.</li>
-                <li>Provide customer support and respond to your requests.</li>
-              </ul>
-            </section>
-
-            {/* Section 3 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">3. Data Sharing and Third-Party Disclosure</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                We do not sell your personal information. We share data only with:
-              </p>
-              <div className="space-y-3 ml-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Service Providers:</h3>
-                  <p className="text-muted-foreground">
-                    Companies like Paystack that assist in payment processing.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Advertising Partners:</h3>
-                  <p className="text-muted-foreground">
-                    We use third-party ad networks (e.g., Google AdSense) that may use cookies to serve ads based on your visits to this and other sites.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Legal Compliance:</h3>
-                  <p className="text-muted-foreground">
-                    If required by law, we may disclose your information to comply with legal obligations or protect our rights.
-                  </p>
-                </div>
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">2. How we use it</h2>
+              <div className="space-y-2 pl-4 text-muted-foreground">
+                <p>Provide account access, purchase processing, activation, downloads, and support.</p>
+                <p>Detect fraud, prevent abuse, and enforce license and device limits.</p>
+                <p>Maintain records required for billing, refunds, and service administration.</p>
+                <p>Improve reliability, features, and security.</p>
               </div>
             </section>
 
-            {/* Section 4 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">4. Data Security and Storage</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                We implement industry-standard security measures, including encryption and secure socket layer (SSL) technology, 
-                to protect your data. Some data may be stored locally on your device to support the Service's offline mode. 
-                While we take significant steps to protect your data, no method of electronic storage is 100% secure.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">3. Sharing and processors</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                We do not sell personal information. We share data only with service providers that help run KANVAS,
+                such as payment processors, authentication and hosting providers, and infrastructure used to deliver
+                downloads, license checks, and support workflows.
               </p>
             </section>
 
-            {/* Section 5 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">5. Your Rights and Choices</h2>
-              <div className="space-y-3 ml-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Access and Deletion:</h3>
-                  <p className="text-muted-foreground">
-                    You have the right to access, update, or request the deletion of your personal information.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Opt-Out:</h3>
-                  <p className="text-muted-foreground">
-                    You can opt out of personalized advertising by visiting the Google ad settings or using "Do Not Track" browser features.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Cookies:</h3>
-                  <p className="text-muted-foreground">
-                    You can choose to disable cookies in your browser, though this may affect your ability to use certain features of the Service.
-                  </p>
-                </div>
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">4. Retention and security</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                We keep information for as long as needed to operate the service, meet legal obligations, resolve
+                disputes, and enforce agreements. We use reasonable safeguards, but no online system or local device
+                storage can be guaranteed to be perfectly secure.
+              </p>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">5. Your choices</h2>
+              <div className="space-y-2 pl-4 text-muted-foreground">
+                <p>You can request access, correction, or deletion of your account data where applicable.</p>
+                <p>You can stop using the service and remove locally stored content from your device at any time.</p>
+                <p>Some records may still be retained if required for legal, security, or billing reasons.</p>
               </div>
             </section>
 
-            {/* Section 6 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">6. Children's Privacy</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                KANVAS is not intended for use by children under the age of 13. We do not knowingly collect information from children. 
-                If we become aware of such data collection, we will delete it immediately.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">6. Children</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                KANVAS is not intended for children under 13, and we do not knowingly collect personal information
+                from them.
               </p>
             </section>
 
-            {/* Footer */}
-            <div className="pt-6 border-t border-glass-border/30">
-              <p className="text-sm text-muted-foreground text-center">
-                © 2026 KANVAS. All Rights Reserved.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">7. Contact</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                Privacy questions can be sent to{" "}
+                <a className="text-primary underline underline-offset-4" href="mailto:shadek392@gmail.com">
+                  shadek392@gmail.com
+                </a>
+                .
               </p>
-            </div>
-            </CardContent>
-          </Card>
-        </div>
+            </section>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

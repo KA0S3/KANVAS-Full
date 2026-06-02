@@ -16,6 +16,8 @@ export async function startPurchase(productKey: PaystackProductKey): Promise<voi
     body: {
       product_key: productKey,
       callback_url: PAYSTACK_CALLBACK_URL,
+      locale: typeof navigator !== "undefined" ? navigator.language : undefined,
+      time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
   });
 

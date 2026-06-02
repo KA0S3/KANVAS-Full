@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expectedPublishChannel, inferReleaseChannel, validateReleaseConfig } from '../../scripts/release-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -16,7 +18,7 @@ const baseConfig = {
   publish: [
     {
       provider: 'generic',
-      url: 'https://example.supabase.co/storage/v1/object/public/desktop-updates/stable',
+      url: 'https://updates.invalid/kanvas/stable',
       channel: 'latest',
     },
   ],
@@ -60,7 +62,7 @@ describe('Electron release channel guards', () => {
       packageMetadata: basePackage,
       builderConfig: {
         ...baseConfig,
-        publish: [{ ...baseConfig.publish[0], url: 'https://example.supabase.co/storage/v1/object/public/desktop-updates/beta', channel: 'beta' }],
+        publish: [{ ...baseConfig.publish[0], url: 'https://updates.invalid/kanvas/beta', channel: 'beta' }],
       },
     });
 
@@ -75,7 +77,7 @@ describe('Electron release channel guards', () => {
       packageMetadata: basePackage,
       builderConfig: {
         ...baseConfig,
-        publish: [{ ...baseConfig.publish[0], url: 'https://example.supabase.co/storage/v1/object/public/desktop-updates/beta' }],
+        publish: [{ ...baseConfig.publish[0], url: 'https://updates.invalid/kanvas/beta' }],
       },
     });
 
@@ -86,11 +88,19 @@ describe('Electron release channel guards', () => {
     expect(builderConfig.artifactName).toBe('KANVAS-Setup.${ext}');
   });
 
-  it('keeps the current beta builder config on the generic beta update feed', () => {
+  it('keeps the current beta builder config on a runtime-replaced generic beta update feed', () => {
     expect(builderConfig.detectUpdateChannel).toBe(false);
     expect(builderConfig.publish[0].provider).toBe('generic');
-    expect(builderConfig.publish[0].url).toContain('/desktop-updates/beta');
+    expect(builderConfig.publish[0].url).toContain('/beta');
     expect(builderConfig.publish[0].channel).toBe('beta');
     expect(builderConfig.generateUpdatesFilesForAllChannels).toBe(false);
+  });
+
+  it('uses the private R2 release uploader instead of Supabase Storage uploads', () => {
+    const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
+    expect(packageJson.scripts['release:beta']).toContain('scripts/upload-r2-release.mjs beta');
+    expect(packageJson.scripts['release:stable']).toContain('scripts/upload-r2-release.mjs stable');
+    expect(packageJson.scripts['release:beta']).not.toContain('upload-supabase-release');
+    expect(existsSync(resolve('scripts/upload-r2-release.mjs'))).toBe(true);
   });
 });

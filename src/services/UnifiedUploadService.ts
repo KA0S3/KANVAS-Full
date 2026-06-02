@@ -1,9 +1,7 @@
-/**
- * UNIFIED UPLOAD SERVICE
- * 
- * Handles file uploads with unified interface
- * This is a simplified version for compatibility
- */
+import { importAssetToCurrentProject } from '@/persistence/desktopProjectPersistence';
+import { db, type FileBlob } from '@/storage/indexeddb';
+import { useProjectStore } from '@/stores/projectStore';
+import { createId } from '@/utils/id';
 
 interface UploadProgress {
   loaded: number;
@@ -12,23 +10,37 @@ interface UploadProgress {
 }
 
 interface UploadOptions {
+  assetId?: string;
+  projectId?: string;
+  backend?: 'auto' | 'local' | 'r2' | 'supabase';
   onProgress?: (progress: UploadProgress) => void;
-  onComplete?: (result: any) => void;
+  onComplete?: (result: UploadResult) => void;
   onError?: (error: Error) => void;
   metadata?: Record<string, any>;
+}
+
+interface UploadStatus {
+  status: 'pending' | 'uploading' | 'completed' | 'error' | 'cancelled';
+  progress?: UploadProgress;
+  result?: UploadResult;
 }
 
 interface UploadResult {
   success: boolean;
   url?: string;
+  publicUrl?: string;
   key?: string;
   size?: number;
   metadata?: Record<string, any>;
   error?: string;
 }
 
+type CloudRetryListener = (assetId: string, retryCount: number, cloudError?: string) => void;
+
 class UnifiedUploadService {
   private static instance: UnifiedUploadService;
+  private uploadStatuses = new Map<string, UploadStatus>();
+  private cloudRetryListeners = new Set<CloudRetryListener>();
 
   static getInstance(): UnifiedUploadService {
     if (!UnifiedUploadService.instance) {
@@ -37,188 +49,265 @@ class UnifiedUploadService {
     return UnifiedUploadService.instance;
   }
 
-  private constructor() {
-    // Private constructor for singleton
-  }
-
-  /**
-   * Upload a file
-   */
   async uploadFile(file: File, options: UploadOptions = {}): Promise<UploadResult> {
-    try {
-      // Validate file
-      const validation = this.validateFile(file);
-      if (!validation.valid) {
-        return {
-          success: false,
-          error: validation.error
-        };
-      }
-
-      // Create upload key
-      const key = this.generateUploadKey(file);
-
-      // In a real implementation, this would upload to cloud storage
-      // For now, simulate upload with progress
-      const result = await this.simulateUpload(file, key, options);
-
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      options.onError?.(error instanceof Error ? error : new Error(errorMessage));
-      
-      return {
-        success: false,
-        error: errorMessage
-      };
-    }
+    return await this.storeFileLocally(file, options);
   }
 
-  /**
-   * Upload multiple files
-   */
+  async uploadFileLegacy(file: File, options: UploadOptions = {}): Promise<UploadResult> {
+    return await this.uploadFile(file, options);
+  }
+
+  async upload(file: File, options: UploadOptions = {}): Promise<UploadResult> {
+    return await this.uploadFile(file, options);
+  }
+
   async uploadFiles(files: File[], options: UploadOptions = {}): Promise<UploadResult[]> {
-    const results: UploadResult[] = [];
-
-    for (const file of files) {
-      const result = await this.uploadFile(file, options);
-      results.push(result);
-    }
-
-    return results;
+    return await Promise.all(files.map(file => this.uploadFile(file, options)));
   }
 
-  /**
-   * Upload from URL
-   */
-  async uploadFromUrl(url: string, options: UploadOptions = {}): Promise<UploadResult> {
-    try {
-      // Fetch the file from URL
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch URL: ${response.statusText}`);
+  async uploadBatch(
+    files: Array<File | { file: File; assetId?: string; projectId?: string; metadata?: Record<string, any> }>,
+    options: UploadOptions = {}
+  ): Promise<UploadResult[]> {
+    return await Promise.all(files.map(input => {
+      if (input instanceof File) {
+        return this.uploadFile(input, options);
       }
 
-      const blob = await response.blob();
-      const filename = this.extractFilenameFromUrl(url) || 'download';
-      const file = new File([blob], filename, { type: blob.type });
-
-      return await this.uploadFile(file, options);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        success: false,
-        error: errorMessage
-      };
-    }
+      return this.uploadFile(input.file, {
+        ...options,
+        assetId: input.assetId ?? options.assetId,
+        projectId: input.projectId ?? options.projectId,
+        metadata: {
+          ...options.metadata,
+          ...input.metadata,
+        },
+      });
+    }));
   }
 
-  /**
-   * Cancel upload by key
-   */
-  cancelUpload(key: string): boolean {
-    // In a real implementation, this would cancel the upload
-    console.log(`Would cancel upload: ${key}`);
-    return true;
-  }
-
-  /**
-   * Get upload status
-   */
-  getUploadStatus(key: string): {
-    status: 'pending' | 'uploading' | 'completed' | 'error' | 'cancelled';
-    progress?: UploadProgress;
-    result?: UploadResult;
-  } {
-    // In a real implementation, this would return actual status
+  async uploadWithVariants(file: File, options: UploadOptions = {}) {
+    const original = await this.uploadFile(file, options);
     return {
-      status: 'completed',
-      progress: { loaded: 100, total: 100, percentage: 100 }
+      success: original.success,
+      original,
+      variants: [],
+      error: original.error,
     };
   }
 
-  // Private helper methods
-  private validateFile(file: File): { valid: boolean; error?: string } {
-    // Check file type
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'text/plain',
-      'application/pdf',
-      'application/json'
-    ];
+  async retryUpload(assetId: string, file: File, projectId?: string): Promise<UploadResult> {
+    const retryCount = ((this.uploadStatuses.get(assetId)?.result?.metadata?.retryCount as number) || 0) + 1;
 
-    if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/')) {
+    for (const listener of this.cloudRetryListeners) {
+      listener(assetId, retryCount);
+    }
+
+    return await this.uploadFile(file, {
+      assetId,
+      projectId,
+      metadata: {
+        retryCount,
+        assetId,
+        projectId,
+      },
+    });
+  }
+
+  getPublicUrl(storageKey: string): string {
+    return storageKey;
+  }
+
+  getStatus() {
+    return {
+      r2Configured: false,
+      supabaseConfigured: false,
+      localOnly: true,
+      availableBackends: ['local', 'r2', 'supabase', 'auto'],
+      defaultBackend: 'local',
+    };
+  }
+
+  isBackendAvailable(backend: string): boolean {
+    return ['auto', 'local', 'r2', 'supabase'].includes(backend);
+  }
+
+  onCloudRetry(callback: CloudRetryListener): () => void {
+    this.cloudRetryListeners.add(callback);
+    return () => {
+      this.cloudRetryListeners.delete(callback);
+    };
+  }
+
+  cancelUpload(key: string): boolean {
+    const current = this.uploadStatuses.get(key);
+    if (!current) {
+      return false;
+    }
+
+    this.uploadStatuses.set(key, {
+      ...current,
+      status: 'cancelled',
+    });
+    return true;
+  }
+
+  getUploadStatus(key: string): UploadStatus {
+    return this.uploadStatuses.get(key) || {
+      status: 'error',
+      result: {
+        success: false,
+        error: `No upload found for key: ${key}`,
+      },
+    };
+  }
+
+  private async storeFileLocally(file: File, options: UploadOptions): Promise<UploadResult> {
+    const backend = options.backend || 'auto';
+    if (!this.isBackendAvailable(backend)) {
+      return {
+        success: false,
+        error: `Unsupported backend: ${backend}`,
+      };
+    }
+
+    const validation = this.validateFile(file);
+    if (!validation.valid) {
+      return {
+        success: false,
+        error: validation.error,
+      };
+    }
+
+    const metadata = {
+      ...options.metadata,
+    };
+    const assetId = String(metadata.assetId || options.assetId || createId());
+    const projectId = String(
+      metadata.projectId ||
+      options.projectId ||
+      useProjectStore.getState().currentProject?.id ||
+      localStorage.getItem('currentProjectId') ||
+      ''
+    );
+    const objectUrl = URL.createObjectURL(file);
+    const fallbackKey = this.generateLocalKey(file, assetId);
+
+    this.uploadStatuses.set(assetId, {
+      status: 'uploading',
+      progress: {
+        loaded: 0,
+        total: file.size,
+        percentage: 0,
+      },
+    });
+
+    try {
+      let storageKey = fallbackKey;
+      let publicUrl = objectUrl;
+
+      if (this.canWriteToDesktopProject(projectId)) {
+        const imported = await importAssetToCurrentProject(file, assetId);
+        storageKey = imported.relativePath;
+        publicUrl = imported.relativePath;
+      }
+
+      const createdAt = new Date().toISOString();
+      const fileRecord: FileBlob = {
+        id: createId(),
+        projectId,
+        assetId,
+        storageKey,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        blob: file,
+        createdAt,
+      };
+
+      await db.storeFile(fileRecord);
+
+      const progress = {
+        loaded: file.size,
+        total: file.size,
+        percentage: 100,
+      };
+      options.onProgress?.(progress);
+
+      const result: UploadResult = {
+        success: true,
+        key: storageKey,
+        url: objectUrl,
+        publicUrl,
+        size: file.size,
+        metadata: {
+          ...metadata,
+          fileId: fileRecord.id,
+          assetId,
+          projectId,
+          fileName: file.name,
+          fileMimeType: file.type,
+          fileStoredAt: createdAt,
+        },
+      };
+
+      this.uploadStatuses.set(assetId, {
+        status: 'completed',
+        progress,
+        result,
+      });
+
+      options.onComplete?.(result);
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+      const wrappedError = error instanceof Error ? error : new Error(errorMessage);
+
+      this.uploadStatuses.set(assetId, {
+        status: 'error',
+        result: {
+          success: false,
+          error: errorMessage,
+        },
+      });
+      options.onError?.(wrappedError);
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  private canWriteToDesktopProject(projectId: string): boolean {
+    if (typeof window === 'undefined' || !window.kanvasDesktop || !projectId) {
+      return false;
+    }
+
+    return useProjectStore.getState().currentProject?.id === projectId;
+  }
+
+  private validateFile(file: File): { valid: boolean; error?: string } {
+    if (!file) {
       return {
         valid: false,
-        error: `File type ${file.type} is not supported`
+        error: 'No file provided',
+      };
+    }
+
+    if (!file.name) {
+      return {
+        valid: false,
+        error: 'File must have a name',
       };
     }
 
     return { valid: true };
   }
 
-  private generateUploadKey(file: File): string {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substr(2, 9);
-    const extension = file.name.split('.').pop() || 'bin';
-    return `uploads/${timestamp}-${random}.${extension}`;
-  }
-
-  private async simulateUpload(file: File, key: string, options: UploadOptions): Promise<UploadResult> {
-    const total = file.size;
-    let loaded = 0;
-    const chunkSize = 1024 * 1024; // 1MB chunks
-
-    return new Promise((resolve) => {
-      const uploadInterval = setInterval(() => {
-        loaded += chunkSize;
-        if (loaded > total) loaded = total;
-
-        const progress: UploadProgress = {
-          loaded,
-          total,
-          percentage: Math.round((loaded / total) * 100)
-        };
-
-        options.onProgress?.(progress);
-
-        if (loaded >= total) {
-          clearInterval(uploadInterval);
-
-          const result: UploadResult = {
-            success: true,
-            url: `https://example.com/${key}`,
-            key,
-            size: file.size,
-            metadata: {
-              originalName: file.name,
-              mimeType: file.type,
-              uploadedAt: new Date().toISOString(),
-              ...options.metadata
-            }
-          };
-
-          options.onComplete?.(result);
-          resolve(result);
-        }
-      }, 100); // Simulate upload progress
-    });
-  }
-
-  private extractFilenameFromUrl(url: string): string | null {
-    try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      const filename = pathname.split('/').pop();
-      return filename || null;
-    } catch {
-      return null;
-    }
+  private generateLocalKey(file: File, assetId: string): string {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `assets/${assetId}/${Date.now()}-${safeName}`;
   }
 }
 
-// Export singleton instance
 export const unifiedUploadService = UnifiedUploadService.getInstance();

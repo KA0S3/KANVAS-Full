@@ -1,13 +1,3 @@
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values
-  ('desktop-installers', 'desktop-installers', false, 524288000, null),
-  ('desktop-updates', 'desktop-updates', true, 524288000, null)
-on conflict (id) do update
-set
-  public = excluded.public,
-  file_size_limit = excluded.file_size_limit,
-  allowed_mime_types = excluded.allowed_mime_types;
-
 create table if not exists public.download_tokens (
   id uuid primary key default gen_random_uuid(),
   token_hash text not null unique,

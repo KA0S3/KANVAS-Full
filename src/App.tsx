@@ -13,6 +13,7 @@ import { timedAssetSaver } from "@/services/TimedAssetSaver";
 import { desktopAutosaveService } from "@/services/desktopAutosaveService";
 import { useUndoKeyboard } from "@/hooks/useUndoKeyboard";
 import { ProjectCacheLoadingIndicator } from "@/components/ProjectCacheLoadingIndicator";
+import { ActivationGate } from "@/components/licensing/ActivationGate";
 import Index from "./pages/Index";
 import AuthConfirm from "./pages/AuthConfirm";
 import AuthCallback from "./pages/AuthCallback";
@@ -38,6 +39,10 @@ const App = () => {
     
     emergencySaveService.initialize();
     desktopAutosaveService.initialize();
+    window.kanvasBeforeUpdateInstall = async () => {
+      await timedAssetSaver.flushAll();
+      await desktopAutosaveService.flushStrict();
+    };
     // NOTE: connectivityService heartbeat NOT started to prevent idle DB requests
     // It will be started on-demand when user interacts with the app
 
@@ -73,6 +78,7 @@ const App = () => {
       // Cleanup browser close warning on unmount
       window.removeEventListener('beforeunload', beforeUnloadHandler);
       document.removeEventListener('visibilitychange', visibilityChangeHandler);
+      delete window.kanvasBeforeUpdateInstall;
       if (USE_SUPABASE) {
         syncProcessor.stop();
       }
@@ -93,7 +99,7 @@ const App = () => {
         {typeof window !== 'undefined' && (window.kanvasDesktop || window.location.protocol === 'file:') ? (
           <HashRouter>
             <Routes>
-              <Route path="/" element={<Index />} />
+              <Route path="/" element={<ActivationGate><Index /></ActivationGate>} />
               <Route path="/auth/confirm" element={<AuthConfirm />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/auth/reset-password" element={<AuthResetPassword />} />

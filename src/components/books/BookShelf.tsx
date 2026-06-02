@@ -7,11 +7,10 @@ import { useAuthStore } from '@/stores/authStore';
 import { useMediaStore } from '@/stores/mediaStore';
 import { Button } from '@/components/ui/button';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
-import { AutosaveIndicator } from '@/components/autosave/AutosaveIndicator';
 import type { Book } from '@/types/book';
 import pedestalDark from '@/assets/pedestal-dark.png';
 import pedestalLight from '@/assets/pedestal-light.png';
-import { openPublicAssetUrl, resolveAppRouteUrl } from '@/utils/appUrls';
+import { openPublicAssetUrl } from '@/utils/appUrls';
 import { cssUrl } from '@/utils/cssUrl';
 import SingleBookFocus from './SingleBookFocus';
 import BookSpineView from './BookSpineView';
@@ -160,16 +159,10 @@ const BookShelf: React.FC<BookShelfProps> = ({
         <div className="flex items-center justify-between px-6 py-4">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className={`text-xl font-bold drop-shadow-lg ${
+              <h1 className={`text-2xl font-semibold uppercase tracking-[0.18em] drop-shadow-lg ${
                 theme === 'dark' ? 'text-white' : 'text-foreground'
-              }`}>World Library</h1>
-              <AutosaveIndicator compact={true} />
+              }`}>Library</h1>
             </div>
-            <p className={`text-sm drop-shadow ${
-              theme === 'dark' ? 'text-white/80' : 'text-muted-foreground'
-            }`}>
-              {getMaxBooksDisplay()} book{getMaxBooksDisplay() !== '∞' && getMaxBooksDisplay() !== 1 ? 's' : ''} available
-            </p>
           </div>
           
           <div className="flex items-center gap-2">
@@ -310,31 +303,6 @@ const BookShelf: React.FC<BookShelfProps> = ({
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      {/* Terms and Conditions Notice */}
-      <div className="absolute bottom-2 left-0 right-0 text-center z-10">
-        <p className={`text-xs ${
-          theme === 'dark' ? 'text-white/40' : 'text-muted-foreground/60'
-        }`}>
-          By using this app you confirm you have read and understood the{' '}
-          <a 
-            href={resolveAppRouteUrl('/terms-of-service')}
-            className={`underline hover:opacity-100 ${
-              theme === 'dark' ? 'text-white/60' : 'text-muted-foreground'
-            }`}
-          >
-            Terms & Conditions
-          </a>
-          {' '}and{' '}
-          <a 
-            href={resolveAppRouteUrl('/privacy-policy')}
-            className={`underline hover:opacity-100 ${
-              theme === 'dark' ? 'text-white/60' : 'text-muted-foreground'
-            }`}
-          >
-            Privacy Policy
-          </a>
-        </p>
-      </div>
     </div>
   );
 };

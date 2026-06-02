@@ -31,6 +31,8 @@ VITE_SUPABASE_URL=https://hzngfqebklzhnwkcmgto.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon-public-key>
 VITE_LICENSE_API_URL=https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1
 VITE_KANVAS_ACTIVATION_URL=https://www.kanvas-it.com/desktop/activate
+VITE_PAYSTACK_TEST_MODE=true
+VITE_DOWNLOAD_OWNER_CODE=kaos3
 ```
 
 Only public `VITE_*` values belong in this frontend. Never add Paystack secret keys, Supabase service-role keys, storage credentials, or license signing private keys to `website/`, Vercel frontend env vars, or any browser code.
@@ -55,15 +57,27 @@ Only public `VITE_*` values belong in this frontend. Never add Paystack secret k
    - In Google Cloud Console, add the Supabase callback URL shown by Supabase to the OAuth client's authorized redirect URIs.
 5. Deploy the Supabase Edge Functions used by the website:
    - `paystack-initialize`
+   - `paystack-webhook`
    - `redeem-key`
-   - `desktop/download-access`
-   - `desktop/download`
-   - `desktop/activation/start`
+   - `license-admin`
+   - `desktop` (serves download, activation, heartbeat, and update routes)
 6. Set Supabase Edge Function secrets:
    - `PAYSTACK_SECRET_KEY`
-   - `DESKTOP_INSTALLER_BUCKET=desktop-installers`
+   - `STABLE_DOWNLOAD_URL=https://github.com/KA0S3/KANVAS-setup/releases/latest/download/KANVAS-Setup.exe`
+   - `GITHUB_RELEASE_REPO=KA0S3/KANVAS-setup`
+   - `BETA_DOWNLOAD_ASSET_NAME=KANVAS-Setup.exe`
+   - optional `BETA_DOWNLOAD_URL` override if beta should not use GitHub prerelease lookup
+   - `R2_ACCOUNT_ID`
+   - `R2_ACCESS_KEY_ID`
+   - `R2_SECRET_ACCESS_KEY`
+   - `R2_BUCKET_NAME=kanvas-desktop-releases`
+   - `KANVAS_LICENSE_PRIVATE_JWK`
+   - `KANVAS_LICENSE_PUBLIC_KEY_PEM`
    - `DOWNLOAD_TOKEN_TTL_SECONDS=600`
-   - `STABLE_DESKTOP_AVAILABLE=false` until the stable feed exists
+   - optional `STABLE_DOWNLOAD_URL=https://github.com/KA0S3/KANVAS-setup/releases/latest/download/KANVAS-Setup.exe`
+   - optional `GITHUB_RELEASE_REPO=KA0S3/KANVAS-setup`
+   - optional `BETA_DOWNLOAD_ASSET_NAME=KANVAS-Setup.exe`
+   - optional `BETA_DOWNLOAD_URL` override if beta should not use GitHub prerelease lookup
 7. In Paystack, set the payment callback/return URL to:
    - `https://www.kanvas-it.com/payment-success`
    - webhook URL: `https://hzngfqebklzhnwkcmgto.supabase.co/functions/v1/paystack-webhook`
@@ -73,4 +87,4 @@ Only public `VITE_*` values belong in this frontend. Never add Paystack secret k
    Paystack checkout is charged in ZAR. The purchase modal may show an approximate local-currency reference converted in the browser from ZAR after an IP country lookup. If that lookup fails or resolves to South Africa, all modal pricing stays in ZAR.
 9. The website never stores download URLs in public frontend env vars. Installer links come from the Supabase download-access function after entitlement checks.
 
-For Vercel, set the same `VITE_*` values as project environment variables. Deploy only this `website/` folder as the website frontend. Keep `website/vercel.json` in that deployment root so direct client routes such as `/login`, `/download`, `/account`, `/oauth/consent`, and `/desktop/activate` rewrite to `/index.html`.
+For Vercel, set the same `VITE_*` values as project environment variables. Keep `VITE_PAYSTACK_TEST_MODE=true` while Paystack is using test credentials; switch it to `false` with live credentials to remove the temporary owner-code download reveal. Deploy only this `website/` folder as the website frontend. Keep `website/vercel.json` in that deployment root so direct client routes such as `/login`, `/download`, `/account`, `/oauth/consent`, and `/desktop/activate` rewrite to `/index.html`.

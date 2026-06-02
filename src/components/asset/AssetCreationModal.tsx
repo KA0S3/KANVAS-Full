@@ -4,6 +4,7 @@ import { useKanvasStore } from '@/stores/kanvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useSyncStore } from '@/stores/syncStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useAssetCreation } from '@/hooks/useAssetCreation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -85,7 +86,7 @@ interface AssetCreationModalProps {
 
 export function AssetCreationModal({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
   const { currentProject } = useProjectStore();
-  const { isAuthenticated, plan } = useAuthStore();
+  const { createNewAsset } = useAssetCreation();
   
   // Simple mock data for tags (would come from project store)
   const mockTags = [
@@ -143,7 +144,6 @@ export function AssetCreationModal({ isOpen, onClose, initialData, parentId, gen
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle');
 
   // Handle generator import data
   useEffect(() => {
@@ -227,13 +227,10 @@ export function AssetCreationModal({ isOpen, onClose, initialData, parentId, gen
       };
 
       // Create asset using new store
-      const assetId = await useKanvasStore.getState().createAsset(canonicalAsset);
-      
-      // Handle file upload if needed
-      if (selectedFile && uploadStatus === 'allowed') {
-        // File upload will be handled by the blob storage system
-        console.log('File upload will be handled by blob storage');
-      }
+      const assetId = await createNewAsset(canonicalAsset, {
+        fromUserClick: true,
+        file: selectedFile || undefined,
+      });
 
       console.log('AssetCreationModal: Asset created with ID:', assetId);
       
@@ -246,35 +243,15 @@ export function AssetCreationModal({ isOpen, onClose, initialData, parentId, gen
     }
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setSelectedFile(file);
-    setUploadStatus('checking');
-
-    // Check if upload is possible
-    if (syncEnabled && isAuthenticated && projectId) {
-      try {
-        // Mock function for now - would check actual quota
-        const canUpload = true; // await canUploadToCloud(file);
-        setUploadStatus(canUpload ? 'allowed' : 'denied');
-      } catch (error) {
-        console.error('Error checking upload quota:', error);
-        setUploadStatus('denied');
-      }
-    } else {
-      setUploadStatus('idle');
-    }
-
-    // Don't convert to base64 - use file object directly
-    // R2 upload will handle the file and set cloudPath
-    // For preview, we'll use a blob URL in the display component
   };
 
   const handleClose = () => {
     setSelectedFile(null);
-    setUploadStatus('idle');
     
     // Recalculate position for the next time the modal opens
     const resetPosition = getCalculatedPosition();

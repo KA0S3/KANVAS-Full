@@ -65,6 +65,7 @@ const getProjectSettings = (bookData: any) => ({
   coverPageSettings: bookData.coverPageSettings,
   viewportOffset: bookData.worldData?.viewportOffset || { x: 0, y: 0 },
   viewportScale: bookData.worldData?.viewportScale || 1,
+  viewportBackgroundOpacity: bookData.worldData?.viewportBackgroundOpacity ?? 0.9,
   rootBackgroundConfig: bookData.worldData?.rootBackgroundConfig || null,
   globalCustomFields: bookData.worldData?.globalCustomFields || [],
 });
@@ -93,6 +94,7 @@ const projectToBook = (project: Project) => {
       globalCustomFields: settings.globalCustomFields || [],
       viewportOffset: settings.viewportOffset || { x: 0, y: 0 },
       viewportScale: settings.viewportScale || 1,
+      viewportBackgroundOpacity: settings.viewportBackgroundOpacity ?? 0.9,
       rootBackgroundConfig: settings.rootBackgroundConfig || null,
     },
   };

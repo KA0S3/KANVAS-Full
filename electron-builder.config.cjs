@@ -3,7 +3,7 @@ const { version, description, author } = require("./package.json");
 const isBeta = /-beta\.\d+$/i.test(version);
 const channel = isBeta ? "beta" : "latest";
 const updateChannelPath = isBeta ? "beta" : "stable";
-const updateBaseUrl = (process.env.KANVAS_UPDATE_BASE_URL || "https://hzngfqebklzhnwkcmgto.supabase.co/storage/v1/object/public/desktop-updates").replace(/\/+$/, "");
+const updateBaseUrl = (process.env.KANVAS_UPDATE_BASE_URL || "https://updates.invalid/kanvas").replace(/\/+$/, "");
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {

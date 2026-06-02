@@ -56,9 +56,8 @@ interface AssetCreationModalProps {
 }
 
 export function AssetCreationModalImproved({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
-  const { createNewAsset, canUploadToCloud } = useAssetCreation();
+  const { createNewAsset } = useAssetCreation();
   const { tags } = useTagStore();
-  const { isAuthenticated, plan } = useAuthStore();
   const { getProjectAssets } = useKanvasStore();
   const assets = projectId ? getProjectAssets(projectId) : [];
   
@@ -104,7 +103,6 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle');
 
   // Handle generator import data
   useEffect(() => {
@@ -197,7 +195,6 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
       }, { 
         fromUserClick: true,
         file: selectedFile || undefined,
-        skipCloud: uploadStatus === 'denied'
       });
 
       console.log('Asset created successfully with ID:', assetId);
@@ -215,34 +212,15 @@ export function AssetCreationModalImproved({ isOpen, onClose, initialData, paren
     }
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setSelectedFile(file);
-    setUploadStatus('checking');
-
-    // Check if upload is possible
-    if (isAuthenticated && projectId) {
-      try {
-        const canUpload = await canUploadToCloud(file);
-        setUploadStatus(canUpload ? 'allowed' : 'denied');
-      } catch (error) {
-        console.error('Error checking upload quota:', error);
-        setUploadStatus('denied');
-      }
-    } else {
-      setUploadStatus('idle');
-    }
-
-    // Don't convert to base64 - use file object directly
-    // R2 upload will handle the file and set cloudPath
-    // For preview, we'll use a blob URL in the display component
   };
 
   const handleClose = () => {
     setSelectedFile(null);
-    setUploadStatus('idle');
     
     setFormData({
       name: initialData?.name || 'New Asset',

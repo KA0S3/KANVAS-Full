@@ -220,6 +220,17 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   const bookWorldData = currentBook ? getWorldData(currentBook.id) : null;
   const bookViewportOffset = bookWorldData?.viewportOffset || { x: -45, y: -20 };
   const bookViewportScale = bookWorldData?.viewportScale || 1;
+  const viewportBackgroundOpacity =
+    bookWorldData?.worldData?.viewportBackgroundOpacity ??
+    bookWorldData?.viewportBackgroundOpacity ??
+    0.9;
+  const clampedViewportBackgroundOpacity = Math.max(0, Math.min(1, viewportBackgroundOpacity));
+  const viewportGlassBlur = Math.round(clampedViewportBackgroundOpacity * 32);
+  const viewportGlassSaturation = Math.round(100 + clampedViewportBackgroundOpacity * 45);
+  const viewportGlassTintOpacity = 0.05 + clampedViewportBackgroundOpacity * 0.9;
+  const viewportGlassBorderOpacity = clampedViewportBackgroundOpacity * 0.34;
+  const viewportGlassGlowOpacity = clampedViewportBackgroundOpacity * 0.14;
+  const viewportGlassHighlightOpacity = clampedViewportBackgroundOpacity * 0.85;
   
   const handleCloseContextMenu = useCallback(() => {
     setContextMenuPosition(null);
@@ -654,7 +665,7 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
   };
 
    return (
-    <div className="glass-strong cosmic-glow rounded-lg w-[calc(100%_-_5px)] mx-[2.5px] h-full flex flex-col min-h-0 overflow-hidden bg-sidebar/85 border border-sidebar-border/40 shadow-[0_0_0_1px_hsl(var(--sidebar-border)/0.25),0_18px_40px_rgba(0,0,0,0.16)] backdrop-blur-2xl">
+    <div className="relative cosmic-glow rounded-[13px] w-[calc(100%_-_5px)] mx-[2.5px] h-full flex flex-col min-h-0 overflow-hidden bg-transparent border border-sidebar-border/40 shadow-[0_0_0_1px_hsl(var(--sidebar-border)/0.25),0_18px_40px_rgba(0,0,0,0.16)]">
        {/* Header */}
       <div className="flex items-center justify-between p-1 md:p-2 border-b border-sidebar-border/40 flex-wrap gap-2 bg-sidebar/85 text-white">
         <div className="flex items-center gap-1 md:gap-2 flex-wrap">
@@ -763,27 +774,44 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
         onDoubleClick={handleContainerDoubleClick}
         onContextMenu={handleContainerContextMenu}
         onMouseDown={handleBackgroundMouseDown}
-        className={`flex-1 relative overflow-hidden glass cosmic-glow border-t border-glass-border/20 ${
+        className={`flex-1 relative overflow-hidden border-t border-glass-border/20 ${
           isEditingBackground && backgroundConfig?.imageUrl ? 'cursor-move' : 'cursor-crosshair'
         }`}
         style={{
-          backdropFilter: 'blur(30px) saturate(140%)',
-          WebkitBackdropFilter: 'blur(30px) saturate(140%)',
-          backgroundColor: 'hsl(var(--glass-bg) / 0.04)',
+          background: 'transparent',
         }}
       >
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundColor: shouldShowGlassEffect(backgroundConfig)
+              ? `hsl(var(--glass-bg) / ${viewportGlassTintOpacity})`
+              : 'transparent',
+            border: shouldShowGlassEffect(backgroundConfig) && clampedViewportBackgroundOpacity > 0
+              ? `1px solid hsl(var(--glass-border) / ${viewportGlassBorderOpacity})`
+              : undefined,
+            boxShadow: shouldShowGlassEffect(backgroundConfig) && clampedViewportBackgroundOpacity > 0
+              ? `inset 0 0 18px hsl(var(--primary) / ${viewportGlassGlowOpacity}), inset 0 1px 0 hsl(var(--glass-border) / ${viewportGlassBorderOpacity})`
+              : undefined,
+            backdropFilter: shouldShowGlassEffect(backgroundConfig) && clampedViewportBackgroundOpacity > 0
+              ? `blur(${viewportGlassBlur}px) saturate(${viewportGlassSaturation}%)`
+              : undefined,
+            WebkitBackdropFilter: shouldShowGlassEffect(backgroundConfig) && clampedViewportBackgroundOpacity > 0
+              ? `blur(${viewportGlassBlur}px) saturate(${viewportGlassSaturation}%)`
+              : undefined,
+          }}
+        />
+
         {/* Autosave Indicator - Bottom Left */}
         <div className="absolute bottom-4 left-4 z-10">
           <AutosaveIndicator compact={true} />
         </div>
         <div
-          className={`absolute inset-0 ${shouldShowGlassEffect(backgroundConfig) ? 'glass cosmic-glow' : ''}`}
+          className="absolute inset-0"
           style={{
-            backgroundColor: shouldShowGlassEffect(backgroundConfig)
-              ? 'color-mix(in srgb, hsl(var(--glass-bg) / 0.04) 90%, rgba(128, 128, 128, 0.10))'
+            background: shouldShowGlassEffect(backgroundConfig)
+              ? 'transparent'
               : getBackgroundColor(backgroundConfig),
-            backdropFilter: shouldShowGlassEffect(backgroundConfig) ? 'blur(30px) saturate(140%)' : undefined,
-            WebkitBackdropFilter: shouldShowGlassEffect(backgroundConfig) ? 'blur(30px) saturate(140%)' : undefined,
           }}
         >
           {shouldShowGlassEffect(backgroundConfig) && (
@@ -793,10 +821,10 @@ export function AssetPort({ onToggleSidebar, currentWorldTitle, onOpenWorldLibra
                 background: `
                   radial-gradient(
                     ellipse at center,
-                    rgba(255, 255, 255, 0.02) 0%,
-                    rgba(255, 255, 255, 0.02) 42%,
-                    rgba(255, 255, 255, 0.06) 70%,
-                    rgba(255, 255, 255, 0.14) 100%
+                    rgba(255, 255, 255, ${0.02 * viewportGlassHighlightOpacity}) 0%,
+                    rgba(255, 255, 255, ${0.035 * viewportGlassHighlightOpacity}) 42%,
+                    rgba(255, 255, 255, ${0.09 * viewportGlassHighlightOpacity}) 72%,
+                    rgba(255, 255, 255, ${0.18 * viewportGlassHighlightOpacity}) 100%
                   )
                 `,
               }}

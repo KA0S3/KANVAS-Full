@@ -1,175 +1,120 @@
-import React from 'react';
-import { ArrowLeft, FileText } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, FileText } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { useNavigate } from "react-router-dom";
+
+const lastUpdated = "May 29, 2026";
 
 const TermsOfService = () => {
   const navigate = useNavigate();
 
-  const handleBack = () => {
-    navigate(-1);
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background/95 to-background/90 p-4">
-      <div className="max-w-4xl mx-auto h-screen flex flex-col">
-        {/* Header */}
-        <div className="mb-6 flex-shrink-0">
-          <Button
-            variant="ghost"
-            onClick={handleBack}
-            className="mb-4 glass cosmic-glow border-glass-border/40 hover:bg-glass/20"
+    <div className="min-h-screen bg-background p-4 md:p-6">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col gap-6">
+        <div className="flex items-start justify-between gap-4">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 rounded-md border border-glass-border/40 bg-glass/20 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass/30 hover:text-foreground"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
+            <ArrowLeft className="h-4 w-4" />
             Back
-          </Button>
-          
-          <div className="text-center space-y-2">
-            <div className="flex items-center justify-center gap-2">
-              <FileText className="w-8 h-8 text-primary" />
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                KANVAS Terms of Service
-              </h1>
-            </div>
-            <p className="text-muted-foreground">Last Updated: March 2026</p>
+          </button>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <FileText className="h-6 w-6 text-primary" />
+            <span className="text-sm font-semibold uppercase tracking-[0.2em]">Legal</span>
           </div>
         </div>
 
-        {/* Terms Content */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-glass-border/40 scrollbar-track-transparent hover:scrollbar-thumb-glass-border/60">
-          <Card className="glass cosmic-glow border-glass-border/40">
-            <CardContent className="p-8 space-y-8">
-            {/* Section 1 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">1. Acceptance of Terms</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                By accessing or using the KANVAS webapp (the "Service"), you agree to be bound by these Terms of Service, 
-                all applicable laws, and our Privacy Policy. This Agreement constitutes a legally binding contract 
-                between you and KANVAS ("Company," "We," "Us"). If you do not agree with any of these terms, 
-                you are prohibited from using or accessing this site.
+        <Card className="glass cosmic-glow border-glass-border/40">
+          <CardContent className="space-y-8 p-6 md:p-8">
+            <header className="space-y-2">
+              <h1 className="text-3xl font-bold text-foreground md:text-4xl">KANVAS Terms of Service</h1>
+              <p className="text-sm text-muted-foreground">Last updated: {lastUpdated}</p>
+            </header>
+
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">1. Acceptance and scope</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                These Terms apply to the KANVAS desktop app, the companion website, account services, payment flows,
+                activation flows, downloads, and any related content or support pages. By using KANVAS, you agree to
+                these Terms and our Privacy Policy.
               </p>
             </section>
 
-            {/* Section 2 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">2. User Accounts and Eligibility</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                To utilize the Service, you must create a user account. You agree to provide accurate, complete, 
-                and current information. You are solely responsible for the security of your account and passwords. 
-                Access to the Service is restricted to individuals at least 18 years of age. Users under 18 must 
-                have express permission from a parent or legal guardian.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">2. Accounts and eligibility</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                You must provide accurate account information and keep your login credentials secure. You are
+                responsible for activity on your account and for any device authorized through your license.
               </p>
             </section>
 
-            {/* Section 3 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">3. Subscription and Payment Terms</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                KANVAS employs a hybrid pricing model involving one-time fees, pay-as-you-go (PAYG) charges, 
-                and ad-supported free access.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">3. Purchase and license terms</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                KANVAS is sold as a one-time purchase, not a subscription. Payment is processed through Paystack in
+                ZAR. Once payment is confirmed and the license is delivered or activated, access is granted under the
+                purchased license terms for the current desktop build or the stated upgrade path.
               </p>
-              
-              <div className="space-y-3 ml-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">One-Time Fee:</h3>
-                  <p className="text-muted-foreground">
-                    A non-refundable fee of $80.00 provides permanent access to the core visual tracking system. 
-                    This is a one-time transaction and does not constitute a recurring subscription.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">PAYG Monthly Fee:</h3>
-                  <p className="text-muted-foreground">
-                    A $5.00 monthly fee is charged based on usage levels and advanced feature access. 
-                    This fee is billed in advance on a recurring 30-day cycle.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Payment Processing:</h3>
-                  <p className="text-muted-foreground">
-                    All payments are processed by Paystack. By initiating a transaction, you authorize Paystack 
-                    to charge your provided payment method.
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium text-foreground">Failed Payments:</h3>
-                  <p className="text-muted-foreground">
-                    We reserve the right to suspend access to premium features if a payment method is declined 
-                    or if a PAYG balance remains unpaid.
-                  </p>
-                </div>
+              <div className="space-y-2 pl-4">
+                <p className="text-muted-foreground">
+                  Beta access is a discounted one-time purchase for the current desktop release.
+                </p>
+                <p className="text-muted-foreground">
+                  If a later stable upgrade is advertised, it may require a separate one-time payment.
+                </p>
+                <p className="text-muted-foreground">
+                  Chargebacks, fraud, or unauthorized payment reversals may suspend or revoke access.
+                </p>
               </div>
             </section>
 
-            {/* Section 4 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">4. Intellectual Property and Content Ownership</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                <strong>User Content:</strong> You retain all copyright and proprietary rights to the novels, 
-                data, and creative works you upload to the Service ("User Content"). We do not claim ownership 
-                of your intellectual property.
-              </p>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                <strong>License to Company:</strong> By uploading User Content, you grant KANVAS a limited, 
-                worldwide, non-exclusive, royalty-free license to store, host, and display your content 
-                solely for the purpose of providing the Service to you.
-              </p>
-              <p className="text-muted-foreground leading-relaxed">
-                <strong>Service Technology:</strong> All software, visual tracking algorithms, UI designs, 
-                and logos are the exclusive property of KANVAS. You may not decompile, reverse engineer, 
-                or attempt to extract the source code of the Service.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">4. User content and local data</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                You keep ownership of your original content. KANVAS may store account, entitlement, and activation
+                metadata for service operation. Project files, assets, and other local work remain your responsibility
+                and may be stored on your device or through your chosen backup flow.
               </p>
             </section>
 
-            {/* Section 5 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">5. Prohibited Conduct</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                You agree not to use the Service in any way that:
-              </p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground ml-4">
-                <li>Violates any local, state, or international law or regulation.</li>
-                <li>Infringes on the intellectual property of others.</li>
-                <li>Involves fraudulent, deceptive, or unfair activities as defined by the Paystack Acceptable Use Policy.</li>
-                <li>Distributes viruses, malware, or any other harmful code.</li>
-                <li>Interferes with the performance or availability of the Service.</li>
-              </ul>
-            </section>
-
-            {/* Section 6 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">6. Disclaimer of Warranties</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                The Service is provided "as is." KANVAS makes no warranties, expressed or implied, regarding the 
-                reliability, accuracy, or availability of the Service. We are not liable for any data loss, 
-                corruption, or damage that may occur during the use of our visual tracking system.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">5. Acceptable use</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                You may not use KANVAS to break the law, interfere with service operation, reverse engineer the
+                software, abuse payment or activation systems, or attempt unauthorized access to accounts or data.
               </p>
             </section>
 
-            {/* Section 7 */}
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">7. Limitation of Liability</h2>
-              <p className="text-muted-foreground leading-relaxed">
-                In no event shall KANVAS or its suppliers be liable for any damages (including, without limitation, 
-                damages for loss of data or profit, or due to business interruption) arising out of the use or 
-                inability to use the Service. Our total liability shall not exceed the total fees paid by you 
-                to the Company in the preceding six months.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">6. Disclaimers</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                KANVAS is provided on an "as is" and "as available" basis. We do not guarantee uninterrupted service,
+                error-free operation, or that every feature will meet every use case.
               </p>
             </section>
 
-            {/* Footer */}
-            <div className="pt-6 border-t border-glass-border/30">
-              <p className="text-sm text-muted-foreground text-center">
-                © 2026 KANVAS. All Rights Reserved.
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">7. Liability</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                To the fullest extent allowed by law, KANVAS is not liable for indirect, incidental, special, or
+                consequential damages. Where liability cannot be excluded, it is limited to the amount paid for the
+                applicable product or service.
               </p>
-            </div>
-            </CardContent>
-          </Card>
-        </div>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-xl font-semibold text-foreground">8. Contact</h2>
+              <p className="leading-relaxed text-muted-foreground">
+                Questions about these Terms can be sent to{" "}
+                <a className="text-primary underline underline-offset-4" href="mailto:shadek392@gmail.com">
+                  shadek392@gmail.com
+                </a>
+                .
+              </p>
+            </section>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -19,6 +19,10 @@ import {
   readProjectJsonFile,
   validateReferencedAssets,
 } from "./projectFilesystem";
+import { updateService } from "./updateService";
+import { parseActivationUrl, registerActivationProtocol } from "./licensing/activationProtocol";
+import { LicenseService } from "./licensing/licenseService";
+import type { ActivationCompleteInput } from "./licensing/licenseTypes";
 
 type AppInfo = {
   name: string;
@@ -34,6 +38,42 @@ type AppInfo = {
 const runtimeInfo = {
   rendererSource: "not-loaded",
   rendererEntry: "not-loaded",
+};
+
+let licenseService: LicenseService | undefined;
+
+const getLicenseService = (): LicenseService => {
+  if (!licenseService) {
+    licenseService = new LicenseService(app.getPath("userData"));
+  }
+
+  return licenseService;
+};
+
+const notifyLicenseStatus = async (): Promise<void> => {
+  const status = await getLicenseService().getStatus();
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send("kanvas:license:status", status);
+  }
+};
+
+const completeActivationFromUrl = async (rawUrl: string): Promise<void> => {
+  const activation = parseActivationUrl(rawUrl);
+  if (!activation) {
+    return;
+  }
+
+  try {
+    const status = await getLicenseService().completeActivation(activation);
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send("kanvas:license:status", status);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Activation failed";
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send("kanvas:license:error", { message });
+    }
+  }
 };
 
 const writeRuntimeLog = (message: string): void => {
@@ -64,7 +104,7 @@ const getAppIconPath = (): string | undefined => {
   return candidates.find((candidate) => existsSync(candidate));
 };
 
-const createMainWindow = (): void => {
+const createMainWindow = (): BrowserWindow => {
   const iconPath = getAppIconPath();
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -113,9 +153,33 @@ const createMainWindow = (): void => {
   mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
     writeRuntimeLog(`Renderer load failed ${code}: ${description} (${url})`);
   });
+
+  updateService.registerWindow(mainWindow);
+  return mainWindow;
 };
 
 ipcMain.handle("kanvas:ping", () => "pong");
+updateService.registerIpcHandlers();
+
+ipcMain.handle("kanvas:license:getStatus", async () => {
+  return await getLicenseService().getStatus();
+});
+
+ipcMain.handle("kanvas:license:startActivation", async () => {
+  return await getLicenseService().startActivation();
+});
+
+ipcMain.handle("kanvas:license:completeActivation", async (_event, input: ActivationCompleteInput) => {
+  return await getLicenseService().completeActivation(input);
+});
+
+ipcMain.handle("kanvas:license:heartbeat", async (_event, input?: { force?: boolean }) => {
+  return await getLicenseService().heartbeat(Boolean(input?.force));
+});
+
+ipcMain.handle("kanvas:license:clearLocalLicense", async () => {
+  return await getLicenseService().clearLocalLicense();
+});
 
 ipcMain.handle("kanvas:get-app-info", (): AppInfo => {
   return {
@@ -378,8 +442,37 @@ ipcMain.handle("kanvas:openProjectFolder", async (event, input?: {
   };
 });
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const activationUrl = argv.find(arg => arg.startsWith("kanvas://"));
+    if (activationUrl) {
+      void completeActivationFromUrl(activationUrl);
+    }
+
+    const [window] = BrowserWindow.getAllWindows();
+    if (window) {
+      if (window.isMinimized()) {
+        window.restore();
+      }
+      window.focus();
+    }
+  });
+}
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  void completeActivationFromUrl(url);
+});
+
 app.whenReady().then(() => {
+  registerActivationProtocol();
+  updateService.initialize();
   createMainWindow();
+  void notifyLicenseStatus();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

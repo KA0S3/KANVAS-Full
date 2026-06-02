@@ -57,10 +57,8 @@ interface AssetCreationModalProps {
 }
 
 export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId, generatorImportData, projectId, viewportSize }: AssetCreationModalProps) {
-  const { createNewAsset, canUploadToCloud } = useAssetCreation();
+  const { createNewAsset } = useAssetCreation();
   const { tags } = useTagStore();
-  const { syncEnabled } = useCloudStore();
-  const { isAuthenticated, plan } = useAuthStore();
   const { assets } = useAssetStore();
   
   // Memoize the calculated position to prevent infinite loops
@@ -98,7 +96,6 @@ export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle');
 
   // Handle generator import data
   useEffect(() => {
@@ -137,24 +134,40 @@ export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId
     setIsCreating(true);
     
     try {
-      const assetId = createNewAsset({
-        name: formData.name,
-        type: formData.type as 'image' | 'document' | 'video' | 'audio' | 'code' | 'other',
-        x: formData.x,
-        y: formData.y,
-        width: formData.width,
-        height: formData.height,
-        description: formData.description,
-        tags: formData.tags,
-        thumbnail: formData.thumbnail,
-        customFields: formData.customFields,
-        customFieldValues: formData.customFieldValues,
-        viewportDisplaySettings: formData.viewportDisplaySettings,
-      }, parentId, { 
+      const assetId = await createNewAsset({
+        projectId: projectId || '',
+        parentId,
+        layout: {
+          x: formData.x,
+          y: formData.y,
+          width: formData.width,
+          height: formData.height,
+          zIndex: 0,
+        },
+        content: {
+          title: formData.name,
+          description: formData.description,
+          imageUrl: formData.thumbnail || undefined,
+          text: '',
+          customFields: {
+            type: formData.type,
+            tags: formData.tags,
+            thumbnail: formData.thumbnail,
+            customFields: formData.customFields,
+            customFieldValues: formData.customFieldValues,
+            viewportDisplaySettings: formData.viewportDisplaySettings,
+          },
+        },
+        style: {},
+        behavior: {
+          renderMode: formData.type,
+        },
+        metadata: {
+          tags: formData.tags,
+        },
+      }, {
         fromUserClick: true,
         file: selectedFile || undefined,
-        projectId,
-        skipCloud: uploadStatus === 'denied'
       });
 
       console.log('Asset created with ID:', assetId);
@@ -168,34 +181,15 @@ export function AssetCreationModalFixed({ isOpen, onClose, initialData, parentId
     }
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setSelectedFile(file);
-    setUploadStatus('checking');
-
-    // Check if upload is possible
-    if (syncEnabled && isAuthenticated && projectId) {
-      try {
-        const canUpload = await canUploadToCloud(file);
-        setUploadStatus(canUpload ? 'allowed' : 'denied');
-      } catch (error) {
-        console.error('Error checking upload quota:', error);
-        setUploadStatus('denied');
-      }
-    } else {
-      setUploadStatus('idle');
-    }
-
-    // Don't convert to base64 - use file object directly
-    // R2 upload will handle the file and set cloudPath
-    // For preview, we'll use a blob URL in the display component
   };
 
   const handleClose = () => {
     setSelectedFile(null);
-    setUploadStatus('idle');
     
     setFormData({
       name: initialData?.name || 'New Asset',

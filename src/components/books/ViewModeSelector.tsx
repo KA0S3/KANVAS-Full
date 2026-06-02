@@ -25,14 +25,14 @@ const ViewModeSelector: React.FC<ViewModeSelectorProps> = ({
   const modes = [
     {
       id: 'single' as const,
-      name: 'Single Book',
+      name: 'Single',
       icon: Book,
       description: 'Focus on one book at a time',
       disabled: bookCount === 0
     },
     {
       id: 'spine' as const,
-      name: 'Library',
+      name: 'Shelf',
       icon: Layout,
       description: 'Books on a shelf',
       disabled: bookCount === 0
